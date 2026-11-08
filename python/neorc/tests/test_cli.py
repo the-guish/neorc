@@ -62,6 +62,7 @@ def test_manager_start_takes_its_settings_from_the_command_line(
                 "database_url": "postgresql:///neorc",
                 "create_schema": True,
                 "ui": True,
+                "frame_ancestors": (),
                 "ssl_certfile": None,
                 "ssl_keyfile": None,
             },
@@ -83,6 +84,70 @@ def test_manager_start_serves_the_api_alone_with_no_ui(
 
     assert exit_code == 0
     assert calls[0]["ui"] is False
+
+
+def test_manager_start_lets_the_origins_it_is_given_frame_the_ui(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, Any]] = []
+
+    def fake_run(host: str, port: int, **kwargs: Any) -> None:
+        calls.append(kwargs)
+
+    monkeypatch.setattr("neorc.manager.run", fake_run)
+
+    exit_code = _cli.main(
+        [
+            "manager",
+            "start",
+            "--frame-ancestors",
+            "http://127.0.0.1:8000",
+            "--frame-ancestors",
+            "HTTP://LocalHost:8000",
+        ]
+    )
+
+    assert exit_code == 0
+    assert calls[0]["frame_ancestors"] == (
+        "http://127.0.0.1:8000",
+        "http://localhost:8000",
+    )
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "*",
+        "http://*.example.com",
+        "http://127.0.0.1:8000/ui/",
+        "http://127.0.0.1:8000; script-src *",
+        "'self'",
+        "ftp://example.com",
+        "http://user@example.com",
+        "example.com",
+    ],
+)
+def test_manager_start_refuses_a_frame_ancestor_that_is_not_an_origin(
+    monkeypatch: pytest.MonkeyPatch, origin: str
+) -> None:
+    monkeypatch.setattr("neorc.manager.run", lambda *args, **kwargs: None)
+
+    with pytest.raises(SystemExit, match=r"--frame-ancestors .* is not an origin"):
+        _cli.main(["manager", "start", "--frame-ancestors", origin])
+
+
+def test_manager_start_refuses_frame_ancestors_with_no_ui(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("neorc.manager.run", lambda *args, **kwargs: None)
+
+    with pytest.raises(SystemExit, match=r"--frame-ancestors.*--no-ui"):
+        _cli.main(
+            [
+                *("manager", "start", "--no-ui"),
+                *("--frame-ancestors", "http://127.0.0.1:8000"),
+            ]
+        )
 
 
 def test_manager_start_names_the_fix_when_there_is_no_built_ui(

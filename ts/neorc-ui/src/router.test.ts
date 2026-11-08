@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { href, parseHash, type Route } from "./router";
+import { href, isEmbedded, parseHash, type Route } from "./router";
 
 describe("routes", () => {
   it.each<[string, Route]>([
@@ -37,5 +37,18 @@ describe("routes", () => {
     for (const route of routes) {
       expect(parseHash(href(route))).toMatchObject(route);
     }
+  });
+});
+
+describe("embedding", () => {
+  it.each<[string, boolean]>([
+    ["", false],
+    ["?embed=1", true],
+    ["?x=2&embed=1", true],
+    ["?embed=0", false],
+    ["?embed=true", false],
+    ["?embed", false],
+  ])("the query %j is embedded: %s", (search, embedded) => {
+    expect(isEmbedded(search)).toBe(embedded);
   });
 });

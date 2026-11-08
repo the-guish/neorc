@@ -76,6 +76,26 @@ describe("Layout", () => {
     expect(screen.getByRole("button", { name: "Expand sidebar" })).toBeInTheDocument();
   });
 
+  it("embedded, has no sidebar, and its navigation is a strip above the page", () => {
+    mockApi(routes());
+
+    renderWithClient(
+      <Layout route={{ name: "run", id: ACTIVE.id }} session={OPEN} embedded>
+        <p>the page</p>
+      </Layout>,
+    );
+
+    expect(screen.getByText("the page")).toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: "Sidebar" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Profile")).not.toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Recent runs" })).not.toBeInTheDocument();
+    const main = screen.getByRole("navigation", { name: "Main" });
+    expect(within(main).getByRole("link", { name: "Runs" })).toHaveAttribute("aria-current", "page");
+    expect(within(main).getByRole("link", { name: "Flows" })).toHaveAttribute("href", "#/flows");
+    // What the reader must still know is still said.
+    expect(screen.getByRole("note")).toHaveTextContent("No authentication");
+  });
+
   it("stands without the flows or the runs", async () => {
     mockApi({});
 

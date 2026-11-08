@@ -10,6 +10,7 @@ move to another queue backend later, while claiming stays with the store.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request
@@ -45,6 +46,7 @@ def create_app(
     sign_in: SignIn | None = None,
     long_poll_timeout: float = DEFAULT_LONG_POLL_TIMEOUT,
     ui: Path | None = None,
+    frame_ancestors: Iterable[str] = (),
 ) -> FastAPI:
     """Build the ASGI application serving ``manager``.
 
@@ -57,7 +59,9 @@ def create_app(
     ``/openapi.json`` is served either way.
 
     With ``ui``, a directory holding the built web UI, the app serves it at
-    ``/ui/`` and sends ``/`` there; without, ``/`` is not found.
+    ``/ui/`` and sends ``/`` there; without, ``/`` is not found. No page may
+    frame the UI but those of the origins in ``frame_ancestors``, an
+    application that embeds it; ``ValueError`` for one that is not an origin.
     """
     pages = access is None
     app = FastAPI(
@@ -102,5 +106,6 @@ def create_app(
         return {"status": "ok"}
 
     if ui is not None:
-        mount_ui(app, ui)  # after the routes: the mount takes a whole prefix
+        # After the routes: the mount takes a whole prefix.
+        mount_ui(app, ui, framed_by=frame_ancestors)
     return app

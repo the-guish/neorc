@@ -206,6 +206,15 @@ pipeline.
   with no inline scripts, so a compromised bundled package can neither load
   more code nor send what it reads to another host. A test checks the header
   and that the built app's `index.html` has no inline script.
+- No page may frame the UI (`frame-ancestors 'none'`), unless the manager is
+  started with `--frame-ancestors <origin>`, once per origin: an application
+  that embeds the UI in its own pages names its origin, and only that origin
+  is let in. Each is checked to be an origin (an `http` or `https` scheme, a
+  host, an optional port, nothing else) before anything starts. The page
+  opened with `?embed=1` leaves out its sidebar, the embedding page having
+  its own, and keeps its navigation as a strip above the page; the query
+  stays for as long as the page is open, since every link changes the hash
+  alone.
 - `build_app` mounts the UI after the routes; `neorc manager start --no-ui`
   leaves it out and keeps the API, and `/` then answers 404 as today.
 - Tests: with a fake assets directory, the app serves `index.html`, redirects

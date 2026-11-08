@@ -250,6 +250,16 @@ one version, cut from a single tag on `main`.
   list` shows them. The scheduler, the worker and the CLI stop on a 403 as on
   a refused token, under their common base, `AccessError`.
 
+- `neorc`: `neorc manager start --frame-ancestors <origin>`, repeatable, lets
+  an application embed the web UI in its own pages: the origins given replace
+  `'none'` in the UI's `frame-ancestors`, and anything that is not an origin
+  (scheme, host and port) is refused before the manager starts. Without the
+  option, nothing changes. `create_app`, `build_app` and `run` take
+  `frame_ancestors`.
+- `neorc-ui`: opened with `?embed=1`, the UI leaves out its sidebar, to sit
+  inside another application's page, and keeps its navigation as a strip
+  above the page.
+
 ### Changed
 
 - The flow classes take the task API's names: `FlowManager` is `Manager`,

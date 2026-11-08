@@ -8,7 +8,7 @@ import { FlowsPage } from "./pages/FlowsPage";
 import { RunPage } from "./pages/RunPage";
 import { RunsPage } from "./pages/RunsPage";
 import { useLiveEvents } from "./queries";
-import { href, replaceRoute, useRoute, type Route } from "./router";
+import { href, isEmbedded, replaceRoute, useRoute, type Route } from "./router";
 import { mayBrowse, takeWhereFrom, useSession, useSessionEndsOnRefusal } from "./session";
 
 /**
@@ -50,7 +50,7 @@ function Browse({ route, session }: { route: Route; session: Session }) {
   useLiveEvents();
   useBackToWhereSignInBegan(session);
   return (
-    <Layout route={route} session={session}>
+    <Layout route={route} session={session} embedded={isEmbedded(location.search)}>
       <Page route={route} />
     </Layout>
   );

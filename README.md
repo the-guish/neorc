@@ -109,6 +109,11 @@ zoomable graph of the run's steps, with a form to start a run and a button
 to cancel one. People sign in to it with an identity provider, as below; a
 manager started with `--no-auth` asks nobody, and says so on every page.
 
+No other page may frame the UI, unless the manager is started with the
+origins that may: `--frame-ancestors https://app.example.com`, repeated for
+each. The embedding page opens it at `/ui/?embed=1#/runs`, which leaves out
+the UI's own sidebar for a strip of navigation above the page.
+
 [examples/hello](examples/hello) and [examples/wordplay](examples/wordplay)
 walk through both ways of running, step by step.
 

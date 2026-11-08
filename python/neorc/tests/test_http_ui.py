@@ -12,7 +12,7 @@ import httpx
 import pytest
 
 from neorc.manager import create_app
-from neorc.manager._ui import CONTENT_SECURITY_POLICY
+from neorc.manager._ui import CONTENT_SECURITY_POLICY, frame_ancestors
 from neorc_core import Manager
 
 
@@ -107,3 +107,77 @@ def test_a_directory_without_index_html_is_refused(
 ) -> None:
     with pytest.raises(FileNotFoundError, match=r"index\.html"):
         create_app(manager, access=None, ui=tmp_path)
+
+
+def test_by_default_no_page_may_frame_the_ui() -> None:
+    assert "frame-ancestors 'none'" in CONTENT_SECURITY_POLICY
+
+
+async def test_the_origins_given_may_frame_the_ui_and_nothing_else_changes(
+    manager: Manager, static: Path
+) -> None:
+    origins = ("http://127.0.0.1:8000", "http://localhost:8000")
+    app = create_app(manager, access=None, ui=static, frame_ancestors=origins)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://manager.test"
+    ) as client:
+        for path in ("/ui/", "/ui/assets/index-abc123.js", "/ui/assets/nothing.js"):
+            policy = (await client.get(path)).headers["content-security-policy"]
+
+            assert policy == CONTENT_SECURITY_POLICY.replace(
+                "frame-ancestors 'none'",
+                "frame-ancestors http://127.0.0.1:8000 http://localhost:8000",
+            )
+
+
+def test_an_app_framed_by_something_that_is_not_an_origin_is_refused(
+    manager: Manager, static: Path
+) -> None:
+    with pytest.raises(ValueError, match="is not an origin"):
+        create_app(
+            manager, access=None, ui=static, frame_ancestors=["https://*.x.test"]
+        )
+
+
+@pytest.mark.parametrize(
+    ("given", "checked"),
+    [
+        (["http://127.0.0.1:8000"], ("http://127.0.0.1:8000",)),
+        (["HTTPS://App.Example.com"], ("https://app.example.com",)),
+        (["http://[::1]:8000"], ("http://[::1]:8000",)),
+        (["http://a.test", "http://a.test"], ("http://a.test",)),
+    ],
+)
+def test_an_origin_is_kept_lowercased_once(
+    given: list[str], checked: tuple[str, ...]
+) -> None:
+    assert frame_ancestors(given) == checked
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "*",
+        "'none'",
+        "http:",
+        "http://",
+        "http://*.example.com",
+        "http://example.com/",
+        "http://example.com/ui",
+        "http://example.com?x=1",
+        "http://example.com#x",
+        "http://user@example.com",
+        "http://example.com:",
+        "http://example.com:0",
+        "http://example.com:70000",
+        "http://exa mple.com",
+        "http://example.com\t",
+        "http://-example.com",
+        "http://[zz]:1",
+        "javascript://example.com",
+        "ws://example.com",
+    ],
+)
+def test_anything_but_an_origin_is_refused(origin: str) -> None:
+    with pytest.raises(ValueError, match="is not an origin"):
+        frame_ancestors([origin])
