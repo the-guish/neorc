@@ -89,6 +89,16 @@ export function href(route: Route): string {
   }
 }
 
+/**
+ * Whether the page is embedded in another application's, which says so with
+ * `?embed=1` in the page's query, not its hash: every link here changes the
+ * hash alone, so the query stays for as long as the page is open. Embedded,
+ * the shell leaves out its sidebar, since the page around it has its own.
+ */
+export function isEmbedded(search: string): boolean {
+  return new URLSearchParams(search).get("embed") === "1";
+}
+
 export function navigate(route: Route): void {
   location.hash = href(route);
 }

@@ -22,57 +22,78 @@ export const SIDEBAR_KEY = "neorc-ui.sidebar";
  * The shell: a sidebar with the brand, a way to a new run, the navigation,
  * the flows, the latest runs and who is signed in, collapsible to a rail of
  * icons; the page beside it, under a strip when authentication is off.
+ * `embedded`, inside another application's page, there is no sidebar, since
+ * the application around it has one of its own: the navigation is a strip
+ * above the page instead, so the flows, and a new run, are still reached.
  */
 export function Layout({
   route,
   session,
+  embedded = false,
   children,
 }: {
   route: Route;
   session: Session;
+  embedded?: boolean;
   children: ReactNode;
 }) {
   const [collapsed, setCollapsed] = useSidebarCollapsed();
   return (
     <div className={`shell${collapsed ? " shell-rail" : ""}`}>
-      <aside className="sidebar" aria-label="Sidebar">
-        <div className="sidebar-top">
-          <button
-            type="button"
-            className="icon-button"
-            onClick={() => setCollapsed(!collapsed)}
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            aria-expanded={!collapsed}
-          >
-            <MenuIcon />
-          </button>
-          <a className="brand" href={href({ name: "runs" })} aria-label="neorc, runs">
-            <span className="brand-mark" aria-hidden="true" />
-            <span className="label">neorc</span>
-          </a>
-        </div>
-        <a className="primary new-run" href={href({ name: "flows" })} title="New run">
-          <PlusIcon />
-          <span className="label">New run</span>
-        </a>
-        <nav aria-label="Main">
-          {NAV.map((item) => (
-            <a
-              key={item.label}
-              href={href(item.route)}
-              aria-current={current(route, item.route) ? "page" : undefined}
-              title={item.label}
+      {!embedded && (
+        <aside className="sidebar" aria-label="Sidebar">
+          <div className="sidebar-top">
+            <button
+              type="button"
+              className="icon-button"
+              onClick={() => setCollapsed(!collapsed)}
+              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              aria-expanded={!collapsed}
             >
-              {item.icon}
-              <span className="label">{item.label}</span>
+              <MenuIcon />
+            </button>
+            <a className="brand" href={href({ name: "runs" })} aria-label="neorc, runs">
+              <span className="brand-mark" aria-hidden="true" />
+              <span className="label">neorc</span>
             </a>
-          ))}
-        </nav>
-        <PinnedFlows route={route} />
-        <RecentRuns route={route} />
-        <Profile session={session} />
-      </aside>
+          </div>
+          <a className="primary new-run" href={href({ name: "flows" })} title="New run">
+            <PlusIcon />
+            <span className="label">New run</span>
+          </a>
+          <nav aria-label="Main">
+            {NAV.map((item) => (
+              <a
+                key={item.label}
+                href={href(item.route)}
+                aria-current={current(route, item.route) ? "page" : undefined}
+                title={item.label}
+              >
+                {item.icon}
+                <span className="label">{item.label}</span>
+              </a>
+            ))}
+          </nav>
+          <PinnedFlows route={route} />
+          <RecentRuns route={route} />
+          <Profile session={session} />
+        </aside>
+      )}
       <div className="content">
+        {embedded && (
+          <nav aria-label="Main" className="embedded-nav">
+            {NAV.map((item) => (
+              <a
+                key={item.label}
+                href={href(item.route)}
+                aria-current={current(route, item.route) ? "page" : undefined}
+              >
+                {item.icon}
+                <span>{item.label}</span>
+              </a>
+            ))}
+          </nav>
+        )}
         {!session.authentication && (
           <p className="banner" role="note">
             No authentication: anyone who reaches this manager can start and cancel runs. For

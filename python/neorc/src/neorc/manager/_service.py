@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager
 
 import uvicorn
@@ -34,6 +34,7 @@ def build_app(
     create_schema: bool = False,
     long_poll_timeout: float = DEFAULT_LONG_POLL_TIMEOUT,
     ui: bool = True,
+    frame_ancestors: Sequence[str] = (),
 ) -> FastAPI:
     """Build the application from the environment: store, notifiers, then routes.
 
@@ -56,7 +57,8 @@ def build_app(
 
     With ``ui``, the web UI from the ``neorc-ui`` distribution is served at
     ``/ui/``; ``FileNotFoundError`` names the fix if that holds no built UI,
-    as in a checkout that was never built.
+    as in a checkout that was never built. ``frame_ancestors`` are the origins
+    whose pages may frame it; by default, none may.
     """
     from neorc.postgres import (
         PostgresCredentialStore,
@@ -115,6 +117,7 @@ def build_app(
         sign_in=sign_in,
         long_poll_timeout=long_poll_timeout,
         ui=static,
+        frame_ancestors=frame_ancestors,
     )
     app.router.lifespan_context = lifespan
     return app
@@ -129,6 +132,7 @@ def run(
     database_url: str | None = None,
     create_schema: bool = False,
     ui: bool = True,
+    frame_ancestors: Sequence[str] = (),
     ssl_certfile: str | None = None,
     ssl_keyfile: str | None = None,
 ) -> None:
@@ -144,6 +148,7 @@ def run(
         auth_config=auth_config,
         create_schema=create_schema,
         ui=ui,
+        frame_ancestors=frame_ancestors,
     )
     if auth and not create_schema:
         # Checked again by the lifespan; here, so the command can say so and

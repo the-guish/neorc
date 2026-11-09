@@ -602,6 +602,29 @@ button.link {
   min-width: 0;
 }
 
+/* Embedded in another application's page: the navigation, as a strip. */
+.embedded-nav {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.5rem 1.5rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.embedded-nav a {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: var(--radius);
+  color: inherit;
+  text-decoration: none;
+}
+
+.embedded-nav a[aria-current="page"] {
+  background: var(--hover);
+  font-weight: 600;
+}
+
 .banner {
   margin: 0;
   padding: 0.35rem 1.5rem;

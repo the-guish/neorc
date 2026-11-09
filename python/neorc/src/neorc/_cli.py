@@ -101,6 +101,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="serve the API alone, without the web UI at /ui/",
     )
     manager_start.add_argument(
+        "--frame-ancestors",
+        action="append",
+        default=[],
+        metavar="ORIGIN",
+        help="an origin whose pages may frame the web UI, such as "
+        "https://app.example.com; repeat for several. By default no page may",
+    )
+    manager_start.add_argument(
         "--no-auth",
         action="store_true",
         help="serve anyone who reaches the manager, with no API token: "
@@ -389,6 +397,16 @@ def manager_start_command(args: argparse.Namespace) -> int:
                 "neorc manager start: cannot serve HTTPS with "
                 f"{args.ssl_certfile!r} and {args.ssl_keyfile!r}: {exc}"
             ) from None
+    framed_by: list[str] = args.frame_ancestors
+    if framed_by and args.no_ui:
+        raise SystemExit(
+            "neorc manager start: --frame-ancestors says who may frame the web UI, "
+            "and --no-ui serves none: drop one of them"
+        )
+    try:
+        frame_ancestors = _frame_ancestors(framed_by)
+    except ValueError as exc:
+        raise SystemExit(f"neorc manager start: --frame-ancestors {exc}") from None
     auth_config = _auth_config(args)
     if args.no_auth:
         where = f"{args.host}:{args.port}"
@@ -408,6 +426,7 @@ def manager_start_command(args: argparse.Namespace) -> int:
             database_url=args.database_url,
             create_schema=args.create_schema,
             ui=not args.no_ui,
+            frame_ancestors=frame_ancestors,
             ssl_certfile=args.ssl_certfile,
             ssl_keyfile=args.ssl_keyfile,
         )
@@ -420,6 +439,13 @@ def manager_start_command(args: argparse.Namespace) -> int:
             f"neorc manager start: cannot reach the database: {exc}"
         ) from None
     return 0
+
+
+def _frame_ancestors(origins: Sequence[str]) -> tuple[str, ...]:
+    """The origins checked, so a wrong one is said before anything starts."""
+    from neorc.manager._ui import frame_ancestors
+
+    return frame_ancestors(origins)
 
 
 def _auth_config(args: argparse.Namespace) -> AuthConfig | None:
