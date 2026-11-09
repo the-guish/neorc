@@ -12,6 +12,9 @@ one version, cut from a single tag on `main`.
 
 ### Added
 
+- `neorc-ui`: opened with `?embedded` in its URL (`/ui/?embedded#/runs`), the
+  UI leaves out its sidebar and shows the page alone, for an application that
+  frames it beside a navigation of its own.
 - Initial monorepo structure: a uv workspace with the `neorc-core` and `neorc`
   Python packages under `python/`.
 - `neorc-core`: a task's status transitions, the same in every store, and the
