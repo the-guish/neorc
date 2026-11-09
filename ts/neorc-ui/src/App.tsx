@@ -3,13 +3,19 @@ import { useEffect } from "react";
 import type { Session } from "./api";
 import { Failed, Layout, Loading } from "./components/Layout";
 import { SignIn } from "./components/SignIn";
+import { isEmbedded } from "./embedding";
 import { FlowPage } from "./pages/FlowPage";
 import { FlowsPage } from "./pages/FlowsPage";
 import { RunPage } from "./pages/RunPage";
 import { RunsPage } from "./pages/RunsPage";
 import { useLiveEvents } from "./queries";
 import { href, replaceRoute, useRoute, type Route } from "./router";
-import { mayBrowse, takeWhereFrom, useSession, useSessionEndsOnRefusal } from "./session";
+import {
+  mayBrowse,
+  takeWhereFrom,
+  useSession,
+  useSessionEndsOnRefusal,
+} from "./session";
 
 /**
  * The session first: with authentication on and nobody signed in, the
@@ -40,7 +46,10 @@ export function App() {
   }
   if (!mayBrowse(session.data)) {
     return (
-      <SignIn session={session.data} error={route.name === "sign-in" ? route.error : undefined} />
+      <SignIn
+        session={session.data}
+        error={route.name === "sign-in" ? route.error : undefined}
+      />
     );
   }
   return <Browse route={route} session={session.data} />;
@@ -50,7 +59,7 @@ function Browse({ route, session }: { route: Route; session: Session }) {
   useLiveEvents();
   useBackToWhereSignInBegan(session);
   return (
-    <Layout route={route} session={session}>
+    <Layout route={route} session={session} embedded={isEmbedded()}>
       <Page route={route} />
     </Layout>
   );

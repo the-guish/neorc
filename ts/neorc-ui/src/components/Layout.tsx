@@ -22,8 +22,36 @@ export const SIDEBAR_KEY = "neorc-ui.sidebar";
  * The shell: a sidebar with the brand, a way to a new run, the navigation,
  * the flows, the latest runs and who is signed in, collapsible to a rail of
  * icons; the page beside it, under a strip when authentication is off.
+ *
+ * `embedded`, for a page framed by an application with a navigation of its
+ * own (`../embedding.ts`): the page and the strip alone, with no sidebar.
  */
 export function Layout({
+  route,
+  session,
+  embedded = false,
+  children,
+}: {
+  route: Route;
+  session: Session;
+  embedded?: boolean;
+  children: ReactNode;
+}) {
+  if (embedded) {
+    return (
+      <div className="shell shell-embedded">
+        <Content session={session}>{children}</Content>
+      </div>
+    );
+  }
+  return (
+    <WithSidebar route={route} session={session}>
+      {children}
+    </WithSidebar>
+  );
+}
+
+function WithSidebar({
   route,
   session,
   children,
@@ -46,12 +74,20 @@ export function Layout({
           >
             <MenuIcon />
           </button>
-          <a className="brand" href={href({ name: "runs" })} aria-label="neorc, runs">
+          <a
+            className="brand"
+            href={href({ name: "runs" })}
+            aria-label="neorc, runs"
+          >
             <span className="brand-mark" aria-hidden="true" />
             <span className="label">neorc</span>
           </a>
         </div>
-        <a className="primary new-run" href={href({ name: "flows" })} title="New run">
+        <a
+          className="primary new-run"
+          href={href({ name: "flows" })}
+          title="New run"
+        >
           <PlusIcon />
           <span className="label">New run</span>
         </a>
@@ -72,15 +108,28 @@ export function Layout({
         <RecentRuns route={route} />
         <Profile session={session} />
       </aside>
-      <div className="content">
-        {!session.authentication && (
-          <p className="banner" role="note">
-            No authentication: anyone who reaches this manager can start and cancel runs. For
-            development and testing only.
-          </p>
-        )}
-        <main>{children}</main>
-      </div>
+      <Content session={session}>{children}</Content>
+    </div>
+  );
+}
+
+/** The page, under a strip when authentication is off. */
+function Content({
+  session,
+  children,
+}: {
+  session: Session;
+  children: ReactNode;
+}) {
+  return (
+    <div className="content">
+      {!session.authentication && (
+        <p className="banner" role="note">
+          No authentication: anyone who reaches this manager can start and
+          cancel runs. For development and testing only.
+        </p>
+      )}
+      <main>{children}</main>
     </div>
   );
 }
@@ -134,7 +183,12 @@ function Profile({ session }: { session: Session }) {
             {principal.email}
           </span>
         )}
-        <button type="button" className="link sign-out" onClick={leave} disabled={leaving}>
+        <button
+          type="button"
+          className="link sign-out"
+          onClick={leave}
+          disabled={leaving}
+        >
           Sign out
         </button>
         {refused !== null && (
@@ -166,8 +220,10 @@ function useSidebarCollapsed(): [boolean, (collapsed: boolean) => void] {
 }
 
 function current(route: Route, item: Route): boolean {
-  if (item.name === "runs") return route.name === "runs" || route.name === "run";
-  if (item.name === "flows") return route.name === "flows" || route.name === "flow";
+  if (item.name === "runs")
+    return route.name === "runs" || route.name === "run";
+  if (item.name === "flows")
+    return route.name === "flows" || route.name === "flow";
   return false;
 }
 
@@ -182,7 +238,11 @@ function PinnedFlows({ route }: { route: Route }) {
         <a
           key={flow.name}
           href={href({ name: "flow", flow: flow.name })}
-          aria-current={route.name === "flow" && route.flow === flow.name ? "page" : undefined}
+          aria-current={
+            route.name === "flow" && route.flow === flow.name
+              ? "page"
+              : undefined
+          }
           title={flow.name}
         >
           <span className="dot dot-flow" aria-hidden="true" />
@@ -205,10 +265,16 @@ function RecentRuns({ route }: { route: Route }) {
         <a
           key={run.id}
           href={href({ name: "run", id: run.id })}
-          aria-current={route.name === "run" && route.id === run.id ? "page" : undefined}
+          aria-current={
+            route.name === "run" && route.id === run.id ? "page" : undefined
+          }
           title={`${run.flow} ${shortId(run.id)}, ${run.status}`}
         >
-          <span className={`dot dot-${run.status}`} data-status={run.status} aria-hidden="true" />
+          <span
+            className={`dot dot-${run.status}`}
+            data-status={run.status}
+            aria-hidden="true"
+          />
           <span className="label">
             {run.flow} <span className="mono muted">{shortId(run.id)}</span>
           </span>
