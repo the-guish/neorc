@@ -116,13 +116,10 @@ async def test_the_flow_tables_are_created_at_startup(pg_schema: str) -> None:
 async def test_with_authentication_the_manager_needs_the_credential_tables(
     pg_schema: str,
 ) -> None:
-    import psycopg
-
+    from neorc.postgres._driver import connected
     from neorc.postgres._schema import SESSIONS_TABLE, MissingTablesError
 
-    async with await psycopg.AsyncConnection.connect(
-        pg_schema, autocommit=True
-    ) as conn:
+    async with connected(pg_schema) as conn:
         await conn.execute(f"DROP TABLE {SESSIONS_TABLE}")
     refused = build_app(pg_schema, auth=True, ui=False)
     unguarded = build_app(pg_schema, auth=False, ui=False)

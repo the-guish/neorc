@@ -204,13 +204,26 @@ def test_a_certificate_that_cannot_be_used_is_said_to_be_that(
     assert runs == []
 
 
+@pytest.mark.parametrize(
+    "error",
+    [
+        "ConnectionRefusedError",
+        "InvalidPasswordError",
+        "InvalidCatalogNameError",
+        "CannotConnectNowError",
+        "TooManyConnectionsError",
+    ],
+)
 def test_a_database_that_cannot_be_reached_is_said_in_a_line(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, error: str
 ) -> None:
-    import psycopg
+    import asyncpg.exceptions  # type: ignore[import-untyped]
 
     def fake_run(host: str, port: int, **kwargs: Any) -> None:
-        raise psycopg.OperationalError("connection refused")
+        raised = getattr(asyncpg.exceptions, error, None)
+        if raised is None:
+            raise ConnectionRefusedError("connection refused")
+        raise raised("connection refused")
 
     monkeypatch.setattr("neorc.manager.run", fake_run)
 
@@ -629,14 +642,11 @@ def test_the_token_commands_create_no_tables(
     pg_schema: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import psycopg
-
+    from neorc.postgres._driver import connected
     from neorc.postgres._schema import TOKENS_TABLE
 
     async def drop() -> None:
-        async with await psycopg.AsyncConnection.connect(
-            pg_schema, autocommit=True
-        ) as conn:
+        async with connected(pg_schema) as conn:
             await conn.execute(f"DROP TABLE {TOKENS_TABLE}")
 
     asyncio.run(drop())
@@ -644,3 +654,15 @@ def test_the_token_commands_create_no_tables(
 
     with pytest.raises(SystemExit, match="neorc manager start --create-schema"):
         _cli.main(["tokens", "create", "ci", "--role", "ci"])
+
+
+@pytest.mark.postgres
+def test_a_database_that_does_not_exist_is_said_in_a_line(database_url: str) -> None:
+    """The server refuses the connection; the command says so, not a traceback."""
+    base, _, query = database_url.partition("?")
+    missing = f"{base.rsplit('/', 1)[0]}/neorc_no_such_database"
+    if query:
+        missing += f"?{query}"
+
+    with pytest.raises(SystemExit, match="cannot reach the database"):
+        _cli.main(["tokens", "list", "--database-url", missing])

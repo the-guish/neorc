@@ -8,33 +8,38 @@ from __future__ import annotations
 from types import TracebackType
 from typing import Self
 
-from psycopg import AsyncConnection, IsolationLevel
-from psycopg.rows import DictRow, dict_row
-from psycopg_pool import AsyncConnectionPool
-
+from neorc.postgres._driver import Pool, create_pool, schema_settings
 from neorc_core import NeorcError
 
-Pool = AsyncConnectionPool[AsyncConnection[DictRow]]
-
-
-async def _read_committed(conn: AsyncConnection[DictRow]) -> None:
-    # The stores' locking is reasoned out for READ COMMITTED: a statement after
-    # a lock sees what was committed before the lock was granted. Pinned here,
-    # so a server or role with another default does not change that.
-    await conn.set_isolation_level(IsolationLevel.READ_COMMITTED)
+_READ_COMMITTED = {"default_transaction_isolation": "read committed"}
+"""The stores' locking is reasoned out for READ COMMITTED: a statement after a
+lock sees what was committed before the lock was granted. Sent with every
+connection's startup, after the connection string's own settings and so over
+them, so a server, role or DSN with another default does not change that. A
+startup setting is also what the pool's reset on release goes back to."""
 
 
 class Pooled:
-    """Owns a pool of connections handing rows over as dictionaries.
+    """Owns a pool of connections.
 
     Every connection runs its transactions in ``READ COMMITTED``, whatever the
-    server's default.
+    server's default. With ``schema``, its ``search_path`` is that schema
+    alone, so the neorc tables are found there; ``create_schema`` with the same
+    ``schema`` creates them in it.
     """
 
-    def __init__(self, dsn: str, *, min_size: int = 1, max_size: int = 10) -> None:
+    def __init__(
+        self,
+        dsn: str,
+        *,
+        min_size: int = 1,
+        max_size: int = 10,
+        schema: str | None = None,
+    ) -> None:
         self._dsn = dsn
         self._min_size = min_size
         self._max_size = max_size
+        self._settings = {**schema_settings(schema), **_READ_COMMITTED}
         self._pool: Pool | None = None
 
     async def __aenter__(self) -> Self:
@@ -53,16 +58,12 @@ class Pooled:
         """Open the connection pool."""
         if self._pool is not None:
             return
-        pool: Pool = AsyncConnectionPool(
+        self._pool = await create_pool(
             self._dsn,
             min_size=self._min_size,
             max_size=self._max_size,
-            kwargs={"row_factory": dict_row},
-            configure=_read_committed,
-            open=False,
+            server_settings=self._settings,
         )
-        await pool.open(wait=True)
-        self._pool = pool
 
     async def aclose(self) -> None:
         """Close the connection pool."""

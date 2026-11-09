@@ -369,9 +369,8 @@ def _exit_now(exit_code: int) -> None:
 def manager_start_command(args: argparse.Namespace) -> int:
     """Run the manager service. Needs the ``manager`` extra."""
     with _needs("manager", "postgres"):
-        import psycopg
-
         from neorc.manager import run
+        from neorc.postgres._driver import CONNECTION_ERRORS
 
     if (args.ssl_certfile is None) != (args.ssl_keyfile is None):
         raise SystemExit(
@@ -415,7 +414,7 @@ def manager_start_command(args: argparse.Namespace) -> int:
         raise SystemExit(f"neorc manager start: {exc}, or pass --no-ui") from None
     except RuntimeError as exc:  # no database, or no credential tables in it
         raise SystemExit(f"neorc manager start: {exc}") from None
-    except (psycopg.OperationalError, OSError) as exc:  # checked before serving
+    except CONNECTION_ERRORS as exc:  # checked before serving
         raise SystemExit(
             f"neorc manager start: cannot reach the database: {exc}"
         ) from None
@@ -549,9 +548,8 @@ def _on_credentials(
     so a mistyped database URL is not given a set of empty tables.
     """
     with _needs("postgres"):
-        import psycopg
-
         from neorc.postgres import PostgresCredentialStore
+        from neorc.postgres._driver import CONNECTION_ERRORS
         from neorc.postgres._schema import MissingTablesError, ensure_credential_tables
 
     from neorc_core import Access
@@ -569,7 +567,7 @@ def _on_credentials(
         return asyncio.run(main())
     except MissingTablesError as exc:
         raise SystemExit(str(exc)) from None
-    except (psycopg.OperationalError, OSError) as exc:
+    except CONNECTION_ERRORS as exc:
         raise SystemExit(f"cannot reach the database: {exc}") from None
 
 

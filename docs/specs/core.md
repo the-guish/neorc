@@ -16,7 +16,7 @@ extras their hosts need.
 
     pip install neorc                       # nothing extra
     pip install neorc[manager]              # FastAPI, to run the manager service
-    pip install neorc[postgres]             # the Postgres driver
+    pip install neorc[postgres]             # the Postgres driver, asyncpg
     pip install neorc[manager,postgres]     # the reference deployment
 
 A worker host installs no extra unless its queue client needs one. Future

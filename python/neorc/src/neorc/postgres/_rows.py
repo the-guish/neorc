@@ -14,6 +14,7 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
+from neorc.postgres._driver import Record
 from neorc_core import _values, _wire
 from neorc_core._runs import Event, EventKind, Run, RunStatus, StoredFlow, Task
 from neorc_core._runs import canonical_content as _canonical_content
@@ -21,8 +22,8 @@ from neorc_core._task import TaskStatus
 from neorc_core._values import JsonValue
 from neorc_core.flows import Version, parse_flow
 
-Row = Mapping[str, Any]
-"""A row as ``psycopg.rows.dict_row`` hands it over, or as it is written."""
+Row = Record
+"""A row as asyncpg hands it over: read by column name."""
 
 FLOW_COLUMNS = "name, major, minor, patch, content"
 RUN_COLUMNS = (
@@ -34,6 +35,16 @@ TASK_COLUMNS = (
     "attempts, lease_expires_at, result, error, created_at, started_at, finished_at"
 )
 EVENT_COLUMNS = "sequence, run_id, kind"
+
+
+def placeholders(columns: str) -> str:
+    """``$1, $2, ...``, one for each of ``columns``."""
+    return ", ".join(f"${n}" for n in range(1, len(columns.split(",")) + 1))
+
+
+def values(row: Mapping[str, Any], columns: str) -> tuple[Any, ...]:
+    """The values of ``row`` for ``columns``, in their order, to bind as arguments."""
+    return tuple(row[column.strip()] for column in columns.split(","))
 
 
 def flow_to_row(flow: StoredFlow) -> dict[str, Any]:

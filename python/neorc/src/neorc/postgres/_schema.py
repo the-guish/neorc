@@ -38,7 +38,7 @@ keep.
 
 from __future__ import annotations
 
-import psycopg
+from neorc.postgres._driver import connected, quote_identifier, schema_settings
 
 FLOW_VERSIONS_TABLE = "neorc_flow_versions"
 RUNS_TABLE = "neorc_runs"
@@ -261,34 +261,45 @@ CREATE INDEX IF NOT EXISTS {PENDING_LOGINS_TABLE}_expires_idx
 DROP_SCHEMA = f"DROP TABLE IF EXISTS {', '.join(TABLES + RETIRED_TABLES)}"
 
 
-async def create_schema(dsn: str) -> None:
-    """Create the neorc tables and indexes if they do not exist."""
-    async with await psycopg.AsyncConnection.connect(dsn, autocommit=True) as conn:
+async def create_schema(dsn: str, *, schema: str | None = None) -> None:
+    """Create the neorc tables and indexes if they do not exist.
+
+    With ``schema``, in that PostgreSQL schema, which is created first if it
+    does not exist; otherwise in the first schema of the connection's
+    ``search_path``, ``public`` by default.
+    """
+    async with connected(dsn, server_settings=schema_settings(schema)) as conn:
+        if schema is not None:
+            await conn.execute(
+                f"CREATE SCHEMA IF NOT EXISTS {quote_identifier(schema)}"
+            )
         await conn.execute(CREATE_SCHEMA)
 
 
-async def missing_tables(dsn: str, tables: tuple[str, ...]) -> list[str]:
+async def missing_tables(
+    dsn: str, tables: tuple[str, ...], *, schema: str | None = None
+) -> list[str]:
     """Which of ``tables`` the database does not have, in their order."""
-    async with await psycopg.AsyncConnection.connect(dsn, autocommit=True) as conn:
-        cursor = await conn.execute(
-            "SELECT t.name FROM unnest(%s::text[]) WITH ORDINALITY AS t (name, n)"
+    async with connected(dsn, server_settings=schema_settings(schema)) as conn:
+        rows = await conn.fetch(
+            "SELECT t.name FROM unnest($1::text[]) WITH ORDINALITY AS t (name, n)"
             " WHERE to_regclass(t.name) IS NULL ORDER BY t.n",
-            [list(tables)],
+            list(tables),
         )
-        return [row[0] for row in await cursor.fetchall()]
+        return [row[0] for row in rows]
 
 
 class MissingTablesError(RuntimeError):
     """The database lacks tables the manager needs; the message names the fix."""
 
 
-async def ensure_credential_tables(dsn: str) -> None:
+async def ensure_credential_tables(dsn: str, *, schema: str | None = None) -> None:
     """Raise ``MissingTablesError`` naming the fix if the credential tables are missing.
 
     A manager with authentication on would otherwise answer every request with
     a 500, which workers and schedulers take for an outage and retry forever.
     """
-    missing = await missing_tables(dsn, CREDENTIAL_TABLES)
+    missing = await missing_tables(dsn, CREDENTIAL_TABLES, schema=schema)
     if missing:
         raise MissingTablesError(
             f"the database has no {', '.join(missing)}: start the manager once "
@@ -296,7 +307,10 @@ async def ensure_credential_tables(dsn: str) -> None:
         )
 
 
-async def drop_schema(dsn: str) -> None:
-    """Remove the neorc tables. For tests and teardown."""
-    async with await psycopg.AsyncConnection.connect(dsn, autocommit=True) as conn:
+async def drop_schema(dsn: str, *, schema: str | None = None) -> None:
+    """Remove the neorc tables, from ``schema`` if one is named. For tests and teardown.
+
+    The PostgreSQL schema itself is left: it may hold more than neorc's tables.
+    """
+    async with connected(dsn, server_settings=schema_settings(schema)) as conn:
         await conn.execute(DROP_SCHEMA)

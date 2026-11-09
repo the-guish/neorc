@@ -12,10 +12,10 @@ from __future__ import annotations
 
 import asyncio
 
-import psycopg
 import pytest
 
 from neorc.postgres import PostgresStore, PostgresTaskNotifier
+from neorc.postgres._driver import connected
 from neorc_core import Manager
 from neorc_core._values import JsonValue
 from neorc_core.flows import Address
@@ -136,13 +136,11 @@ async def test_a_waiting_worker_is_woken_by_a_publish(
 
 async def _cut(database_url: str, query_like: str) -> None:
     """End every server backend running a query like ``query_like``: a dropped link."""
-    async with await psycopg.AsyncConnection.connect(
-        database_url, autocommit=True
-    ) as conn:
+    async with connected(database_url) as conn:
         await conn.execute(
             "SELECT pg_terminate_backend(pid) FROM pg_stat_activity"
-            " WHERE pid <> pg_backend_pid() AND query LIKE %s",
-            (query_like,),
+            " WHERE pid <> pg_backend_pid() AND query LIKE $1",
+            query_like,
         )
 
 
@@ -163,13 +161,12 @@ async def test_an_announcement_survives_its_connection_breaking(
 
         assert await subscription.wait(timeout=5) is True
         # One sending connection, reopened; none left behind.
-        async with await psycopg.AsyncConnection.connect(database_url) as conn:
-            cursor = await conn.execute(
-                "SELECT count(*) FROM pg_stat_activity WHERE query LIKE %s",
-                ("SELECT pg_notify%",),
+        async with connected(database_url) as conn:
+            count = await conn.fetchval(
+                "SELECT count(*) FROM pg_stat_activity WHERE query LIKE $1",
+                "SELECT pg_notify%",
             )
-            row = await cursor.fetchone()
-        assert row is not None and row[0] <= 2  # this notifier's, and the fixture's
+        assert count <= 2  # this notifier's, and the fixture's
 
 
 async def test_a_mark_to_announce_never_waits_on_the_link(
@@ -181,11 +178,17 @@ async def test_a_mark_to_announce_never_waits_on_the_link(
     class Stuck:
         closed = False
 
-        async def execute(self, *args: object) -> None:
+        def is_closed(self) -> bool:
+            return self.closed
+
+        async def execute(self, *args: object, **kwargs: object) -> None:
             stuck.set()
             await asyncio.sleep(3600)
 
-        async def close(self) -> None:
+        async def close(self, *, timeout: float | None = None) -> None:
+            self.closed = True
+
+        def terminate(self) -> None:
             self.closed = True
 
     async def connect_stuck() -> Stuck:

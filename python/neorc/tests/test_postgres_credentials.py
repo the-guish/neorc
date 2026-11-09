@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import pytest
-from psycopg import errors
+from asyncpg.exceptions import CheckViolationError  # type: ignore[import-untyped]
 
 from neorc.postgres import PostgresCredentialStore
 from neorc_core import CredentialStore, Principal, PrincipalKind, Role
@@ -31,11 +31,11 @@ async def test_the_database_refuses_a_queue_only_a_worker_has(
     pg_credentials: PostgresCredentialStore, role: Role, queue: str | None
 ) -> None:
     """Beneath the checks ``Access`` makes, for whatever writes the table."""
-    with pytest.raises(errors.CheckViolation, match="queue_check"):
+    with pytest.raises(CheckViolationError, match="queue_check"):
         await pg_credentials.add_token("t", secret_hash("t"), role=role, queue=queue)
     person = Principal(
         kind=PrincipalKind.SESSION, subject="x", name="x", role=role, queue=queue
     )
-    with pytest.raises(errors.CheckViolation, match="queue_check"):
+    with pytest.raises(CheckViolationError, match="queue_check"):
         await pg_credentials.add_session(secret_hash("s"), person, seconds=60)
     assert await pg_credentials.tokens() == []

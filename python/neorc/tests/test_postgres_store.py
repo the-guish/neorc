@@ -18,11 +18,9 @@ from contextlib import asynccontextmanager
 from typing import Any, TypeVar
 
 import pytest
-from psycopg import AsyncConnection
-from psycopg.conninfo import make_conninfo
-from psycopg.rows import DictRow
 
 from neorc.postgres import PostgresStore
+from neorc.postgres._driver import Connection
 from neorc.postgres._schema import (
     EVENTS_TABLE,
     FLOW_TASKS_TABLE,
@@ -61,17 +59,20 @@ async def test_transactions_run_in_read_committed_whatever_the_default(
     pg_schema: str,
 ) -> None:
     """The lock order is reasoned out for READ COMMITTED, so the store pins it."""
-    serializable = make_conninfo(
-        pg_schema, options="-c default_transaction_isolation=serializable"
-    )
+    separator = "&" if "?" in pg_schema else "?"
+    options = "options=-c%20default_transaction_isolation%3Dserializable"
+    serializable = f"{pg_schema}{separator}{options}"
 
     async with (
         PostgresStore(serializable) as store,
-        store.pool.connection() as conn,
-        conn.transaction(),
+        store.pool.acquire() as conn,
     ):
-        cursor = await conn.execute("SHOW transaction_isolation")
-        row = await cursor.fetchone()
+        # The connection string's setting arrives: it is the one overridden.
+        assert await conn.fetchval("SHOW default_transaction_isolation") == (
+            "read committed"
+        )
+        async with conn.transaction():
+            row = await conn.fetchrow("SHOW transaction_isolation")
 
     assert row is not None and row["transaction_isolation"] == "read committed"
 
@@ -102,14 +103,14 @@ async def test_an_upload_spares_a_tree_whose_run_of_the_flow_just_succeeded(
         "b", Version(1, 0, 0), {}, parent_id=root.id, parent_address=Address("call")
     )
 
-    async with store.pool.connection() as succeeding, succeeding.transaction():
+    async with store.pool.acquire() as succeeding, succeeding.transaction():
         # succeed_run(sub_run), by hand, stopped short of its commit.
         await succeeding.execute(
-            f"SELECT id FROM {RUNS_TABLE} WHERE id = %s FOR UPDATE", (root.id,)
+            f"SELECT id FROM {RUNS_TABLE} WHERE id = $1 FOR UPDATE", root.id
         )
         await succeeding.execute(
-            f"UPDATE {RUNS_TABLE} SET status = 'succeeded' WHERE id = %s",
-            (sub_run.id,),
+            f"UPDATE {RUNS_TABLE} SET status = 'succeeded' WHERE id = $1",
+            sub_run.id,
         )
         uploading = asyncio.create_task(store.store_flows([_flow("b", "2.0.0")]))
         await asyncio.sleep(0.2)
@@ -122,13 +123,11 @@ async def test_an_upload_spares_a_tree_whose_run_of_the_flow_just_succeeded(
 
 _T = TypeVar("_T")
 
-Connection = AsyncConnection[DictRow]
-
 
 @asynccontextmanager
 async def held(store: PostgresStore) -> AsyncIterator[Connection]:
     """A transaction played by hand, open until the block ends, then committed."""
-    async with store.pool.connection() as conn, conn.transaction():
+    async with store.pool.acquire() as conn, conn.transaction():
         yield conn
 
 
@@ -141,9 +140,7 @@ async def blocked(coroutine: Coroutine[Any, Any, _T]) -> asyncio.Task[_T]:
 
 
 async def _lock_root(conn: Connection, root_id: RunId) -> None:
-    await conn.execute(
-        f"SELECT id FROM {RUNS_TABLE} WHERE id = %s FOR UPDATE", (root_id,)
-    )
+    await conn.execute(f"SELECT id FROM {RUNS_TABLE} WHERE id = $1 FOR UPDATE", root_id)
 
 
 async def _cancel_by_hand(conn: Connection, run: Run) -> None:
@@ -151,19 +148,20 @@ async def _cancel_by_hand(conn: Connection, run: Run) -> None:
     await _lock_root(conn, run.root_id)
     await conn.execute(
         f"UPDATE {RUNS_TABLE} SET status = 'cancelled', reason = 'by hand'"
-        " WHERE root_id = %s AND status = 'active'",
-        (run.root_id,),
+        " WHERE root_id = $1 AND status = 'active'",
+        run.root_id,
     )
 
 
 async def _append_event_by_hand(
     conn: Connection, run_id: RunId, kind: EventKind
 ) -> None:
-    await conn.execute("SELECT pg_advisory_xact_lock(%s, %s)", EVENT_LOCK)
+    await conn.execute("SELECT pg_advisory_xact_lock($1::int, $2::int)", *EVENT_LOCK)
     await conn.execute(
         f"INSERT INTO {EVENTS_TABLE} (sequence, run_id, kind)"
-        f" SELECT COALESCE(MAX(sequence), 0) + 1, %s, %s FROM {EVENTS_TABLE}",
-        (run_id, kind.value),
+        f" SELECT COALESCE(MAX(sequence), 0) + 1, $1, $2 FROM {EVENTS_TABLE}",
+        run_id,
+        kind.value,
     )
 
 
@@ -193,7 +191,7 @@ async def test_a_receive_skips_the_task_another_receive_holds(
 
     async with held(store) as receiving:
         await receiving.execute(
-            f"SELECT id FROM {FLOW_TASKS_TABLE} WHERE id = %s FOR UPDATE", (first.id,)
+            f"SELECT id FROM {FLOW_TASKS_TABLE} WHERE id = $1 FOR UPDATE", first.id
         )
         meanwhile = await store.receive_task("default", lease_seconds=30)
 
@@ -251,11 +249,13 @@ async def test_a_run_start_waits_for_an_upload_and_is_refused_the_old_version(
 
     async with held(store) as uploading:
         # store_flows, by hand: the lock, then the new version, not committed.
-        await uploading.execute("SELECT pg_advisory_xact_lock(%s, %s)", UPLOAD_LOCK)
+        await uploading.execute(
+            "SELECT pg_advisory_xact_lock($1::int, $2::int)", *UPLOAD_LOCK
+        )
         await uploading.execute(
             f"INSERT INTO {FLOW_VERSIONS_TABLE} (name, major, minor, patch, content)"
-            " VALUES ('a', 2, 0, 0, %s)",
-            (canonical_content(_flow("a", "2.0.0").content),),
+            " VALUES ('a', 2, 0, 0, $1)",
+            canonical_content(_flow("a", "2.0.0").content),
         )
         starting = await blocked(store.start_run("a", Version(1, 0, 0), {}))
 
@@ -294,15 +294,15 @@ async def test_runs_started_under_contention_list_in_commit_order(
         # number; stopped short of its commit.
         await starting.execute(
             f"INSERT INTO {RUNS_TABLE} (id, flow, version, inputs, status, root_id)"
-            " VALUES (%s, 'a', '1.0.0', '{}', 'active', %s)",
-            (by_hand, by_hand),
+            " VALUES ($1, 'a', '1.0.0', '{}', 'active', $1)",
+            by_hand,
         )
         await _append_event_by_hand(starting, by_hand, EventKind.RUN_STARTED)
         await starting.execute(
             f"UPDATE {RUNS_TABLE} SET position = "
             f"(SELECT COALESCE(MAX(position), 0) + 1 FROM {RUNS_TABLE})"
-            " WHERE id = %s",
-            (by_hand,),
+            " WHERE id = $1",
+            by_hand,
         )
         waiting = await blocked(store.start_run("a", Version(1, 0, 0), {}))
 

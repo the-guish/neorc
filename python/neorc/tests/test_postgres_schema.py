@@ -18,11 +18,15 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from enum import StrEnum
 
-import psycopg
 import pytest
-from psycopg.rows import DictRow, dict_row
 
-from neorc.postgres import create_schema, drop_schema
+from neorc.postgres import (
+    PostgresCredentialStore,
+    PostgresStore,
+    create_schema,
+    drop_schema,
+)
+from neorc.postgres._driver import Connection, UniqueViolationError, connected
 from neorc.postgres._rows import (
     EVENT_COLUMNS,
     FLOW_COLUMNS,
@@ -32,12 +36,15 @@ from neorc.postgres._rows import (
     event_to_row,
     flow_from_row,
     flow_to_row,
+    placeholders,
     run_from_row,
     run_to_row,
     task_from_row,
     task_to_row,
+    values,
 )
 from neorc.postgres._schema import (
+    CREDENTIAL_TABLES,
     EVENTS_TABLE,
     FLOW_TASKS_TABLE,
     FLOW_VERSIONS_TABLE,
@@ -47,6 +54,9 @@ from neorc.postgres._schema import (
     SESSIONS_TABLE,
     TABLES,
     TOKENS_TABLE,
+    MissingTablesError,
+    ensure_credential_tables,
+    missing_tables,
 )
 from neorc_core import (
     Event,
@@ -67,16 +77,13 @@ pytestmark = pytest.mark.postgres
 
 
 @pytest.fixture
-async def conn(pg_schema: str) -> AsyncIterator[psycopg.AsyncConnection[DictRow]]:
-    async with await psycopg.AsyncConnection.connect(
-        pg_schema, autocommit=True, row_factory=dict_row
-    ) as connection:
+async def conn(pg_schema: str) -> AsyncIterator[Connection]:
+    async with connected(pg_schema) as connection:
         yield connection
 
 
-async def _names(conn: psycopg.AsyncConnection[DictRow], query: str) -> set[str]:
-    cursor = await conn.execute(query)
-    return {row["name"] for row in await cursor.fetchall()}
+async def _names(conn: Connection, query: str, *args: object) -> set[str]:
+    return {row["name"] for row in await conn.fetch(query, *args)}
 
 
 _TABLES = "SELECT tablename AS name FROM pg_tables WHERE tablename LIKE 'neorc_%'"
@@ -87,29 +94,24 @@ async def test_create_schema_is_idempotent_and_creates_everything(
     database_url: str,
 ) -> None:
     await drop_schema(database_url)
-    async with await psycopg.AsyncConnection.connect(
-        database_url, autocommit=True
-    ) as conn:  # a table of an earlier version, as a reused database may hold
+    # A table of an earlier version, as a reused database may hold.
+    async with connected(database_url) as conn:
         await conn.execute("CREATE TABLE neorc_tasks (id uuid PRIMARY KEY)")
     await create_schema(database_url)
     await create_schema(database_url)
 
-    async with await psycopg.AsyncConnection.connect(
-        database_url, row_factory=dict_row
-    ) as conn:
+    async with connected(database_url) as conn:
         assert await _names(conn, _TABLES) == set(TABLES) | set(RETIRED_TABLES)
         assert set(INDEXES) <= await _names(conn, _INDEXES)
 
     await drop_schema(database_url)
-    async with await psycopg.AsyncConnection.connect(
-        database_url, row_factory=dict_row
-    ) as conn:
+    async with connected(database_url) as conn:
         assert await _names(conn, _TABLES) == set()
 
 
 _COLUMNS = """
 SELECT column_name AS name FROM information_schema.columns
- WHERE table_schema = current_schema() AND table_name = %s
+ WHERE table_schema = current_schema() AND table_name = $1
 """
 
 _OLD_RUNS = f"""
@@ -139,26 +141,23 @@ async def test_create_schema_adds_the_columns_tables_from_before_lack(
     """Tables from a checkout before the timestamps get them, with rows kept."""
     await drop_schema(database_url)
     try:
-        async with await psycopg.AsyncConnection.connect(
-            database_url, autocommit=True, row_factory=dict_row
-        ) as conn:
+        async with connected(database_url) as conn:
             await conn.execute(_OLD_RUNS)
             await conn.execute(_OLD_TASKS)
             run_id = uuid.uuid4()
             await conn.execute(
                 f"INSERT INTO {RUNS_TABLE} (id, flow, version, inputs, status, root_id)"
-                " VALUES (%s, 'a', '1.0.0', '{}', 'active', %s)",
-                (run_id, run_id),
+                " VALUES ($1, 'a', '1.0.0', '{}', 'active', $1)",
+                run_id,
             )
 
             await create_schema(database_url)
 
-            runs = await _names(conn, _COLUMNS.replace("%s", f"'{RUNS_TABLE}'"))
-            tasks = await _names(conn, _COLUMNS.replace("%s", f"'{FLOW_TASKS_TABLE}'"))
-            cursor = await conn.execute(
+            runs = await _names(conn, _COLUMNS, RUNS_TABLE)
+            tasks = await _names(conn, _COLUMNS, FLOW_TASKS_TABLE)
+            (row,) = await conn.fetch(
                 f"SELECT {RUN_COLUMNS}, position FROM {RUNS_TABLE}"
             )
-            (row,) = await cursor.fetchall()
 
         assert {"created_at", "finished_at", "position"} <= runs
         assert {"created_at", "started_at", "finished_at"} <= tasks
@@ -172,8 +171,8 @@ _CONSTRAINT = """
 SELECT pg_get_constraintdef(c.oid) AS definition
   FROM pg_constraint AS c
   JOIN pg_class AS t ON t.oid = c.conrelid
- WHERE c.contype = 'c' AND t.relname = %(table)s
-   AND pg_get_constraintdef(c.oid) LIKE %(column)s
+ WHERE c.contype = 'c' AND t.relname = $1
+   AND pg_get_constraintdef(c.oid) LIKE $2
 """
 
 
@@ -190,15 +189,12 @@ SELECT pg_get_constraintdef(c.oid) AS definition
     ids=["tasks", "runs", "events", "sessions", "session-roles", "token-roles"],
 )
 async def test_check_constraints_are_in_step_with_the_enums(
-    conn: psycopg.AsyncConnection[DictRow],
+    conn: Connection,
     table: str,
     column: str,
     enum: type[StrEnum],
 ) -> None:
-    cursor = await conn.execute(
-        _CONSTRAINT, {"table": table, "column": f"CHECK (({column} = ANY%"}
-    )
-    (row,) = await cursor.fetchall()
+    (row,) = await conn.fetch(_CONSTRAINT, table, f"CHECK (({column} = ANY%")
 
     literals = re.findall(r"'([^']*)'", row["definition"])
     assert sorted(literals) == sorted(member.value for member in enum)
@@ -209,7 +205,7 @@ def _flow(content: JsonValue) -> StoredFlow:
 
 
 async def test_a_flow_version_is_stored_as_canonical_json(
-    conn: psycopg.AsyncConnection[DictRow],
+    conn: Connection,
 ) -> None:
     content: JsonValue = {
         "version": "1.2.3",
@@ -220,11 +216,10 @@ async def test_a_flow_version_is_stored_as_canonical_json(
 
     await conn.execute(
         f"INSERT INTO {FLOW_VERSIONS_TABLE} ({FLOW_COLUMNS}) VALUES "
-        "(%(name)s, %(major)s, %(minor)s, %(patch)s, %(content)s)",
-        flow_to_row(flow),
+        f"({placeholders(FLOW_COLUMNS)})",
+        *values(flow_to_row(flow), FLOW_COLUMNS),
     )
-    cursor = await conn.execute(f"SELECT {FLOW_COLUMNS} FROM {FLOW_VERSIONS_TABLE}")
-    (row,) = await cursor.fetchall()
+    (row,) = await conn.fetch(f"SELECT {FLOW_COLUMNS} FROM {FLOW_VERSIONS_TABLE}")
 
     assert row["content"] == canonical_content(content)
     assert row["content"].startswith('{"name":"a","steps":')
@@ -249,22 +244,19 @@ def _same_numbers(read: JsonValue) -> None:
     assert isinstance(integer, int) and not isinstance(integer, bool)
 
 
-async def _insert_run(conn: psycopg.AsyncConnection[DictRow], run: Run) -> Run:
+async def _insert_run(conn: Connection, run: Run) -> Run:
     await conn.execute(
         f"INSERT INTO {RUNS_TABLE} ({RUN_COLUMNS}) VALUES "
-        "(%(id)s, %(flow)s, %(version)s, %(inputs)s, %(status)s, %(root_id)s, "
-        "%(parent_id)s, %(parent_address)s, %(output)s, %(reason)s, "
-        "%(created_at)s, %(finished_at)s)",
-        run_to_row(run),
+        f"({placeholders(RUN_COLUMNS)})",
+        *values(run_to_row(run), RUN_COLUMNS),
     )
-    cursor = await conn.execute(
-        f"SELECT {RUN_COLUMNS} FROM {RUNS_TABLE} WHERE id = %s", (run.id,)
+    (row,) = await conn.fetch(
+        f"SELECT {RUN_COLUMNS} FROM {RUNS_TABLE} WHERE id = $1", run.id
     )
-    (row,) = await cursor.fetchall()
     return run_from_row(row)
 
 
-async def test_runs_round_trip(conn: psycopg.AsyncConnection[DictRow]) -> None:
+async def test_runs_round_trip(conn: Connection) -> None:
     root_id = uuid.uuid4()
     root = Run(
         id=root_id,
@@ -300,7 +292,7 @@ async def test_runs_round_trip(conn: psycopg.AsyncConnection[DictRow]) -> None:
 
 
 async def test_tasks_round_trip_and_are_ordered_by_publication(
-    conn: psycopg.AsyncConnection[DictRow],
+    conn: Connection,
 ) -> None:
     run_id = uuid.uuid4()
     pending = Task(
@@ -334,16 +326,13 @@ async def test_tasks_round_trip_and_are_ordered_by_publication(
     for task in (pending, finished):
         await conn.execute(
             f"INSERT INTO {FLOW_TASKS_TABLE} ({TASK_COLUMNS}) VALUES "
-            "(%(id)s, %(run_id)s, %(address)s, %(queue)s, %(handler)s, %(params)s, "
-            "%(fixed_params)s, %(status)s, %(attempts)s, %(lease_expires_at)s, "
-            "%(result)s, %(error)s, %(created_at)s, %(started_at)s, %(finished_at)s)",
-            task_to_row(task),
+            f"({placeholders(TASK_COLUMNS)})",
+            *values(task_to_row(task), TASK_COLUMNS),
         )
 
-    cursor = await conn.execute(
+    rows = await conn.fetch(
         f"SELECT {TASK_COLUMNS} FROM {FLOW_TASKS_TABLE} ORDER BY position"
     )
-    rows = await cursor.fetchall()
 
     read_pending, read_finished = (task_from_row(row) for row in rows)
     assert read_pending == pending
@@ -353,21 +342,61 @@ async def test_tasks_round_trip_and_are_ordered_by_publication(
     _same_numbers(read_finished.result)
 
 
-async def test_events_round_trip(conn: psycopg.AsyncConnection[DictRow]) -> None:
+async def test_events_round_trip(conn: Connection) -> None:
     event = Event(7, uuid.uuid4(), EventKind.TASK_FINISHED)
-
-    await conn.execute(
-        f"INSERT INTO {EVENTS_TABLE} ({EVENT_COLUMNS}) VALUES "
-        "(%(sequence)s, %(run_id)s, %(kind)s)",
-        event_to_row(event),
+    insert = (
+        f"INSERT INTO {EVENTS_TABLE} ({EVENT_COLUMNS}) "
+        f"VALUES ({placeholders(EVENT_COLUMNS)})"
     )
-    cursor = await conn.execute(f"SELECT {EVENT_COLUMNS} FROM {EVENTS_TABLE}")
-    (row,) = await cursor.fetchall()
+
+    await conn.execute(insert, *values(event_to_row(event), EVENT_COLUMNS))
+    (row,) = await conn.fetch(f"SELECT {EVENT_COLUMNS} FROM {EVENTS_TABLE}")
 
     assert event_from_row(row) == event
-    with pytest.raises(psycopg.errors.UniqueViolation):
-        await conn.execute(
-            f"INSERT INTO {EVENTS_TABLE} ({EVENT_COLUMNS}) VALUES "
-            "(%(sequence)s, %(run_id)s, %(kind)s)",
-            event_to_row(event),
-        )
+    with pytest.raises(UniqueViolationError):
+        await conn.execute(insert, *values(event_to_row(event), EVENT_COLUMNS))
+
+
+_SCHEMA_TABLES = "SELECT tablename AS name FROM pg_tables WHERE schemaname = $1"
+
+
+async def test_a_schema_of_its_own_holds_every_table_and_is_used(
+    database_url: str,
+) -> None:
+    """With ``schema``, the tables are made in it, and the stores work in it."""
+    schema = f"neorc test {uuid.uuid4().hex[:8]}"  # quoted, as any name may need
+    try:
+        assert await missing_tables(
+            database_url, CREDENTIAL_TABLES, schema=schema
+        ) == list(CREDENTIAL_TABLES)
+        with pytest.raises(MissingTablesError):
+            await ensure_credential_tables(database_url, schema=schema)
+
+        await create_schema(database_url, schema=schema)
+        await create_schema(database_url, schema=schema)
+        await ensure_credential_tables(database_url, schema=schema)
+
+        async with connected(database_url) as conn:
+            assert await _names(conn, _SCHEMA_TABLES, schema) == set(TABLES)
+        async with PostgresStore(database_url, schema=schema) as store:
+            content: JsonValue = {
+                "name": "a",
+                "version": "1.0.0",
+                "steps": {"work": {"handler": "tasks:work"}},
+            }
+            await store.store_flows([_flow(content)])
+            assert [f.name for f in await store.latest_flows()] == ["a"]
+        async with PostgresCredentialStore(database_url, schema=schema) as store:
+            assert await store.tokens() == []
+        async with connected(database_url) as conn:
+            count = await conn.fetchval(
+                f'SELECT count(*) FROM "{schema}".{FLOW_VERSIONS_TABLE}'
+            )
+        assert count == 1
+
+        await drop_schema(database_url, schema=schema)
+        async with connected(database_url) as conn:
+            assert await _names(conn, _SCHEMA_TABLES, schema) == set()
+    finally:
+        async with connected(database_url) as conn:
+            await conn.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')

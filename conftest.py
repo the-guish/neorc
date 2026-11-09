@@ -84,15 +84,12 @@ def database_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
 @pytest.fixture
 async def pg_schema(database_url: str) -> str:
     """The database URL, its neorc tables created and emptied."""
-    import psycopg
-
     from neorc.postgres import create_schema
+    from neorc.postgres._driver import connected
     from neorc.postgres._schema import TABLES
 
     await create_schema(database_url)
-    async with await psycopg.AsyncConnection.connect(
-        database_url, autocommit=True
-    ) as conn:
+    async with connected(database_url) as conn:
         await conn.execute(f"TRUNCATE {', '.join(TABLES)}")
     return database_url
 

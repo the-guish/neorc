@@ -249,6 +249,11 @@ one version, cut from a single tag on `main`.
   `neorc tokens create` takes `--role` and, for a worker, `--queue`; `tokens
   list` shows them. The scheduler, the worker and the CLI stop on a 403 as on
   a refused token, under their common base, `AccessError`.
+- `neorc.postgres`: an optional `schema` on `PostgresStore`,
+  `PostgresCredentialStore`, `create_schema`, `drop_schema` and
+  `ensure_credential_tables`, to keep neorc's tables in a PostgreSQL schema of
+  their own: the connections' `search_path` is that schema alone, and
+  `create_schema` creates it if it does not exist.
 
 ### Changed
 
@@ -264,6 +269,18 @@ one version, cut from a single tag on `main`.
   task it did not receive. Publishing an address again still returns the first
   task. `Manager.claim_task`, `extend_lease` and `report_finished` take the
   queue a worker token is bound to.
+- `neorc.postgres`: the adapters run on asyncpg (Apache-2.0) instead of
+  psycopg 3 and psycopg-pool (LGPL-3.0); the `postgres` extra installs
+  `asyncpg`. The classes and functions `neorc.postgres` exports keep their
+  signatures and accept the same connection strings: URLs, and libpq's
+  `key=value` strings, which are translated, `connect_timeout` included;
+  libpq's keepalive parameters are dropped, since asyncpg has none. A store's
+  `pool` is now an asyncpg pool, `pool.acquire()` where it was
+  `pool.connection()`. Opening a store fails at once when the database cannot
+  be reached, where psycopg-pool retried for 30 seconds. The notifier's
+  listening connection finds a silently dropped link by repeating its `LISTEN`
+  every 10 seconds, with a 20-second bound on the answer, in place of libpq's
+  TCP keepalives; sending an announcement is bounded at 30 seconds.
 
 ### Security
 
