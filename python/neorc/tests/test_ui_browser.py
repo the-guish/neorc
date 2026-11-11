@@ -6,10 +6,10 @@
 A manager on uvicorn and Postgres serves the assets ``ts/neorc-ui`` built, with
 authentication on: a scheduler and workers run ``examples/wordplay`` over HTTP
 with a token, and Chromium, driven by Playwright, signs in through a stand-in
-OpenID provider, starts a run from the form, watches it succeed, looks at it as
-a graph, cancels another, and signs out. Skipped without a built UI or a browser: CI
-builds and installs both for one Python, and contributing/dev-environment.md
-says how to locally.
+OpenID provider, sees a flow's steps as a graph, starts a run from the form,
+watches it succeed, looks at it as a graph, cancels another, and signs out.
+Skipped without a built UI or a browser: CI builds and installs both for one
+Python, and contributing/dev-environment.md says how to locally.
 """
 
 from __future__ import annotations
@@ -142,7 +142,13 @@ async def browsing() -> AsyncIterator[tuple[Page, list[str]]]:
 
 
 async def _start_word_picker_rounds(page: Page, ui_address: str) -> None:
+    from playwright.async_api import expect
+
     await page.goto(f"{ui_address}/ui/#/flows/word_picker_rounds")
+    # The flow's steps as a graph, before any run: each loop and fan-out once.
+    steps = page.get_by_label("Flow graph")
+    await expect(steps.locator(".react-flow__node")).to_have_count(9)
+    await expect(steps.get_by_role("link", name="word_picker")).to_be_visible()
     await page.get_by_label("sentence").fill(SENTENCE)
     await page.get_by_label("preferred_letter").fill("t")
     await page.get_by_label("requested_at").fill("2026-09-13T10:00")

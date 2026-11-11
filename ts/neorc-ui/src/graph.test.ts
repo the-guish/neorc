@@ -87,7 +87,15 @@ describe("runGraph on the recorded word_picker_rounds run", () => {
       type: "task",
       parentId: containerNodeId("padding", [["decorate", 2]], 2),
     });
-    expect(pad.data).toMatchObject({ kind: "task", handler: "tasks:pad", status: "succeeded" });
+    expect(pad.data).toMatchObject({
+      kind: "task",
+      handler: "tasks:pad",
+      status: "succeeded",
+      // What the definition gives the step, for a graph with no run to show.
+      queue: "default",
+      params: { word: "neorc.item", loop_count: "neorc.loop_count" },
+      fixedParams: { pad_char: "*" },
+    });
     expect(pad.data.kind === "task" && pad.data.task?.address).toEqual({
       step: "pad",
       scope: [["decorate", 2], ["padding", 2]],

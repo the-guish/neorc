@@ -104,9 +104,9 @@ Start a run from anywhere, with a token that may:
         -H 'content-type: application/json' -d '{"inputs": {"name": "world"}}'
 
 Or from the web UI the manager serves at `https://manager.internal:8420/ui/`:
-the flows, the runs and every task of each, live, as an outline or as a
-zoomable graph of the run's steps, with a form to start a run and a button
-to cancel one. People sign in to it with an identity provider, as below; a
+the flows, each with its steps drawn as a graph, the runs and every task of
+each, live, as an outline or as a zoomable graph of the run's steps, with a
+form to start a run and a button to cancel one. People sign in to it with an identity provider, as below; a
 manager started with `--no-auth` asks nobody, and says so on every page.
 
 [examples/hello](examples/hello) and [examples/wordplay](examples/wordplay)

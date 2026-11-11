@@ -257,6 +257,14 @@ one version, cut from a single tag on `main`.
   `ensure_credential_tables`, to keep neorc's tables in a PostgreSQL schema of
   their own: the connections' `search_path` is that schema alone, and
   `create_schema` creates it if it does not exist.
+- `neorc-ui`: a flow's page draws its steps as a graph, before any run: a
+  node per step with its handler and queue, loops and fan-outs as boxes, each
+  drawn once, a sub-flow linking to the flow it calls, an edge from each step
+  to the ones reading it, and a step's params and fixed params beside the
+  graph when its node is clicked. A definition says all of this; only how
+  many times a loop goes round and how many branches a fan-out over a list
+  has wait for a run. The page now goes: version, steps, the form to start a
+  run, then the definition as text.
 
 ### Changed
 

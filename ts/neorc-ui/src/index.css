@@ -230,6 +230,17 @@ button.link {
   overflow: hidden;
 }
 
+/* A definition's graph on a flow's page: as tall as its steps need, set on it. */
+.flow-graph .run-graph-canvas {
+  height: 100%;
+  min-height: 0;
+}
+
+.flow-graph .run-graph-panel {
+  box-sizing: border-box;
+  max-height: 100%;
+}
+
 .run-graph-panel {
   width: min(28rem, 40vw);
   overflow: auto;
