@@ -1,0 +1,101 @@
+[
+  {
+    "version": "v0.9",
+    "createSurface": {
+      "surfaceId": "code_task",
+      "catalogId": "https://github.com/open-shipyard/neorc/forms/v1"
+    }
+  },
+  {
+    "version": "v0.9",
+    "updateComponents": {
+      "surfaceId": "code_task",
+      "components": [
+        {
+          "id": "root",
+          "component": "Column",
+          "children": ["intro", "description", "repo", "model", "attempts", "draft"]
+        },
+        {
+          "id": "intro",
+          "component": "Text",
+          "variant": "caption",
+          "text": "Describe a change, and where and how it should be made."
+        },
+        {
+          "id": "description",
+          "component": "TextField",
+          "label": "Task description",
+          "variant": "longText",
+          "value": { "path": "/description" },
+          "checks": [
+            {
+              "condition": {
+                "call": "length",
+                "args": { "value": { "path": "/description" }, "min": 10 }
+              },
+              "message": "Describe the task in at least 10 characters."
+            }
+          ]
+        },
+        {
+          "id": "repo",
+          "component": "ChoicePicker",
+          "label": "Repository",
+          "variant": "mutuallyExclusive",
+          "options": [
+            { "label": "billing", "value": "acme/billing" },
+            { "label": "catalog", "value": "acme/catalog" },
+            { "label": "checkout", "value": "acme/checkout" },
+            { "label": "identity", "value": "acme/identity" },
+            { "label": "search", "value": "acme/search" },
+            { "label": "shipping", "value": "acme/shipping" }
+          ],
+          "value": { "path": "/repo" }
+        },
+        {
+          "id": "model",
+          "component": "ChoicePicker",
+          "label": "Model",
+          "variant": "mutuallyExclusive",
+          "options": [
+            { "label": "Large", "value": "large" },
+            { "label": "Medium", "value": "medium" },
+            { "label": "Small", "value": "small" }
+          ],
+          "value": { "path": "/model" }
+        },
+        {
+          "id": "attempts",
+          "component": "TextField",
+          "label": "Attempts",
+          "variant": "number",
+          "value": { "path": "/attempts" },
+          "checks": [
+            {
+              "condition": {
+                "call": "numeric",
+                "args": { "value": { "path": "/attempts" }, "min": 1, "max": 5 }
+              },
+              "message": "Between 1 and 5 attempts."
+            }
+          ]
+        },
+        {
+          "id": "draft",
+          "component": "CheckBox",
+          "label": "Open the pull request as a draft",
+          "value": { "path": "/draft" }
+        }
+      ]
+    }
+  },
+  {
+    "version": "v0.9",
+    "updateDataModel": {
+      "surfaceId": "code_task",
+      "path": "/",
+      "value": { "model": ["medium"], "attempts": "2", "draft": true }
+    }
+  }
+]

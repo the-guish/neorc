@@ -1,7 +1,8 @@
 import { useMutation } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 
 import { startRun, type Flow } from "../api";
+import { answered, FlowForm, formOf, type Answers } from "../forms";
 import { localToIso } from "../format";
 import { navigate } from "../router";
 
@@ -77,15 +78,18 @@ export function jsonBodyOf(
 }
 
 /**
- * Start a run of a flow's latest version: one field per declared input, or
- * a JSON editor for what the fields cannot say. The manager's refusal is
- * shown as it came; a started run is opened.
+ * Start a run of a flow's latest version: the flow's own form when it gives
+ * one (../forms), one field per declared input when it does not, or a JSON
+ * editor for what neither can say. The manager's refusal is shown as it
+ * came; a started run is opened.
  */
 export function StartRunForm({ flow }: { flow: Flow }) {
   const inputs = inputsOf(flow.content);
   const names = Object.keys(inputs);
   const [mode, setMode] = useState<"form" | "json">(names.length ? "form" : "json");
   const [values, setValues] = useState<Values>({});
+  const form = useMemo(() => formOf(flow.content), [flow.content]);
+  const [answers, setAnswers] = useState<Answers>(form?.start ?? {});
   const [json, setJson] = useState("{}");
   const [problem, setProblem] = useState<string | null>(null);
   const start = useMutation({
@@ -94,7 +98,12 @@ export function StartRunForm({ flow }: { flow: Flow }) {
 
   function submit(event: FormEvent) {
     event.preventDefault();
-    const built = mode === "form" ? bodyOf(inputs, values) : jsonBodyOf(json);
+    const built =
+      mode === "json"
+        ? jsonBodyOf(json)
+        : form
+          ? answered(form, answers)
+          : bodyOf(inputs, values);
     if ("problem" in built) {
       setProblem(built.problem);
       return;
@@ -120,7 +129,9 @@ export function StartRunForm({ flow }: { flow: Flow }) {
         )}
       </p>
       {mode === "form" ? (
-        names.length === 0 ? (
+        form ? (
+          <FlowForm form={form} answers={answers} onChange={setAnswers} />
+        ) : names.length === 0 ? (
           <p className="muted">This flow declares no inputs.</p>
         ) : (
           <div className="fields">

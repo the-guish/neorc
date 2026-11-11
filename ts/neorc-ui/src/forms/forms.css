@@ -1,0 +1,35 @@
+/* A flow's form, inside "Start a run". The fields' own look is the page's
+   (index.css, .start-run): this is what the form adds to it. */
+
+.start-run .flow-form fieldset {
+  display: grid;
+  gap: 0.25rem;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.start-run .flow-form legend {
+  padding: 0;
+}
+
+.start-run .flow-form label.flow-form-inline {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.start-run .flow-form textarea {
+  font-family: inherit;
+  font-size: inherit;
+  margin-bottom: 0;
+}
+
+.start-run .flow-form p,
+.start-run .flow-form h3,
+.start-run .flow-form h4,
+.start-run .flow-form h5,
+.start-run .flow-form h6 {
+  margin: 0;
+}
