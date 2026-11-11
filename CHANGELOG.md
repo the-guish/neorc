@@ -281,6 +281,25 @@ one version, cut from a single tag on `main`.
   listening connection finds a silently dropped link by repeating its `LISTEN`
   every 10 seconds, with a 20-second bound on the answer, in place of libpq's
   TCP keepalives; sending an announcement is bounded at 30 seconds.
+- `neorc-ui`: a run's graph draws a loop once, as the definition has it,
+  showing one iteration: the latest, which follows a live run, until another
+  is picked on the loop, with its arrows or by its number. A loop inside a
+  loop or a fan-out is picked apart in each. A task's details stay open on
+  the iteration picked. The loop says what its exit condition returned in the
+  iteration shown, and a loop that used up `max_cycles` without it met is
+  marked failed, in the graph and in the outline: the manager stores tasks,
+  not loops, so the run's reason was the only place that said so. A step
+  after a loop is joined to the iteration shown, which stands for all of
+  them; what it received from each is in its params. Before, the graph had a
+  box per iteration, one under the other.
+- `neorc-ui`: the graph's "fit view" control works after the graph has
+  changed. It did nothing once a task's details had been opened or a live
+  run had moved on, since React Flow waited to measure nodes it had already
+  drawn.
+- `neorc-ui`: the outline and the graph list a run's steps in the order they
+  run, each after the ones it refers to. They were in the sorted order of
+  the keys the manager stores a definition with, which put a loop's exit
+  condition before the steps it reads.
 
 ### Security
 

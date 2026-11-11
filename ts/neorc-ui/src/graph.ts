@@ -1,13 +1,19 @@
-// A run as a graph: one node per step instance, a parent node per iteration
-// or branch of a container, an edge from each step a param refers to, laid
-// out by dagre one container level at a time. No React here: the view draws
-// what this gives.
+// A run as a graph: one node per step, a parent node per loop and per branch
+// of a fan-out, an edge from each step a param refers to, laid out by dagre
+// one container level at a time. A loop is drawn once, as the definition has
+// it, showing one of its iterations: the latest, or the one picked. No React
+// here: the view draws what this gives.
 import dagre from "@dagrejs/dagre";
 
 import type { Run, RunStatus, Task, TaskStatus } from "./api";
 import {
   addressKey,
   instancesOf,
+  iterationOutcome,
+  lastIteration,
+  loopFailed,
+  referencedStep,
+  type IterationOutcome,
   type Published,
   type Scope,
   type StepNode,
@@ -40,7 +46,32 @@ export type NodeData =
       /** "iteration 2", "branch 1", or "not entered yet". */
       instance: string;
       entered: boolean;
+      /** For a loop that has been entered: its iterations, and the one drawn. */
+      loop?: LoopShown;
     };
+
+/** A loop's iterations so far, and the one its node shows. */
+export interface LoopShown {
+  /** The scope the loop itself is in: with its name, what a pick is kept by. */
+  scope: Scope;
+  iterations: number[];
+  shown: number;
+  /** What the iteration shown ended with, once its exit condition said. */
+  outcome?: IterationOutcome;
+  /** The loop stopped without its exit condition met, whichever iteration is shown. */
+  failed: boolean;
+}
+
+/**
+ * The iteration to show for each loop the reader picked one for, by
+ * `loopKey`. A loop not in it shows its latest, and follows a live run.
+ */
+export type Picked = ReadonlyMap<string, number>;
+
+/** What a pick is kept by: the loop, and the scope it is in. */
+export function loopKey(loop: string, scope: Scope): string {
+  return addressKey(loop, scope);
+}
 
 /** A node as React Flow takes it: a child's position is relative to its parent's. */
 export interface GraphNode {
@@ -80,6 +111,12 @@ const CHAR_WIDTH = 7.5;
 const LEAF_PADDING = 110;
 /** A container's title bar, above its children. */
 export const CONTAINER_HEADER = 32;
+/** A loop's title bar once entered: the title, and a row to pick an iteration on. */
+export const LOOP_HEADER = 68;
+/** The widest a loop is made for its title bar alone; longer text is cut short. */
+const LOOP_MAX_WIDTH = 680;
+/** The controls of the row an iteration is picked on, before what it ended with. */
+const PICKER_WIDTH = 230;
 export const CONTAINER_PADDING = 16;
 const NODE_SEP = 32;
 const RANK_SEP = 40;
@@ -100,26 +137,25 @@ function levelId(scope: Scope): string | undefined {
   return last && containerNodeId(last[0], scope.slice(0, -1), last[1]);
 }
 
-/** The step a `tasks.` or `flows.` reference names; nothing for the rest. */
-export function referencedStep(value: string): string | undefined {
-  const match = /^(?:tasks|flows)\.([^.]+)/.exec(value);
-  return match?.[1];
-}
-
 /**
- * The graph of `steps` for what the run `done` so far: nodes for every step
- * instance, containers around them, edges for the references between them,
- * all positioned.
+ * The graph of `steps` for what the run `done` so far: a node for every
+ * step, in every branch of a fan-out and in one iteration of a loop, the
+ * containers around them, edges for the references between them, all
+ * positioned. Each loop shows the iteration `picked` for it, or its latest.
  */
-export function runGraph(steps: StepNode[], done: Published): Graph {
+export function runGraph(
+  steps: StepNode[],
+  done: Published,
+  picked: Picked = new Map(),
+): Graph {
   const state: Build = {
     done,
+    picked,
     leaves: leafPaths(steps),
     nodes: [],
     byId: new Map(),
     edges: new Map(),
     levelEdges: new Map(),
-    loops: new Map(),
     fanOuts: new Map(),
   };
   const level = build(state, steps, [], undefined);
@@ -146,6 +182,7 @@ interface End {
 
 interface Build {
   done: Published;
+  picked: Picked;
   /** The containers around each task or sub-flow step, outermost first. */
   leaves: Map<string, Container[]>;
   nodes: GraphNode[];
@@ -157,8 +194,6 @@ interface Build {
    * container, between the members holding its ends.
    */
   levelEdges: Map<string | undefined, [string, string][]>;
-  /** By level, each loop's iteration nodes in order, to stack them top to bottom. */
-  loops: Map<string | undefined, string[][]>;
   /** By level, each fan-out's branch nodes in order, to keep them left to right. */
   fanOuts: Map<string | undefined, string[][]>;
 }
@@ -189,10 +224,32 @@ function leafSize(name: string, sub: string): { width: number; height: number } 
 }
 
 /**
+ * The iteration of the loop at `scope` to show: the one picked, if the loop
+ * got that far, else its latest; 0 for a loop not entered yet.
+ */
+function shownIteration(state: Build, loop: string, scope: Scope): number {
+  const iterations = instancesOf(loop, scope, state.done.addresses);
+  const picked = state.picked.get(loopKey(loop, scope));
+  if (picked !== undefined && iterations.includes(picked)) return picked;
+  return lastIteration(loop, scope, state.done.addresses);
+}
+
+/**
+ * The instances of a container at `scope` that get a node: every branch of
+ * a fan-out, the one iteration shown of a loop; 0 alone for one not entered.
+ */
+function drawn(state: Build, { name, kind }: Container, scope: Scope): number[] {
+  if (kind === "loop") return [shownIteration(state, name, scope)];
+  const branches = instancesOf(name, scope, state.done.addresses);
+  return branches.length === 0 ? [0] : branches;
+}
+
+/**
  * Add the nodes of `steps` at `scope`, under `parentId`, with the edges into
  * them; gives the ids of the nodes at this level, for laying it out. A
- * container becomes one node per instance, each holding a level of its own,
- * laid out at once so the container's size is known here.
+ * fan-out becomes one node per branch and a loop one node, for the iteration
+ * shown, each holding a level of its own, laid out at once so the
+ * container's size is known here.
  */
 function build(
   state: Build,
@@ -256,16 +313,16 @@ function build(
       }
       case "loop":
       case "fan_out": {
-        const instances = instancesOf(step.name, scope, state.done.addresses);
         const what = step.kind === "loop" ? "iteration" : "branch";
         const about =
           step.kind === "loop"
             ? `loop, at most ${step.maxCycles}, until ${step.exitCondition}`
             : `fan-out ${step.over}`;
         const ids: string[] = [];
-        for (const n of instances.length === 0 ? [0] : instances) {
+        for (const n of drawn(state, step, scope)) {
           const id = containerNodeId(step.name, scope, n);
           const instance = n === 0 ? "not entered yet" : `${what} ${n}`;
+          const loop = step.kind === "loop" && n !== 0 ? loopShown(state, step, scope, n) : undefined;
           const node: GraphNode = {
             id,
             type: "container",
@@ -279,6 +336,7 @@ function build(
               about,
               instance,
               entered: n !== 0,
+              ...(loop && { loop }),
             },
           };
           place(node);
@@ -289,11 +347,20 @@ function build(
           }
           const inner = build(state, step.children, [...scope, [step.name, n]], id);
           const size = layoutLevel(state, inner, id);
-          node.width = Math.max(size.width, leafSize(`${step.name} ${instance}`, about).width);
+          node.width = Math.max(
+            size.width,
+            leafSize(`${step.name} ${instance}`, about).width,
+            loop ? pickerWidth(loop) : 0,
+          );
           node.height = size.height;
+          // A title bar wider than what it holds: its children go in the middle.
+          for (const child of inner) {
+            state.byId.get(child)!.position.x += (node.width - size.width) / 2;
+          }
         }
-        const chains = step.kind === "loop" ? state.loops : state.fanOuts;
-        chains.set(parentId, [...(chains.get(parentId) ?? []), ids]);
+        if (step.kind === "fan_out") {
+          state.fanOuts.set(parentId, [...(state.fanOuts.get(parentId) ?? []), ids]);
+        }
         break;
       }
     }
@@ -301,15 +368,44 @@ function build(
   return level;
 }
 
+/** What a loop's node shows of the loop at `scope`, drawn at iteration `n`. */
+function loopShown(
+  state: Build,
+  loop: Extract<StepNode, { kind: "loop" }>,
+  scope: Scope,
+  n: number,
+): LoopShown {
+  const outcome = iterationOutcome(loop, scope, n, state.done);
+  return {
+    scope,
+    iterations: instancesOf(loop.name, scope, state.done.addresses),
+    shown: n,
+    ...(outcome && { outcome }),
+    failed: loopFailed(loop, scope, state.done),
+  };
+}
+
+/** The room a loop's title bar takes for picking an iteration and what it ended with. */
+function pickerWidth(loop: LoopShown): number {
+  const outcome = loop.outcome ? CHAR_WIDTH * loop.outcome.text.length : 0;
+  return Math.min(LOOP_MAX_WIDTH, 2 * CONTAINER_PADDING + PICKER_WIDTH + outcome);
+}
+
+/** The height of the title bar of the container node `id`; none for the roots. */
+function headerOf(state: Build, id: string | undefined): number {
+  if (id === undefined) return 0;
+  const data = state.byId.get(id)?.data;
+  return data?.kind === "container" && data.loop ? LOOP_HEADER : CONTAINER_HEADER;
+}
+
 /**
  * Edges into `target` from the steps `params` refer to, `scope` being the
  * consumer's. The core resolves a reference to what the flows spec says,
- * "Resolving references"; this draws one edge per instance it reaches, with
- * one economy: a consumer inside a loop is fed by the iterations so far, and
- * the graph joins it to its own iteration's and the one before, which the
- * iteration before feeds in turn. The chain says "so far" in as many edges
- * as iterations rather than half their square, which a loop of hundreds of
- * iterations would turn into tens of thousands.
+ * "Resolving references": a list of every branch of a fan-out the consumer
+ * is outside of, and of every iteration of a loop, so far or in all. This
+ * draws one edge per node the reference reaches: every branch, and of a
+ * loop the one iteration shown, which stands for the loop. What a step
+ * received from the other iterations is in its details, in its params.
  */
 function refer(
   state: Build,
@@ -329,39 +425,26 @@ function refer(
   }
 }
 
-/** The scopes a reference from `scope` reaches, for a step under `path`. */
+/** The scopes with a node that a reference from `scope` reaches, for a step under `path`. */
 function sourceScopes(state: Build, path: Container[], scope: Scope): Scope[] {
-  // Each candidate carries whether it is still the start of the consumer's own scope.
-  let candidates: { reached: Scope; onPath: boolean }[] = [{ reached: [], onPath: true }];
-  path.forEach(({ name, kind }, depth) => {
+  let reached: Scope[] = [[]];
+  path.forEach((container, depth) => {
     const own = scope[depth];
-    // Inside: the consumer is within this container too, by name; at an
-    // earlier iteration of a loop around both, that is another instance.
+    // Inside: the consumer is within this container too, and so in the same
+    // branch or iteration of it, the only one of a loop that has nodes.
     const inside =
       own !== undefined &&
-      own[0] === name &&
+      own[0] === container.name &&
       scope.slice(0, depth).every(([c], i) => path[i]?.name === c);
-    candidates = candidates.flatMap(({ reached, onPath }) => {
-      const instances = instancesOf(name, reached, state.done.addresses);
-      let numbers: number[];
-      if (inside && kind === "fan_out") {
-        // The consumer's own branch, wherever the loops around both are.
-        numbers = [own[1]];
-      } else if (inside && onPath) {
-        // The iterations so far: this one and the one before, see `refer`.
-        numbers = [own[1] - 1, own[1]].filter((n) => n === own[1] || instances.includes(n));
-      } else {
-        // Every branch, or every iteration a loop ran, where the consumer is
-        // outside it or in an earlier iteration of a loop around it.
-        numbers = instances.length === 0 ? [0] : instances;
-      }
-      return numbers.map((n) => ({
-        reached: [...reached, [name, n]] as Scope,
-        onPath: onPath && inside && n === own[1],
-      }));
-    });
+    reached = reached.flatMap((so) =>
+      // Its own branch or iteration; from outside, every branch, and the
+      // iteration shown of a loop.
+      (inside ? [own[1]] : drawn(state, container, so)).map(
+        (n) => [...so, [container.name, n]] as Scope,
+      ),
+    );
   });
-  return candidates.map((candidate) => candidate.reached);
+  return reached;
 }
 
 /** Record an edge, once per pair of ends, and at the level that lays it out. */
@@ -422,13 +505,12 @@ function layoutLevel(
   for (const [source, target] of between(state.levelEdges.get(parentId) ?? [])) {
     graph.setEdge(source, target);
   }
-  for (const [id, next] of between(pairs(state.loops.get(parentId)))) graph.setEdge(id, next);
   const constraints = between(pairs(state.fanOuts.get(parentId))).map(([left, right]) => ({
     left,
     right,
   }));
   dagre.layout(graph, { constraints });
-  const header = parentId === undefined ? 0 : CONTAINER_HEADER;
+  const header = headerOf(state, parentId);
   let width = 2 * margin;
   let height = 2 * margin + header;
   for (const id of level) {

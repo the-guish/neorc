@@ -320,6 +320,47 @@ button.link {
   text-overflow: ellipsis;
 }
 
+/* A loop that stopped without its exit condition met. */
+.graph-failed {
+  border-style: solid;
+  border-color: var(--bad);
+}
+
+/* The row of a loop's title bar an iteration is picked on. */
+.graph-picker {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  height: 32px;
+  padding: 0 0.75rem;
+  white-space: nowrap;
+}
+
+.graph-picker button {
+  padding: 0 0.5rem;
+  line-height: 1.5;
+}
+
+.graph-picker button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.graph-picker select {
+  padding: 0 0.2rem;
+}
+
+.graph-outcome {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.graph-outcome-failed,
+.loop-outcome-failed {
+  color: var(--bad);
+}
+
 .dot {
   flex: none;
   width: 0.6rem;
@@ -833,6 +874,15 @@ td.num {
 
 .step {
   margin: 0;
+}
+
+.container-card.loop-failed {
+  border-color: var(--bad);
+}
+
+.loop-outcome {
+  margin: 0.25rem 0 0;
+  font-size: 0.85rem;
 }
 
 .instance {

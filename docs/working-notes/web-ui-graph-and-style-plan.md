@@ -264,6 +264,13 @@ Pure functions in `src/graph.ts`, no React, tested against the recorded run.
 - One node per step instance, in parent nodes per iteration or branch,
   rather than one node per step with the instances listed inside: the
   reader wants to see a run's shape, and the instances are the shape.
+  Revisited for loops: a loop of six iterations came out as six boxes in a
+  staircase, which read as six different things and hid that the run failed
+  on the loop itself. A loop is now one box showing one iteration, the
+  latest unless another is picked on it, and says what its exit condition
+  returned; a fan-out keeps a box per branch, since branches run side by
+  side and that is its shape. The picks are the view's state, not in the
+  address.
 - The outline stays, as a second view, not beside the graph: one main area,
   a switch, the choice kept in the route and remembered.
 - The look is taken from the screenshots as style and layout only. Columns

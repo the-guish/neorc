@@ -30,6 +30,16 @@ describe("RunPage on a recorded word_picker_rounds run", () => {
       );
     }
     expect(screen.queryByRole("region", { name: "runs iteration 3" })).not.toBeInTheDocument();
+    // The steps in the order they run, not the sorted order of the stored keys.
+    expect(
+      [...(document.querySelector(".tree")?.children ?? [])].map(
+        (step) => step.querySelector("strong")?.textContent,
+      ),
+    ).toEqual(["runs", "final_words", "decorate", "report"]);
+    // What the loop came to, read from its exit condition.
+    expect(
+      screen.getByText("iteration 2: ran_enough returned true: the loop ended here"),
+    ).toBeInTheDocument();
 
     // The fan-out has a branch per word, each with the nested loop's iterations.
     for (const branch of [1, 2]) {
@@ -199,22 +209,26 @@ describe("cancelling a run", () => {
 });
 
 describe("the graph view", () => {
-  it("draws a node per step instance in its iteration or branch, edges between them", async () => {
+  it("draws a node per step, a loop once at its latest iteration, edges between them", async () => {
     mockApi(recordedRoutes());
     const { run, sub_runs } = RECORDED;
 
     renderWithClient(<RunPage id={run.id} view="graph" />);
 
     const canvas = await screen.findByLabelText("Run graph");
-    await waitFor(() => expect(canvas.querySelectorAll(".react-flow__node")).toHaveLength(22));
-    await waitFor(() => expect(canvas.querySelectorAll(".react-flow__edge")).toHaveLength(17));
-    expect(within(canvas).getAllByText("picker")).toHaveLength(2);
-    expect(within(canvas).getAllByText("pad")).toHaveLength(4);
-    // runs iteration 1, and padding iteration 1 in each of decorate's two branches.
-    expect(within(canvas).getAllByText("iteration 1")).toHaveLength(3);
+    await waitFor(() => expect(canvas.querySelectorAll(".react-flow__node")).toHaveLength(13));
+    await waitFor(() => expect(canvas.querySelectorAll(".react-flow__edge")).toHaveLength(8));
+    // Each loop went round twice and is one box: runs, and padding in each branch.
+    expect(within(canvas).getAllByText("picker")).toHaveLength(1);
+    expect(within(canvas).getAllByText("pad")).toHaveLength(2);
+    expect(within(canvas).getByLabelText("runs: iteration shown")).toHaveValue("2");
+    for (const shown of within(canvas).getAllByLabelText("padding: iteration shown")) {
+      expect(shown).toHaveValue("2");
+    }
+    expect(within(canvas).getByText("ran_enough returned true: the loop ended here")).toBeInTheDocument();
     expect(within(canvas).getAllByText("branch 2")).toHaveLength(1);
     expect(within(canvas).getAllByText("fan-out over tasks.final_words")).toHaveLength(2);
-    expect(within(canvas).getAllByLabelText("succeeded")).toHaveLength(14);
+    expect(within(canvas).getAllByLabelText("succeeded")).toHaveLength(8);
     expect(within(canvas).getByRole("link", { name: `run ${shortId(sub_runs[1]!.id)}` })).toHaveAttribute(
       "href",
       `#/runs/${sub_runs[1]!.id}`,
@@ -243,6 +257,103 @@ describe("the graph view", () => {
 
     fireEvent.click(within(panel).getByRole("button", { name: "Close" }));
     expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+  });
+
+  it("shows another iteration of a loop when it is picked", async () => {
+    mockApi(recordedRoutes());
+    const { run, sub_runs } = RECORDED;
+
+    renderWithClient(<RunPage id={run.id} view="graph" />);
+    const canvas = await screen.findByLabelText("Run graph");
+    await within(canvas).findByLabelText("runs: iteration shown");
+    const previous = () => within(canvas).getByRole("button", { name: "runs: previous iteration" });
+    const next = () => within(canvas).getByRole("button", { name: "runs: next iteration" });
+    const subRun = (n: number) =>
+      within(canvas).queryByRole("link", { name: `run ${shortId(sub_runs[n]!.id)}` });
+
+    // The latest of the two: nothing after it.
+    expect(next()).toBeDisabled();
+    expect(subRun(1)).toBeInTheDocument();
+
+    fireEvent.click(previous());
+
+    await waitFor(() => expect(subRun(0)).toBeInTheDocument());
+    expect(subRun(1)).not.toBeInTheDocument();
+    expect(within(canvas).getByLabelText("runs: iteration shown")).toHaveValue("1");
+    expect(previous()).toBeDisabled();
+    expect(
+      within(canvas).getByText("ran_enough returned false: iteration 2 followed"),
+    ).toBeInTheDocument();
+    // The other loops stay where they were, and the graph has as many nodes.
+    for (const padding of within(canvas).getAllByLabelText("padding: iteration shown")) {
+      expect(padding).toHaveValue("2");
+    }
+    expect(canvas.querySelectorAll(".react-flow__node")).toHaveLength(13);
+
+    // By its number, too.
+    fireEvent.change(within(canvas).getByLabelText("runs: iteration shown"), {
+      target: { value: "2" },
+    });
+    await waitFor(() => expect(subRun(1)).toBeInTheDocument());
+    expect(within(canvas).getByLabelText("runs: iteration shown")).toHaveValue("2");
+    expect(next()).toBeDisabled();
+  });
+
+  it("keeps a task's details open on the iteration picked", async () => {
+    mockApi(recordedRoutes());
+    const { run } = RECORDED;
+
+    renderWithClient(<RunPage id={run.id} view="graph" />);
+    const canvas = await screen.findByLabelText("Run graph");
+    fireEvent.click(await within(canvas).findByText("ran_enough"));
+
+    const panel = await screen.findByRole("complementary", { name: "ran_enough details" });
+    expect(within(panel).getByText("runs 2")).toBeInTheDocument();
+    expect(within(panel).getByText("true")).toBeInTheDocument();
+
+    fireEvent.click(within(canvas).getByRole("button", { name: "runs: previous iteration" }));
+
+    const moved = await screen.findByRole("complementary", { name: "ran_enough details" });
+    await waitFor(() => expect(within(moved).getByText("runs 1")).toBeInTheDocument());
+    expect(within(moved).getByText("false")).toBeInTheDocument();
+  });
+
+  it("marks a loop that used up its iterations", async () => {
+    const { run, tasks } = RECORDED;
+    // The loop of at most 4 never told to stop: four iterations, the exit condition false.
+    const exit = tasks.find((task) => task.address.step === "ran_enough")!;
+    const never = [1, 2, 3, 4].map((n) => ({
+      ...exit,
+      id: `${exit.id}-${n}`,
+      address: { step: "ran_enough", scope: [["runs", n]] as [string, number][] },
+      result: false,
+    }));
+    mockApi({
+      ...recordedRoutes(),
+      [`/runs/${run.id}`]: {
+        ...run,
+        status: "failed" as const,
+        output: null,
+        reason: "runs: still not done after max_cycles, 4 iterations",
+      },
+      [`/runs/${run.id}/tasks`]: { tasks: never },
+      [`/runs/${run.id}/sub-runs`]: { runs: [] },
+    });
+
+    const graph = renderWithClient(<RunPage id={run.id} view="graph" />);
+    const canvas = await screen.findByLabelText("Run graph");
+    const outcome = await within(canvas).findByText(
+      "ran_enough returned false on the last of 4 iterations",
+    );
+    expect(outcome.closest(".graph-container")).toHaveClass("graph-failed");
+    expect(within(canvas).getByLabelText("runs: iteration shown")).toHaveValue("4");
+    graph.unmount();
+
+    renderWithClient(<RunPage id={run.id} view="outline" />);
+    const said = await screen.findByText(
+      "iteration 4: ran_enough returned false on the last of 4 iterations",
+    );
+    expect(said.closest(".card")).toHaveClass("loop-failed");
   });
 
   it("draws a run that has published nothing yet, containers not entered", async () => {

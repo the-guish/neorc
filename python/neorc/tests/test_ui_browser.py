@@ -188,14 +188,24 @@ async def test_a_run_is_started_watched_and_another_cancelled_in_the_browser(
     await expect(report).to_contain_text("potato**")
     await expect(report).to_contain_text("tomate**")
 
-    # The same run as a graph: a node per step instance, the fan-out's
-    # branches side by side, zoomable, a task's details from its node.
+    # The same run as a graph: a node per step, the fan-out's branches side
+    # by side, zoomable, a task's details from its node.
     await page.get_by_role("link", name="Graph").click()
     canvas = page.get_by_label("Run graph")
     await expect(canvas.get_by_text("branch 1", exact=True)).to_be_visible()
     await expect(canvas.get_by_text("branch 2", exact=True)).to_be_visible()
-    await expect(canvas.locator(".react-flow__node")).to_have_count(22)
-    await expect(canvas.locator(".react-flow__edge")).to_have_count(17)
+    await expect(canvas.locator(".react-flow__node")).to_have_count(13)
+    await expect(canvas.locator(".react-flow__edge")).to_have_count(8)
+    # A loop is one box, at its latest iteration; an earlier one when picked.
+    shown = canvas.get_by_label("runs: iteration shown")
+    await expect(shown).to_have_value("2")
+    ended = "ran_enough returned true: the loop ended here"
+    await expect(canvas.get_by_text(ended)).to_be_visible()
+    await canvas.get_by_role("button", name="runs: previous iteration").click()
+    await expect(shown).to_have_value("1")
+    went_on = "ran_enough returned false: iteration 2 followed"
+    await expect(canvas.get_by_text(went_on)).to_be_visible()
+    await expect(canvas.locator(".react-flow__node")).to_have_count(13)
     await canvas.get_by_text("report", exact=True).click()
     panel = page.get_by_role("complementary", name="report details")
     await expect(panel).to_contain_text("potato**")
@@ -206,6 +216,10 @@ async def test_a_run_is_started_watched_and_another_cancelled_in_the_browser(
     before = await viewport.get_attribute("style")
     await canvas.get_by_role("button", name="Zoom Out").click()
     await expect(viewport).not_to_have_attribute("style", before or "")
+    # And fitting the view brings them back, after the graph has changed.
+    zoomed_out = await viewport.get_attribute("style")
+    await canvas.get_by_role("button", name="Fit View").click()
+    await expect(viewport).not_to_have_attribute("style", zoomed_out or "")
     # Back to the outline, which the next run opens with: the choice is kept.
     await page.get_by_role("link", name="Outline").click()
     await expect(page.get_by_role("region", name="decorate branch 2")).to_be_visible()

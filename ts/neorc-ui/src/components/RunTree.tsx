@@ -1,6 +1,7 @@
 import {
   addressKey,
   instancesOf,
+  iterationOutcome,
   type Published,
   type Scope,
   type StepNode,
@@ -120,13 +121,26 @@ function Container({
     step.kind === "loop"
       ? `loop, at most ${step.maxCycles}, until ${step.exitCondition}`
       : `fan-out ${step.over}`;
+  // What the loop came to, from its latest iteration: it ended, or gave up.
+  const last = instances[instances.length - 1];
+  const outcome =
+    step.kind === "loop" && last !== undefined
+      ? iterationOutcome(step, scope, last, done)
+      : undefined;
   return (
-    <div className={`card container-card${instances.length === 0 ? " not-yet" : ""}`}>
+    <div
+      className={`card container-card${instances.length === 0 ? " not-yet" : ""}${outcome?.failed ? " loop-failed" : ""}`}
+    >
       <div className="step-line">
         <span className="step-text">
           <strong>{step.name}</strong> <span className="muted">{about}</span>
         </span>
       </div>
+      {outcome && (
+        <p className={`loop-outcome ${outcome.failed ? "loop-outcome-failed" : "muted"}`}>
+          iteration {last}: {outcome.text}
+        </p>
+      )}
       {instances.length === 0 ? (
         <section className="instance not-yet">
           <h4 className="muted">not entered yet</h4>

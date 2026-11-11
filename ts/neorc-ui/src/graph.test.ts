@@ -3,20 +3,32 @@ import { describe, expect, it } from "vitest";
 import { published, stepsOf } from "./definition";
 import {
   CONTAINER_HEADER,
+  LOOP_HEADER,
   containerNodeId,
-  referencedStep,
+  loopKey,
   runGraph,
   stepNodeId,
   type Graph,
   type GraphNode,
+  type Picked,
 } from "./graph";
 import type { Task } from "./api";
 import { SPLIT } from "./test/fixtures";
 import { RECORDED } from "./test/recorded";
 
-function recordedGraph(): Graph {
+function recordedGraph(picked?: Picked): Graph {
   const { flows, tasks, sub_runs } = RECORDED;
-  return runGraph(stepsOf(flows["word_picker_rounds"]?.content), published(tasks, sub_runs));
+  return runGraph(
+    stepsOf(flows["word_picker_rounds"]?.content),
+    published(tasks, sub_runs),
+    picked,
+  );
+}
+
+/** What a container's node says of the loop it draws. */
+function loopOf(graph: Graph, id: string) {
+  const data = node(graph, id).data;
+  return data.kind === "container" ? data.loop : undefined;
 }
 
 function node(graph: Graph, id: string): GraphNode {
@@ -39,42 +51,96 @@ function overlap(a: GraphNode, b: GraphNode): boolean {
 }
 
 describe("runGraph on the recorded word_picker_rounds run", () => {
-  it("has one node per step instance, nested in a node per iteration or branch", () => {
+  it("has one node per step, in each branch of a fan-out and in a loop's latest iteration", () => {
     const graph = recordedGraph();
 
-    expect(graph.nodes).toHaveLength(22);
-    const runs1 = node(graph, containerNodeId("runs", [], 1));
-    expect(runs1.data).toMatchObject({
+    // The loop ran twice and is drawn once, as its second iteration.
+    expect(graph.nodes).toHaveLength(13);
+    expect(graph.nodes.some((n) => n.id === containerNodeId("runs", [], 1))).toBe(false);
+    const runs = node(graph, containerNodeId("runs", [], 2));
+    expect(runs.data).toMatchObject({
       kind: "container",
       container: "loop",
-      instance: "iteration 1",
+      instance: "iteration 2",
       entered: true,
       about: "loop, at most 4, until ran_enough",
+      loop: {
+        scope: [],
+        iterations: [1, 2],
+        shown: 2,
+        outcome: { text: "ran_enough returned true: the loop ended here", failed: false },
+        failed: false,
+      },
     });
-    expect(runs1.parentId).toBeUndefined();
-    const picker1 = node(graph, stepNodeId("picker", [["runs", 1]]));
-    expect(picker1).toMatchObject({ type: "flow", parentId: runs1.id, extent: "parent" });
-    expect(picker1.data).toMatchObject({
+    expect(runs.parentId).toBeUndefined();
+    const picker = node(graph, stepNodeId("picker", [["runs", 2]]));
+    expect(picker).toMatchObject({ type: "flow", parentId: runs.id, extent: "parent" });
+    expect(picker.data).toMatchObject({
       kind: "flow",
       flow: "word_picker",
       status: "succeeded",
-      run: { id: RECORDED.sub_runs[0]?.id },
+      run: { id: RECORDED.sub_runs[1]?.id },
     });
-    const pad = node(graph, stepNodeId("pad", [["decorate", 2], ["padding", 1]]));
+    // Both branches of the fan-out, each with the loop inside it at its latest.
+    const pad = node(graph, stepNodeId("pad", [["decorate", 2], ["padding", 2]]));
     expect(pad).toMatchObject({
       type: "task",
-      parentId: containerNodeId("padding", [["decorate", 2]], 1),
+      parentId: containerNodeId("padding", [["decorate", 2]], 2),
     });
     expect(pad.data).toMatchObject({ kind: "task", handler: "tasks:pad", status: "succeeded" });
     expect(pad.data.kind === "task" && pad.data.task?.address).toEqual({
       step: "pad",
-      scope: [["decorate", 2], ["padding", 1]],
+      scope: [["decorate", 2], ["padding", 2]],
     });
     expect(pad.data.kind === "task" && pad.data.duration).toMatch(/ms$/);
-    expect(node(graph, containerNodeId("padding", [["decorate", 2]], 1)).parentId).toBe(
+    expect(node(graph, containerNodeId("padding", [["decorate", 2]], 2)).parentId).toBe(
       containerNodeId("decorate", [], 2),
     );
+    expect(loopOf(graph, containerNodeId("padding", [["decorate", 1]], 2))).toMatchObject({
+      scope: [["decorate", 1]],
+      iterations: [1, 2],
+      shown: 2,
+    });
+    // A fan-out's branch has no iterations to pick from.
+    expect(loopOf(graph, containerNodeId("decorate", [], 1))).toBeUndefined();
     expect(node(graph, stepNodeId("report", [])).parentId).toBeUndefined();
+  });
+
+  it("draws the iteration picked for a loop, each loop apart", () => {
+    const graph = recordedGraph(
+      new Map([
+        [loopKey("runs", []), 1],
+        [loopKey("padding", [["decorate", 2]]), 1],
+      ]),
+    );
+
+    expect(graph.nodes).toHaveLength(13);
+    expect(loopOf(graph, containerNodeId("runs", [], 1))).toMatchObject({
+      iterations: [1, 2],
+      shown: 1,
+      outcome: { text: "ran_enough returned false: iteration 2 followed", failed: false },
+      failed: false,
+    });
+    const picker = node(graph, stepNodeId("picker", [["runs", 1]]));
+    expect(picker.data.kind === "flow" && picker.data.run?.id).toBe(RECORDED.sub_runs[0]?.id);
+    // The loop in the second branch at its first iteration, the first branch's at its latest.
+    expect(node(graph, stepNodeId("pad", [["decorate", 2], ["padding", 1]])).parentId).toBe(
+      containerNodeId("padding", [["decorate", 2]], 1),
+    );
+    expect(node(graph, stepNodeId("pad", [["decorate", 1], ["padding", 2]])).parentId).toBe(
+      containerNodeId("padding", [["decorate", 1]], 2),
+    );
+    // What is after a loop is joined to the iteration shown.
+    expect(edgeIds(graph)).toContain(`${picker.id}->${stepNodeId("final_words", [])}`);
+    expect(edgeIds(graph)).toContain(
+      `${stepNodeId("pad", [["decorate", 2], ["padding", 1]])}->${stepNodeId("report", [])}`,
+    );
+  });
+
+  it("draws a loop's latest iteration when the one picked was never reached", () => {
+    const graph = recordedGraph(new Map([[loopKey("runs", []), 3]]));
+
+    expect(loopOf(graph, containerNodeId("runs", [], 2))).toMatchObject({ shown: 2 });
   });
 
   it("lists parents before their children, as React Flow requires", () => {
@@ -86,45 +152,36 @@ describe("runGraph on the recorded word_picker_rounds run", () => {
     }
   });
 
-  it("draws an edge from the step a param refers to, into the instance it resolves to", () => {
+  it("draws an edge from the step a param refers to, in the branches and the iteration drawn", () => {
     const graph = recordedGraph();
     const id = (source: string, target: string) => `${source}->${target}`;
-    const iteration = (n: number): [string, number][] => [["runs", n]];
-    const padding = (branch: number, n: number): [string, number][] => [
+    const runs: [string, number][] = [["runs", 2]];
+    const padding = (branch: number): [string, number][] => [
       ["decorate", branch],
-      ["padding", n],
+      ["padding", 2],
     ];
 
     expect(edgeIds(graph)).toEqual(
       [
-        // From inside the loop: the iterations so far, the consumer's own last.
-        id(stepNodeId("picker", iteration(1)), stepNodeId("ran_enough", iteration(1))),
-        id(stepNodeId("picker", iteration(1)), stepNodeId("ran_enough", iteration(2))),
-        id(stepNodeId("picker", iteration(2)), stepNodeId("ran_enough", iteration(2))),
-        // From after the loop: every iteration.
-        id(stepNodeId("picker", iteration(1)), stepNodeId("final_words", [])),
-        id(stepNodeId("picker", iteration(2)), stepNodeId("final_words", [])),
+        // Inside the loop: within the iteration drawn.
+        id(stepNodeId("picker", runs), stepNodeId("ran_enough", runs)),
+        // From after the loop: the iteration drawn stands for all of them.
+        id(stepNodeId("picker", runs), stepNodeId("final_words", [])),
         // What the fan-out iterates over feeds each branch.
         id(stepNodeId("final_words", []), containerNodeId("decorate", [], 1)),
         id(stepNodeId("final_words", []), containerNodeId("decorate", [], 2)),
-        // The same branch, the iterations so far of the loop inside it.
-        ...[1, 2].flatMap((branch) =>
-          [1, 2].flatMap((n) =>
-            [1, 2]
-              .filter((m) => m <= n)
-              .map((m) =>
-                id(stepNodeId("pad", padding(branch, m)), stepNodeId("long_enough", padding(branch, n))),
-              ),
-          ),
+        // The same branch, the loop inside it.
+        ...[1, 2].map((branch) =>
+          id(stepNodeId("pad", padding(branch)), stepNodeId("long_enough", padding(branch))),
         ),
-        // From outside the fan-out and the loop in it: every branch, every iteration.
-        ...[1, 2].flatMap((branch) =>
-          [1, 2].map((n) => id(stepNodeId("pad", padding(branch, n)), stepNodeId("report", []))),
+        // From outside the fan-out and the loop in it: every branch.
+        ...[1, 2].map((branch) =>
+          id(stepNodeId("pad", padding(branch)), stepNodeId("report", [])),
         ),
       ].sort(),
     );
     const report = graph.edges.filter((e) => e.target === stepNodeId("report", []));
-    expect(report.map((e) => e.params)).toEqual([["padded"], ["padded"], ["padded"], ["padded"]]);
+    expect(report.map((e) => e.params)).toEqual([["padded"], ["padded"]]);
     const decorate = graph.edges.find((e) => e.target === containerNodeId("decorate", [], 1));
     expect(decorate?.params).toEqual(["over"]);
   });
@@ -139,7 +196,13 @@ describe("runGraph on the recorded word_picker_rounds run", () => {
       expect(n.height).toBeGreaterThan(0);
       const bounds = n.parentId ? node(graph, n.parentId) : { width: graph.width, height: graph.height };
       expect(n.position.x).toBeGreaterThanOrEqual(0);
-      expect(n.position.y).toBeGreaterThanOrEqual(n.parentId ? CONTAINER_HEADER : 0);
+      // A loop's title bar is taller: it holds the row an iteration is picked on.
+      const header = !n.parentId
+        ? 0
+        : loopOf(graph, n.parentId)
+          ? LOOP_HEADER
+          : CONTAINER_HEADER;
+      expect(n.position.y).toBeGreaterThanOrEqual(header);
       expect(n.position.x + n.width).toBeLessThanOrEqual(bounds.width);
       expect(n.position.y + n.height).toBeLessThanOrEqual(bounds.height);
     }
@@ -152,15 +215,23 @@ describe("runGraph on the recorded word_picker_rounds run", () => {
     }
   });
 
-  it("stacks a loop's iterations top to bottom and a fan-out's branches side by side", () => {
+  it("draws a fan-out's branches side by side", () => {
     const graph = recordedGraph();
-    const runs1 = node(graph, containerNodeId("runs", [], 1));
-    const runs2 = node(graph, containerNodeId("runs", [], 2));
-    expect(runs2.position.y).toBeGreaterThanOrEqual(runs1.position.y + runs1.height);
     const branch1 = node(graph, containerNodeId("decorate", [], 1));
     const branch2 = node(graph, containerNodeId("decorate", [], 2));
     expect(branch1.position.y).toBe(branch2.position.y);
     expect(branch2.position.x).toBeGreaterThanOrEqual(branch1.position.x + branch1.width);
+  });
+
+  it("makes a loop wide enough for its title bar, its steps in the middle", () => {
+    const graph = recordedGraph();
+    const runs = node(graph, containerNodeId("runs", [], 2));
+    const inside = graph.nodes.filter((n) => n.parentId === runs.id);
+    const left = Math.min(...inside.map((n) => n.position.x));
+    const right = Math.max(...inside.map((n) => n.position.x + n.width));
+
+    expect(runs.width).toBeGreaterThan(right - left + 64);
+    expect(left).toBeCloseTo(runs.width - right);
   });
 
   it("draws a run that has published nothing yet with each container not entered", () => {
@@ -182,6 +253,7 @@ describe("runGraph on the recorded word_picker_rounds run", () => {
     );
     const runs = node(graph, containerNodeId("runs", [], 0));
     expect(runs.data).toMatchObject({ instance: "not entered yet", entered: false });
+    expect(loopOf(graph, runs.id)).toBeUndefined();
     const picker = node(graph, stepNodeId("picker", [["runs", 0]]));
     expect(picker.data).toMatchObject({ status: "none", duration: "" });
     expect(picker.data.kind === "flow" && picker.data.run).toBeUndefined();
@@ -198,46 +270,70 @@ describe("runGraph on the recorded word_picker_rounds run", () => {
 });
 
 describe("runGraph on the recorded word_picker sub-run", () => {
-  it("joins every instance a reference resolves to", () => {
+  const subGraph = (picked?: Picked): Graph => {
     const { flows, sub_runs, sub_run_tasks } = RECORDED;
     const sub = sub_runs[0]!;
-    const graph = runGraph(
+    return runGraph(
       stepsOf(flows["word_picker"]?.content),
       published(sub_run_tasks[sub.id] ?? [], []),
+      picked,
     );
-    const into = (target: string) =>
-      graph.edges.filter((e) => e.target === target).map((e) => e.source).sort();
+  };
+  const into = (graph: Graph, target: string) =>
+    graph.edges.filter((e) => e.target === target).map((e) => e.source).sort();
 
-    // In the loop, outside the fan-out nested in it: every branch, of the iterations so far.
-    expect(into(stepNodeId("collect_words", [["rounds", 1]]))).toEqual(
-      [1, 2, 3].map((branch) => stepNodeId("extract_word", [["rounds", 1], ["picking", branch]])),
+  it("joins every node a reference reaches", () => {
+    const graph = subGraph();
+
+    // The loop ran four times: its fourth iteration is the one drawn.
+    expect(loopOf(graph, containerNodeId("rounds", [], 4))).toMatchObject({
+      iterations: [1, 2, 3, 4],
+      shown: 4,
+      outcome: { text: "enough_rounds returned true: the loop ended here" },
+    });
+    // In the loop, outside the fan-out nested in it: every branch of the iteration.
+    expect(into(graph, stepNodeId("collect_words", [["rounds", 4]]))).toEqual(
+      [1, 2, 3].map((branch) => stepNodeId("extract_word", [["rounds", 4], ["picking", branch]])),
     );
-    expect(into(stepNodeId("collect_words", [["rounds", 2]]))).toEqual(
-      [1, 2].flatMap((round) =>
-        [1, 2, 3].map((branch) => stepNodeId("extract_word", [["rounds", round], ["picking", branch]])),
-      ),
-    );
-    // In the loop, a sibling: its own iteration and the one before, chained.
-    expect(into(stepNodeId("enough_rounds", [["rounds", 3]]))).toEqual(
-      [2, 3].map((round) => stepNodeId("collect_words", [["rounds", round]])),
-    );
-    expect(into(stepNodeId("enough_rounds", [["rounds", 1]]))).toEqual([
-      stepNodeId("collect_words", [["rounds", 1]]),
+    // In the loop, a sibling: in the same iteration.
+    expect(into(graph, stepNodeId("enough_rounds", [["rounds", 4]]))).toEqual([
+      stepNodeId("collect_words", [["rounds", 4]]),
     ]);
-    // After the loop: every iteration.
-    expect(into(stepNodeId("latest_round", []))).toEqual(
-      [1, 2, 3, 4].map((round) => stepNodeId("collect_words", [["rounds", round]])),
-    );
+    // After the loop: the iteration drawn.
+    expect(into(graph, stepNodeId("latest_round", []))).toEqual([
+      stepNodeId("collect_words", [["rounds", 4]]),
+    ]);
     // A fan-out over a range is fed by nothing.
-    expect(into(containerNodeId("grading", [], 2))).toEqual([]);
+    expect(into(graph, containerNodeId("grading", [], 2))).toEqual([]);
     // Outside a fan-out: every branch.
-    expect(into(stepNodeId("keep_matching_words", []))).toEqual(
+    expect(into(graph, stepNodeId("keep_matching_words", []))).toEqual(
       [1, 2, 3].map((branch) => stepNodeId("score_words", [["grading", branch]])),
     );
     // From deep inside, a step at the root.
-    expect(into(stepNodeId("pick_word", [["rounds", 3], ["picking", 2]]))).toEqual([
+    expect(into(graph, stepNodeId("pick_word", [["rounds", 4], ["picking", 2]]))).toEqual([
       stepNodeId("compose_payload", []),
     ]);
+  });
+
+  it("joins the iteration picked, and nothing of the others", () => {
+    const graph = subGraph(new Map([[loopKey("rounds", []), 2]]));
+
+    expect(loopOf(graph, containerNodeId("rounds", [], 2))).toMatchObject({
+      shown: 2,
+      outcome: { text: "enough_rounds returned false: iteration 3 followed", failed: false },
+    });
+    expect(into(graph, stepNodeId("collect_words", [["rounds", 2]]))).toEqual(
+      [1, 2, 3].map((branch) => stepNodeId("extract_word", [["rounds", 2], ["picking", branch]])),
+    );
+    expect(into(graph, stepNodeId("latest_round", []))).toEqual([
+      stepNodeId("collect_words", [["rounds", 2]]),
+    ]);
+    const ids = new Set(graph.nodes.map((n) => n.id));
+    expect([...ids].filter((id) => /rounds:[134]/.test(id))).toEqual([]);
+    for (const edge of graph.edges) {
+      expect(ids.has(edge.source), edge.id).toBe(true);
+      expect(ids.has(edge.target), edge.id).toBe(true);
+    }
   });
 });
 
@@ -248,7 +344,7 @@ describe("runGraph on nested containers", () => {
     address: { step, scope },
   });
 
-  it("joins a loop in an earlier iteration of the loop around it from every iteration", () => {
+  it("draws a loop inside a loop at its latest iteration of the outer one drawn", () => {
     const steps = stepsOf({
       steps: {
         outer: {
@@ -262,30 +358,43 @@ describe("runGraph on nested containers", () => {
         },
       },
     });
-    const tasks = [
-      ...[1, 2, 3].flatMap((n) => [
-        task("a", [["outer", 1], ["inner", n]]),
-        task("b", [["outer", 1], ["inner", n]]),
-      ]),
-      task("a", [["outer", 2], ["inner", 1]]),
-      task("b", [["outer", 2], ["inner", 1]]),
-    ];
-    const graph = runGraph(steps, published(tasks, []));
-
-    const into = (target: string) =>
-      graph.edges.filter((e) => e.target === target).map((e) => e.source).sort();
-    expect(into(stepNodeId("b", [["outer", 2], ["inner", 1]]))).toEqual(
+    const done = published(
       [
-        ...[1, 2, 3].map((n) => stepNodeId("a", [["outer", 1], ["inner", n]])),
-        stepNodeId("a", [["outer", 2], ["inner", 1]]),
-      ].sort(),
+        ...[1, 2, 3].flatMap((n) => [
+          task("a", [["outer", 1], ["inner", n]]),
+          task("b", [["outer", 1], ["inner", n]]),
+        ]),
+        task("a", [["outer", 2], ["inner", 1]]),
+        task("b", [["outer", 2], ["inner", 1]]),
+      ],
+      [],
     );
-    expect(into(stepNodeId("b", [["outer", 1], ["inner", 3]]))).toEqual(
-      [2, 3].map((n) => stepNodeId("a", [["outer", 1], ["inner", n]])),
-    );
+    const ids = (picked?: Picked) => runGraph(steps, done, picked).nodes.map((n) => n.id).sort();
+    const drawn = (outer: number, inner: number) =>
+      [
+        containerNodeId("outer", [], outer),
+        containerNodeId("inner", [["outer", outer]], inner),
+        stepNodeId("a", [["outer", outer], ["inner", inner]]),
+        stepNodeId("b", [["outer", outer], ["inner", inner]]),
+      ].sort();
+
+    expect(ids()).toEqual(drawn(2, 1));
+    // The inner loop went round three times in the outer loop's first iteration.
+    expect(ids(new Map([[loopKey("outer", []), 1]]))).toEqual(drawn(1, 3));
+    // A pick for the inner loop is for it in one iteration of the outer one.
+    const inner2 = new Map([
+      [loopKey("outer", []), 1],
+      [loopKey("inner", [["outer", 1]]), 2],
+    ]);
+    expect(ids(inner2)).toEqual(drawn(1, 2));
+    expect(ids(new Map([[loopKey("inner", [["outer", 1]]), 2]]))).toEqual(drawn(2, 1));
+    const graph = runGraph(steps, done, inner2);
+    expect(graph.edges.map((e) => e.id)).toEqual([
+      `${stepNodeId("a", [["outer", 1], ["inner", 2]])}->${stepNodeId("b", [["outer", 1], ["inner", 2]])}`,
+    ]);
   });
 
-  it("leaves out a branch an earlier iteration never had", () => {
+  it("draws the branches a fan-out had in the iteration drawn", () => {
     const steps = stepsOf({
       steps: {
         rounds: {
@@ -299,43 +408,83 @@ describe("runGraph on nested containers", () => {
         },
       },
     });
-    const tasks = [
-      ...[1, 2].flatMap((branch) => [
-        task("a", [["rounds", 1], ["picking", branch]]),
-        task("b", [["rounds", 1], ["picking", branch]]),
-      ]),
-      ...[1, 2, 3].flatMap((branch) => [
-        task("a", [["rounds", 2], ["picking", branch]]),
-        task("b", [["rounds", 2], ["picking", branch]]),
-      ]),
-    ];
-    const graph = runGraph(steps, published(tasks, []));
+    const done = published(
+      [
+        ...[1, 2].flatMap((branch) => [
+          task("a", [["rounds", 1], ["picking", branch]]),
+          task("b", [["rounds", 1], ["picking", branch]]),
+        ]),
+        ...[1, 2, 3].flatMap((branch) => [
+          task("a", [["rounds", 2], ["picking", branch]]),
+          task("b", [["rounds", 2], ["picking", branch]]),
+        ]),
+      ],
+      [],
+    );
+    const branches = (graph: Graph) =>
+      graph.nodes.filter((n) => n.data.kind === "container" && n.data.container === "fan_out");
 
-    const ids = new Set(graph.nodes.map((n) => n.id));
-    for (const edge of graph.edges) {
-      expect(ids.has(edge.source), edge.id).toBe(true);
-      expect(ids.has(edge.target), edge.id).toBe(true);
-    }
-    const into = (target: string) =>
-      graph.edges.filter((e) => e.target === target).map((e) => e.source).sort();
-    expect(into(stepNodeId("b", [["rounds", 2], ["picking", 3]]))).toEqual([
-      stepNodeId("a", [["rounds", 2], ["picking", 3]]),
-    ]);
-    expect(into(stepNodeId("b", [["rounds", 2], ["picking", 2]]))).toEqual([
-      stepNodeId("a", [["rounds", 1], ["picking", 2]]),
-      stepNodeId("a", [["rounds", 2], ["picking", 2]]),
-    ]);
+    const latest = runGraph(steps, done);
+    expect(branches(latest).map((n) => n.id)).toEqual(
+      [1, 2, 3].map((branch) => containerNodeId("picking", [["rounds", 2]], branch)),
+    );
+    expect(latest.edges.map((e) => e.id).sort()).toEqual(
+      [1, 2, 3].map(
+        (branch) =>
+          `${stepNodeId("a", [["rounds", 2], ["picking", branch]])}->${stepNodeId("b", [["rounds", 2], ["picking", branch]])}`,
+      ),
+    );
+    const first = runGraph(steps, done, new Map([[loopKey("rounds", []), 1]]));
+    expect(branches(first).map((n) => n.id)).toEqual(
+      [1, 2].map((branch) => containerNodeId("picking", [["rounds", 1]], branch)),
+    );
   });
-});
 
-describe("referencedStep", () => {
-  it("names the step of a tasks. or flows. reference, and nothing else", () => {
-    expect(referencedStep("tasks.pick_word")).toBe("pick_word");
-    expect(referencedStep("flows.picker")).toBe("picker");
-    expect(referencedStep("tasks.pick_word.field")).toBe("pick_word");
-    expect(referencedStep("inputs.sentence")).toBeUndefined();
-    expect(referencedStep("neorc.item")).toBeUndefined();
-    expect(referencedStep("tasks.")).toBeUndefined();
-    expect(referencedStep("")).toBeUndefined();
+  it("marks a loop that used its iterations up without its exit condition met", () => {
+    const steps = stepsOf({
+      steps: {
+        trying: {
+          loop: { max_cycles: 2, exit_condition: "done" },
+          steps: { done: { handler: "t:done" } },
+        },
+      },
+    });
+    const exit = (n: number, result: unknown): Task => ({
+      ...task("done", [["trying", n]]),
+      status: "succeeded",
+      result,
+    });
+    const loop = (tasks: Task[], picked?: Picked) => {
+      const graph = runGraph(steps, published(tasks, []), picked);
+      return graph.nodes.flatMap((n) => (n.data.kind === "container" && n.data.loop) || []);
+    };
+
+    expect(loop([exit(1, false), exit(2, false)])).toMatchObject([
+      {
+        shown: 2,
+        outcome: { text: "done returned false on the last of 2 iterations", failed: true },
+        failed: true,
+      },
+    ]);
+    // The loop is marked whichever iteration is drawn; the iteration says its own end.
+    expect(loop([exit(1, false), exit(2, false)], new Map([[loopKey("trying", []), 1]]))).toMatchObject([
+      {
+        shown: 1,
+        outcome: { text: "done returned false: iteration 2 followed", failed: false },
+        failed: true,
+      },
+    ]);
+    // Going round still: the first iteration said no, the second is not there yet.
+    expect(loop([exit(1, false)])).toMatchObject([
+      { shown: 1, outcome: { text: "done returned false", failed: false }, failed: false },
+    ]);
+    // The run fails on an exit condition that is not a boolean.
+    expect(loop([exit(1, "maybe")])).toMatchObject([
+      { outcome: { text: "done returned neither true nor false", failed: true }, failed: true },
+    ]);
+    // Nothing to say while the exit condition has not finished.
+    const waiting = loop([{ ...task("done", [["trying", 1]]), status: "running", result: null }]);
+    expect(waiting).toMatchObject([{ shown: 1, failed: false }]);
+    expect(waiting[0]?.outcome).toBeUndefined();
   });
 });
