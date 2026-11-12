@@ -275,6 +275,15 @@ one version, cut from a single tag on `main`.
   "Start a run" draws a flow's form in the place of one field per input.
   `examples/code_task` is a flow with one; `docs/architecture/forms.md` says
   what a form may hold, where the feature is, and how to take it out.
+- `neorc.sqlite`: `SqliteStore`, the store port on one SQLite file, for a
+  manager embedded in an application: what it holds survives the process, and
+  a run goes on when the application starts again. It needs no extra, only the
+  standard library. Several processes may open the same file, each with a
+  manager of its own; `SqliteTaskNotifier` wakes their waiters on each
+  other's commits by watching the file, where a manager alone on its file
+  uses `MemoryTaskNotifier`. The store passes the suite the Postgres store
+  passes.
+  See [docs/specs/sqlite-implementation.md](docs/specs/sqlite-implementation.md).
 
 ### Changed
 
