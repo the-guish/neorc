@@ -25,6 +25,17 @@ Claiming, heartbeating or finishing a task on another queue than the token's ans
 
 The id belongs to the task, not to one delivery. A worker whose lease lapsed still holds a valid id after another worker receives the task; delivery is at-least-once, and handlers are idempotent (see [postgres-implementation.md](postgres-implementation.md)).
 
+A worker token is bound to a worker queue. An external queue has no workers (see [task-completion.md](task-completion.md)).
+
+
+### Responders
+
+There is one responder role. Each responder token is bound to one queue of either kind, and its permissions apply only to that queue.
+
+The responder permissions allow listing the pending tasks of the queue and completing them (see [task-completion.md](task-completion.md)).
+
+Listing the pending tasks of another queue than the token's is refused. Completing a task on another queue answers as if the task did not exist.
+
 
 ### Scheduler
 
@@ -56,7 +67,7 @@ Can only start new runs, of any flow. It reads nothing but the run it gets back 
 
 ## Token creation
 
-Tokens are created, listed and revoked with the CLI connecting to the DB. A token's role is required; a queue is required for the worker role and refused for any other.
+Tokens are created, listed and revoked with the CLI connecting to the DB. A token's role is required; a queue is required for the worker and responder roles and refused for any other.
 
 
 ## Not in scope

@@ -57,6 +57,7 @@ Each token has a role, and may do only what its role allows
 | `ci`               | upload flows                                                           |
 | `scheduler`        | read flows, runs and events; publish tasks, start sub-runs, end runs   |
 | `worker`           | fetch, receive, claim, heartbeat and finish the tasks of its one queue |
+| `responder`        | list and complete the pending tasks of its one queue                   |
 | `user`             | read flows, runs and events; start and cancel runs                     |
 | `external-trigger` | start runs                                                             |
 
@@ -115,6 +116,42 @@ and [examples/code_task](examples/code_task) to try one.
 
 [examples/hello](examples/hello) and [examples/wordplay](examples/wordplay)
 walk through both ways of running, step by step.
+
+## Tasks for a person or another system
+
+Some tasks are done outside a neorc worker: an approval a person gives, or
+work another system does. Such a task waits on an *external* queue until a
+*responder* completes it by its id, with no lease to keep
+([task-completion.md](docs/specs/task-completion.md)).
+
+Declare the queue external, and create a responder token for it:
+
+    neorc queues declare editors --kind external
+    neorc tokens create inbox-app --role responder --queue editors
+
+A step names that queue. Its handler is a text for the responder:
+
+```yaml
+approve_draft:
+  queue: editors
+  handler: approve-draft
+  params: {draft: tasks.write_draft}
+```
+
+The responder lists the pending tasks of its queue, each with its inputs
+filled in, and completes one with a result, or with an error that fails it:
+
+    curl https://manager.internal:8420/queues/editors/tasks/pending \
+        -H "authorization: Bearer <inbox-app>"
+    curl -X POST https://manager.internal:8420/tasks/<task id>/complete \
+        -H "authorization: Bearer <inbox-app>" \
+        -H 'content-type: application/json' -d '{"result": {"approved": true}}'
+
+A task is completed once: a second completion answers 409. Workers are kept
+off an external queue, and a queue nobody declared is a worker queue. A
+responder token for a worker queue completes a task there until a worker
+receives it. `neorc queues list` shows the declared queues. `neorc run` starts
+no responder, so a run with a task on an external queue waits there.
 
 ## Signing in with Google or Okta
 
@@ -175,6 +212,8 @@ origin; behind a proxy, `public_url` is the address people type.
   each other
 - [docs/specs/flows.md](docs/specs/flows.md) — flow files: tasks, loops,
   fan-outs, sub-flows and references
+- [docs/specs/task-completion.md](docs/specs/task-completion.md) — tasks a
+  person or another system completes: queue kinds, pending tasks, responders
 - [docs/specs/postgres-implementation.md](docs/specs/postgres-implementation.md)
   — how the reference persistence layer receives, leases and recovers
 - [docs/working-notes/sso-plan.md](docs/working-notes/sso-plan.md) — API
