@@ -7,7 +7,7 @@ This repository is a monorepo. The packages it publishes:
 
 | Package                           | Description                             |
 | --------------------------------- | --------------------------------------- |
-| [`neorc`](python/neorc)           | Manager service, scheduler and worker commands, Postgres and HTTP adapters |
+| [`neorc`](python/neorc)           | Manager service, scheduler and worker commands, Postgres, SQLite and HTTP adapters |
 | [`neorc-core`](python/neorc-core) | The mechanism: flow definitions, the planner, ports, and the manager, scheduler and worker logic |
 
 ## How it works

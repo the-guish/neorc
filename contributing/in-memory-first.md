@@ -35,6 +35,7 @@ python/neorc-core/src/neorc_core/
 
 python/neorc/src/neorc/
   postgres/         the store and notifier ports, on Postgres
+  sqlite/           the store and notifier ports, on one SQLite file
   manager/          FastAPI routes, translating HTTP to Manager calls
   http/             the client ports, over HTTP
   _cli.py           commands, including `neorc run` on LocalCluster

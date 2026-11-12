@@ -22,6 +22,10 @@ extras their hosts need.
 A worker host installs no extra unless its queue client needs one. Future
 backends and persistence layers arrive as further extras.
 
+The SQLite store, `neorc.sqlite`, needs none: it is on the standard library,
+for a manager embedded in an application rather than deployed
+([sqlite-implementation.md](sqlite-implementation.md)).
+
 
 ## Task Queues
 
