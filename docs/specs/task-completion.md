@@ -3,6 +3,18 @@
 Some tasks are done outside a neorc worker, by a person or by another system.
 Such a task waits in its queue until someone completes it.
 
+## Queues
+
+A queue has a kind, `worker` or `external`. Every task of a queue has the kind
+of the queue.
+
+- A worker queue is served by workers. A worker token is bound to a worker
+  queue.
+- An external queue is served by responders. Its tasks end only by a
+  completion.
+- An external queue is declared on the database, as tokens are. A queue nobody
+  declared is a worker queue.
+
 ## Completing a task
 
 Completing a task records its result and ends the task, in one step. A
@@ -35,26 +47,23 @@ list.
 ## In a flow file
 
 A flow file declares the task as any other task, with a queue, a handler and
-params. The handler is the fixed text `external`.
+params. The queue is an external queue.
 
 ```yaml
 approve_draft:
   queue: editors
-  handler: external
+  handler: approve-draft
   params:
     draft: tasks.write_draft
 ```
 
-- An `external` task ends only by a completion. Workers receive the other
-  tasks of the queue.
-- The text `external` is reserved. A worker runtime names its handlers with
-  other texts.
-- The queue says who completes the task.
+The handler of a task on an external queue is a text for the responder. The
+manager and the scheduler store it and pass it on.
 
 ## Who may complete
 
 Completing has its own role, `responder`. A responder token is bound to one
-queue, as a worker token is (see [roles.md](roles.md)).
+queue of either kind (see [roles.md](roles.md)).
 
 | Role        | May, on its one queue                                     |
 | ----------- | --------------------------------------------------------- |
@@ -65,9 +74,8 @@ queue, as a worker token is (see [roles.md](roles.md)).
   receiving it.
 - A queue takes completions once it has a responder token. Tokens are created
   on the database, and the operator chooses those queues.
-- A queue has worker tokens, responder tokens, or both.
-- A responder completes any pending task of its queue. A task meant for a
-  worker can be completed until a worker receives it.
+- A responder completes any pending task of its queue. A task on a worker
+  queue can be completed until a worker receives it.
 
 ## Not in scope
 
