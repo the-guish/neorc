@@ -25,7 +25,7 @@ The manager lists the pending tasks of a queue. Each task in the list has its
 inputs filled in, as a worker receives them (see [core.md](core.md), "Task
 payloads").
 
-Listing takes no lease and changes no task. A task stays in the list until
+Listing does not lease or change any task. A task stays in the list until
 someone completes it or its run ends.
 
 Uploading a new version of a flow cancels its runs in progress (see
