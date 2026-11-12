@@ -1,0 +1,27 @@
+# A flow with a form: the page that starts a run of it draws
+# code_task.form.json, the file next to this one, in the place of one text box
+# per input. docs/architecture/forms.md says what a form may hold.
+name: code_task
+version: 1.0.0
+
+inputs:
+  description: string
+  repo: string
+  model: string
+  attempts: number
+  draft: boolean
+
+form: code_task.form.json
+
+output: tasks.plan
+
+steps:
+  plan:
+    queue: default
+    handler: tasks:plan
+    params:
+      description: inputs.description
+      repo: inputs.repo
+      model: inputs.model
+      attempts: inputs.attempts
+      draft: inputs.draft

@@ -265,6 +265,16 @@ one version, cut from a single tag on `main`.
   many times a loop goes round and how many branches a fan-out over a list
   has wait for a run. The page now goes: version, steps, the form to start a
   run, then the definition as text.
+- Forms: a flow file may name a form file next to it, `form:
+  code_task.form.json`, written in a subset of A2UI v0.9: text and number
+  fields, a check box, a choice of one from a list, and the checks `required`,
+  `length` and `numeric`. `neorc-core`: `neorc_core.forms`, which reads the
+  file in where a flow file is read, refuses at upload a form outside the
+  subset or one that does not ask for exactly the flow's inputs, and holds
+  every start of a run to what the form asks of its inputs. `neorc-ui`:
+  "Start a run" draws a flow's form in the place of one field per input.
+  `examples/code_task` is a flow with one; `docs/architecture/forms.md` says
+  what a form may hold, where the feature is, and how to take it out.
 
 ### Changed
 
