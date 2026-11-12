@@ -41,6 +41,7 @@ from neorc_core._errors import (
     UnsupportedMediaTypeError,
 )
 from neorc_core._manager import Manager
+from neorc_core._queues import Queue, QueueKind
 from neorc_core._runs import (
     Event,
     EventKind,
@@ -57,6 +58,7 @@ from neorc_core._task import (
     TERMINAL_STATUSES,
     TaskId,
     TaskStatus,
+    ensure_completable,
     ensure_transition,
 )
 from neorc_core._worker import HandlerError, Worker
@@ -105,7 +107,9 @@ __all__ = [
     "PermissionDeniedError",
     "Principal",
     "PrincipalKind",
+    "Queue",
     "QueueClient",
+    "QueueKind",
     "ResolutionError",
     "Role",
     "Run",
@@ -129,5 +133,6 @@ __all__ = [
     "Worker",
     "__version__",
     "authorize",
+    "ensure_completable",
     "ensure_transition",
 ]

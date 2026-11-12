@@ -21,9 +21,11 @@ from neorc_core._errors import (
     FlowDefinitionError,
     FlowVersionError,
     InvalidValueError,
+    PermissionDeniedError,
     RunStateError,
     TaskNotFoundError,
 )
+from neorc_core._queues import Queue, QueueKind
 from neorc_core._runs import (
     Event,
     Run,
@@ -285,9 +287,11 @@ class Manager:
     async def task_definitions(self, queue: str) -> list[TaskStep]:
         """Every task on ``queue`` in the latest flows, for a worker to check.
 
-        One task step per flow that defines it, flows in name order.
+        One task step per flow that defines it, flows in name order. Raises
+        ``PermissionDeniedError`` for an external queue, which no worker serves.
         """
         _queue(queue)
+        await self._ensure_worker_queue(queue)
         return [
             task
             for flow in await self._store.latest_flows()
@@ -314,9 +318,13 @@ class Manager:
         wait ends with ``None`` once it says so, so a task is received only for
         a worker known to be there a moment before. A worker lost between that
         moment and its reply keeps the lease until it lapses.
+
+        Raises ``PermissionDeniedError`` for an external queue: its tasks end
+        only by a completion.
         """
         _queue(queue)
         check_lease_seconds(lease_seconds)
+        await self._ensure_worker_queue(queue)
         deadline = time.monotonic() + timeout
         async with self._tasks.subscribe() as subscription:
             while True:
@@ -389,9 +397,70 @@ class Manager:
         await self._events.notify()
         return finished
 
+    # Responders: a person or another system, completing tasks by their id
+    # with no lease. See docs/specs/task-completion.md.
+
+    async def pending_tasks(
+        self, queue: str, *, limit: int = DEFAULT_PAGE
+    ) -> list[TaskDelivery]:
+        """Up to ``limit`` pending tasks of ``queue``, oldest first, inputs filled in.
+
+        Each comes as a worker would receive it, and none is leased or changed.
+        """
+        _queue(queue)
+        if limit < 1:
+            raise InvalidValueError(f"limit is at least 1, not {limit}")
+        # Tasks of one run share its definition and state: read once per run.
+        contexts: dict[RunId, tuple[Run, FlowDefinition, RunState]] = {}
+        deliveries = []
+        for task in await self._store.pending_tasks(queue, limit=limit):
+            if task.run_id not in contexts:
+                contexts[task.run_id] = await self._context(task.run_id)
+            deliveries.append(_delivered(task, *contexts[task.run_id]))
+        return deliveries
+
+    async def complete_task(
+        self,
+        task_id: TaskId,
+        *,
+        result: JsonValue = None,
+        error: str | None = None,
+        queue: str | None = None,
+    ) -> Task:
+        """End a pending task with a result, or with its failure when ``error`` is set.
+
+        Raises ``TaskStateError`` unless the task is pending, and
+        ``RunStateError`` if its run is no longer active. A result that is not
+        a valid value, or is over the size limit, is refused with
+        ``InvalidValueError``, and the task stays pending for a result that is.
+        """
+        await self._ensure_on_queue(task_id, queue)
+        if error is None:
+            result = _values.encode(_values.decode(result))
+            _values.ensure_fits(_values.dumps_json(result))
+        completed = await self._store.complete_task(task_id, result=result, error=error)
+        await self._events.notify()
+        return completed
+
     async def get_task(self, task_id: TaskId) -> Task:
         """A task, for a status query."""
         return await self._store.get_task(task_id)
+
+    # Queues.
+
+    async def declare_queue(self, name: str, kind: QueueKind) -> None:
+        """Declare ``name`` a queue of ``kind``, whatever it was declared before."""
+        _queue(name)
+        await self._store.declare_queue(name, kind)
+
+    async def queues(self) -> list[Queue]:
+        """Every declared queue, by name."""
+        return await self._store.queues()
+
+    async def queue_kind(self, name: str) -> QueueKind:
+        """The kind of a queue: a worker queue unless declared external."""
+        _queue(name)
+        return await self._store.queue_kind(name)
 
     async def _start_latest(
         self,
@@ -436,12 +505,21 @@ class Manager:
         if queue is not None and (await self._store.get_task(task_id)).queue != queue:
             raise TaskNotFoundError(str(task_id))
 
+    async def _ensure_worker_queue(self, queue: str) -> None:
+        """Raise ``PermissionDeniedError`` for an external queue.
+
+        Whoever asks, and with authentication off too: a worker told so stops,
+        as it does for a refused token, rather than poll a queue it will never
+        be given a task from.
+        """
+        if await self._store.queue_kind(queue) is QueueKind.EXTERNAL:
+            raise PermissionDeniedError(
+                f"queue {queue!r} is external: its tasks are completed, "
+                "and no worker receives them"
+            )
+
     async def _delivery(self, task: Task) -> TaskDelivery:
-        run, definition, state = await self._context(task.run_id)
-        inputs = _filled_in(
-            run, definition, state, task.address, task.params, task_id=task.id
-        )
-        return TaskDelivery(task, {**task.fixed_params, **inputs})
+        return _delivered(task, *await self._context(task.run_id))
 
 
 def _queue(name: str) -> None:
@@ -566,6 +644,16 @@ def _filled_in(
             raise RunStateError(f"{address}: {reference} is not available yet")
         values[name] = resolved.value
     return values
+
+
+def _delivered(
+    task: Task, run: Run, definition: FlowDefinition, state: RunState
+) -> TaskDelivery:
+    """A task with its inputs filled in, from its run's definition and state."""
+    inputs = _filled_in(
+        run, definition, state, task.address, task.params, task_id=task.id
+    )
+    return TaskDelivery(task, {**task.fixed_params, **inputs})
 
 
 def _encoded_delivery(inputs: Mapping[str, JsonValue]) -> str:

@@ -9,7 +9,12 @@ with an identity provider: the provider says who they are, as an ``Identity``,
 and the deployment's allow list says whether they may sign in.
 
 Every principal has a ``Role``: a token the one it was created with, a person
-signed in ``USER``. A worker's token is bound to the one queue it serves.
+signed in ``USER``. A worker's token is bound to the one queue it serves, and
+a responder's to the one queue whose tasks it completes.
+
+A queue has a kind (see ``neorc_core._queues``), and a worker token is bound to
+a worker queue. ``Access`` holds that rule where tokens are created and queues
+declared, when it is given the store that keeps the declarations.
 
 Tokens, sessions and sign-ins in progress are secrets handed out once. The
 credential store keeps only their SHA-256: each has 256 random bits and is
@@ -38,10 +43,12 @@ from neorc_core._errors import (
     PermissionDeniedError,
     SignInRefusedError,
 )
+from neorc_core._queues import Queue, QueueKind
 from neorc_core.flows._definition import is_queue_name
 
-if TYPE_CHECKING:  # the port names this module's records
+if TYPE_CHECKING:  # the ports name this module's records
     from neorc_core.ports._credentials import CredentialStore
+    from neorc_core.ports._store import Store
 
 
 class PrincipalKind(StrEnum):
@@ -56,6 +63,8 @@ class Role(StrEnum):
 
     WORKER = "worker"
     """Takes and runs the tasks of the one queue its token is bound to."""
+    RESPONDER = "responder"
+    """Lists and completes the pending tasks of the one queue its token is bound to."""
     SCHEDULER = "scheduler"
     CI = "ci"
     """Uploads flows."""
@@ -82,9 +91,13 @@ class Permission(StrEnum):
     TASKS_CLAIM = "tasks:claim"
     TASKS_HEARTBEAT = "tasks:heartbeat"
     TASKS_FINISH = "tasks:finish"
+    QUEUE_PENDING = "queue:pending"
+    """List a queue's pending tasks, taking no lease."""
+    TASKS_COMPLETE = "tasks:complete"
+    """End a pending task by its id, with no lease before."""
 
 
-QUEUE_PERMISSIONS: frozenset[Permission] = frozenset(
+WORKER_PERMISSIONS: frozenset[Permission] = frozenset(
     {
         Permission.QUEUE_DEFINITIONS,
         Permission.QUEUE_RECEIVE,
@@ -93,11 +106,23 @@ QUEUE_PERMISSIONS: frozenset[Permission] = frozenset(
         Permission.TASKS_FINISH,
     }
 )
-"""The permissions that apply to one queue: the one a worker token is bound to."""
+"""What a worker may do, on the queue its token is bound to."""
+
+RESPONDER_PERMISSIONS: frozenset[Permission] = frozenset(
+    {Permission.QUEUE_PENDING, Permission.TASKS_COMPLETE}
+)
+"""What a responder may do, on the queue its token is bound to."""
+
+QUEUE_PERMISSIONS: frozenset[Permission] = WORKER_PERMISSIONS | RESPONDER_PERMISSIONS
+"""The permissions that apply to one queue: the one a token is bound to."""
+
+QUEUE_ROLES: frozenset[Role] = frozenset({Role.WORKER, Role.RESPONDER})
+"""The roles whose tokens are bound to one queue."""
 
 PERMISSIONS: Mapping[Role, frozenset[Permission]] = MappingProxyType(
     {
-        Role.WORKER: QUEUE_PERMISSIONS,
+        Role.WORKER: WORKER_PERMISSIONS,
+        Role.RESPONDER: RESPONDER_PERMISSIONS,
         Role.SCHEDULER: frozenset(
             {
                 Permission.FLOWS_READ,
@@ -164,18 +189,22 @@ def _role(value: str) -> Role:
 def check_role(role: Role, queue: str | None) -> None:
     """Raise ``InvalidValueError`` unless a credential may have this role and queue.
 
-    A worker is bound to one queue, named as queues are; no other role is.
+    A worker or a responder is bound to one queue, named as queues are; no
+    other role is.
     """
-    if role is Role.WORKER:
+    if role in QUEUE_ROLES:
         if queue is None:
-            raise InvalidValueError("a worker token is bound to a queue: name one")
+            raise InvalidValueError(
+                f"a {role.value} token is bound to a queue: name one"
+            )
         if not is_queue_name(queue):
             raise InvalidValueError(
                 f"{queue!r} is not a queue name: letters, digits, _ and -"
             )
     elif queue is not None:
         raise InvalidValueError(
-            f"only a worker token is bound to a queue, not a {role.value} token"
+            "only a worker or responder token is bound to a queue, "
+            f"not a {role.value} token"
         )
 
 
@@ -190,7 +219,7 @@ class Principal:
     """A token's name, or a person's name as their provider gave it."""
     role: Role
     queue: str | None = None
-    """The queue a worker is bound to; ``None`` for every other role."""
+    """The queue a worker or responder is bound to; ``None`` for every other role."""
     provider: str | None = None
     """The identity provider a session was opened with; ``None`` for a token."""
     email: str | None = None
@@ -298,7 +327,7 @@ class ApiToken:
     role: Role
     created_at: datetime
     queue: str | None = None
-    """The queue a worker token is bound to; ``None`` for every other role."""
+    """The queue a worker or responder token is bound to; ``None`` otherwise."""
     expires_at: datetime | None = None
     """When the token stops being accepted; ``None`` if never."""
 
@@ -368,12 +397,19 @@ class Access:
 
     Every refusal to authenticate is ``AuthenticationError``, saying what kind
     of credential failed and never repeating it.
+
+    ``queues`` is the store that keeps the queue declarations. With it, a
+    worker token is refused an external queue, and a queue is refused the
+    external kind while a worker token is bound to it. Tokens and declarations
+    are in two stores, so the two checks are not one step with what they
+    guard: the manager refusing workers an external queue is what holds.
     """
 
     def __init__(
         self,
         credentials: CredentialStore,
         *,
+        queues: Store | None = None,
         allow: Sequence[Allow] = (),
         session_seconds: float = DEFAULT_SESSION_SECONDS,
         login_seconds: float = DEFAULT_LOGIN_SECONDS,
@@ -385,6 +421,7 @@ class Access:
         if max_pending_logins < 1:
             raise InvalidValueError("at least one sign-in must be allowed at once")
         self._credentials = credentials
+        self._queues = queues
         self._allow = tuple(allow)
         self._session_seconds = session_seconds
         self._login_seconds = login_seconds
@@ -419,8 +456,8 @@ class Access:
         """A new token and its secret, which is not kept and cannot be shown again.
 
         Raises ``InvalidValueError`` for a name that is not one or is taken, a
-        worker token without a queue or another role's with one, or a life out
-        of bounds.
+        worker or responder token without a queue or another role's with one,
+        a worker token for an external queue, or a life out of bounds.
         """
         if not is_token_name(name):
             raise InvalidValueError(
@@ -431,6 +468,16 @@ class Access:
         check_role(role, queue)
         if expires_seconds is not None:
             check_seconds(expires_seconds, "a token's life")
+        if (
+            role is Role.WORKER
+            and queue is not None
+            and self._queues is not None
+            and await self._queues.queue_kind(queue) is QueueKind.EXTERNAL
+        ):
+            raise InvalidValueError(
+                f"queue {queue!r} is external: a worker token is bound to a "
+                "worker queue"
+            )
         secret = TOKEN_PREFIX + secrets.token_urlsafe(_SECRET_BYTES)
         token = await self._credentials.add_token(
             name,
@@ -448,6 +495,41 @@ class Access:
     async def revoke_token(self, name: str) -> bool:
         """Delete the token called ``name``; whether there was one."""
         return await self._credentials.delete_token(name)
+
+    # Queues.
+
+    async def declare_queue(self, name: str, kind: QueueKind) -> None:
+        """Declare ``name`` a queue of ``kind``, whatever it was declared before.
+
+        Raises ``InvalidValueError`` for a name that is not a queue's, and for
+        the external kind while a worker token is bound to the queue, expired
+        or not: revoke those tokens first.
+        """
+        if not is_queue_name(name):
+            raise InvalidValueError(
+                f"{name!r} is not a queue name: letters, digits, _ and -"
+            )
+        if kind is QueueKind.EXTERNAL:
+            bound = [
+                token.name
+                for token in await self._credentials.tokens()
+                if token.role is Role.WORKER and token.queue == name
+            ]
+            if bound:
+                raise InvalidValueError(
+                    f"queue {name!r} has worker tokens bound to it, and workers "
+                    f"serve only worker queues: revoke {', '.join(bound)} first"
+                )
+        await self._declarations().declare_queue(name, kind)
+
+    async def queues(self) -> list[Queue]:
+        """Every declared queue, by name."""
+        return await self._declarations().queues()
+
+    def _declarations(self) -> Store:
+        if self._queues is None:
+            raise RuntimeError("this Access was given no store of queue declarations")
+        return self._queues
 
     async def authenticate_token(self, secret: str) -> Principal:
         """The principal a token secret stands for."""

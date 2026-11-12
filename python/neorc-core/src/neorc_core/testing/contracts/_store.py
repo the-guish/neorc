@@ -21,11 +21,13 @@ from neorc_core._errors import (
     TaskNotFoundError,
     TaskStateError,
 )
+from neorc_core._queues import Queue, QueueKind
 from neorc_core._runs import (
     EventKind,
     Run,
     RunStatus,
     StoredFlow,
+    Task,
     sub_run_id_for,
 )
 from neorc_core._task import TaskStatus
@@ -651,6 +653,237 @@ class StoreContract:
             await store.claim_task(missing)
         with pytest.raises(TaskNotFoundError):
             await store.finish_task(missing, result=1)
+
+    # Completion: ending a pending task by its id, with no lease.
+
+    async def test_pending_tasks_are_listed_per_queue_oldest_first(
+        self, store: Store
+    ) -> None:
+        await self.upload(store)
+        run = await self.start(store)
+        first = await self.publish(store, run, Address("one"))
+        await self.publish(store, run, Address("two"), queue="scoring")
+        second = await self.publish(store, run, Address("three"))
+
+        listed = await store.pending_tasks("default")
+
+        assert [task.id for task in listed] == [first, second]
+        assert [task.id for task in await store.pending_tasks("default", limit=1)] == [
+            first
+        ]
+        assert await store.pending_tasks("nobody") == []
+
+    async def test_listing_does_not_lease_or_change_any_task(
+        self, store: Store
+    ) -> None:
+        await self.upload(store)
+        run = await self.start(store)
+        task_id = await self.publish(store, run)
+        before = await store.get_task(task_id)
+
+        await store.pending_tasks("default")
+        await store.pending_tasks("default")
+
+        assert await store.get_task(task_id) == before
+        assert before.status is TaskStatus.PENDING
+        assert (before.attempts, before.lease_expires_at) == (0, None)
+        assert len(await store.events_after(0)) == 1  # the run's start alone
+
+    async def test_a_task_leaves_the_list_when_received_completed_or_its_run_ends(
+        self, store: Store
+    ) -> None:
+        await self.upload(store)
+        run = await self.start(store)
+        ended = await self.start(store)
+        received = await self.publish(store, run, Address("one"))
+        completed = await self.publish(store, run, Address("two"))
+        waiting = await self.publish(store, run, Address("three"))
+        await self.publish(store, ended)
+
+        taken = await store.receive_task("default", lease_seconds=30)
+        await store.complete_task(completed, result=1)
+        await store.cancel_run_tree(ended.id, "by hand")
+
+        assert taken is not None and taken.id == received
+        assert [task.id for task in await store.pending_tasks("default")] == [waiting]
+
+    async def test_a_pending_task_is_completed_with_its_result_and_an_event(
+        self, store: Store
+    ) -> None:
+        await self.upload(store)
+        run = await self.start(store)
+        task_id = await self.publish(store, run)
+
+        completed = await store.complete_task(task_id, result={"approved": True})
+
+        assert completed.status is TaskStatus.SUCCEEDED
+        assert completed.result == {"approved": True}
+        assert completed.finished_at is not None
+        assert (completed.attempts, completed.lease_expires_at) == (0, None)
+        assert completed.started_at is None  # no worker began it
+        assert await store.get_task(task_id) == completed
+        events = await store.events_after(1)
+        assert [(e.run_id, e.kind) for e in events] == [
+            (run.id, EventKind.TASK_FINISHED)
+        ]
+        state = await store.run_state(run.id)
+        assert state.steps[WORK] == StepResult(Outcome.SUCCEEDED, {"approved": True})
+
+    async def test_a_completion_with_an_error_fails_the_task(
+        self, store: Store
+    ) -> None:
+        await self.upload(store)
+        run = await self.start(store)
+        task_id = await self.publish(store, run)
+
+        failed = await store.complete_task(task_id, error="refused: \x00")
+
+        assert failed.status is TaskStatus.FAILED
+        assert (failed.result, failed.error) == (None, "refused: \ufffd")
+        assert (await store.events_after(0))[-1].kind is EventKind.TASK_FINISHED
+
+    async def test_a_task_is_completed_once(self, store: Store) -> None:
+        await self.upload(store)
+        run = await self.start(store)
+        task_id = await self.publish(store, run)
+        await store.complete_task(task_id, result="first")
+
+        with pytest.raises(TaskStateError, match="only a pending one"):
+            await store.complete_task(task_id, result="second")
+        with pytest.raises(TaskStateError):
+            await store.complete_task(task_id, error="second")
+
+        assert (await store.get_task(task_id)).result == "first"
+        assert len(await store.events_after(1)) == 1
+
+    async def test_of_completions_at_once_one_is_taken(self, store: Store) -> None:
+        await self.upload(store)
+        run = await self.start(store)
+        task_id = await self.publish(store, run)
+
+        outcomes = await asyncio.gather(
+            *(store.complete_task(task_id, result=n) for n in range(8)),
+            return_exceptions=True,
+        )
+
+        taken = [o for o in outcomes if not isinstance(o, BaseException)]
+        refused = [o for o in outcomes if isinstance(o, TaskStateError)]
+        assert (len(taken), len(refused)) == (1, 7)
+        assert (await store.get_task(task_id)).result == taken[0].result
+        assert len(await store.events_after(1)) == 1
+
+    async def test_a_task_a_worker_received_is_the_workers_to_finish(
+        self, store: Store
+    ) -> None:
+        await self.upload(store)
+        run = await self.start(store)
+        task_id = await self.publish(store, run)
+        await store.receive_task("default", lease_seconds=30)
+
+        with pytest.raises(TaskStateError, match="a received task"):
+            await store.complete_task(task_id, result=1)
+        await store.claim_task(task_id)
+        with pytest.raises(TaskStateError, match="a running task"):
+            await store.complete_task(task_id, result=1)
+
+        finished = await store.finish_task(task_id, result="the worker's")
+        assert finished.result == "the worker's"
+
+    async def test_a_completion_and_a_receive_at_once_do_not_both_take_the_task(
+        self, store: Store
+    ) -> None:
+        await self.upload(store)
+        run = await self.start(store)
+        for index in range(10):
+            task_id = await self.publish(store, run, Address(f"t{index}"))
+
+            received, completed = await asyncio.gather(
+                store.receive_task("default", lease_seconds=30),
+                store.complete_task(task_id, result=1),
+                return_exceptions=True,
+            )
+
+            task = await store.get_task(task_id)
+            if isinstance(completed, TaskStateError):
+                assert isinstance(received, Task) and received.id == task_id
+                assert task.status is TaskStatus.RECEIVED
+                await store.finish_task(task_id, result=2)
+            else:
+                assert received is None
+                assert task.status is TaskStatus.SUCCEEDED
+
+    async def test_a_run_takes_completions_only_while_it_is_active(
+        self, store: Store
+    ) -> None:
+        await self.upload(store)
+        run = await self.start(store)
+        task_id = await self.publish(store, run)
+        await store.cancel_run_tree(run.id, "by hand")
+
+        with pytest.raises(RunStateError):
+            await store.complete_task(task_id, result=1)
+
+        task = await store.get_task(task_id)
+        assert (task.status, task.result) == (TaskStatus.PENDING, None)
+        assert (await store.events_after(0))[-1].kind is EventKind.RUN_FINISHED
+
+    async def test_an_unknown_task_cannot_be_completed(self, store: Store) -> None:
+        with pytest.raises(TaskNotFoundError):
+            await store.complete_task(uuid.uuid4(), result=1)
+
+    # Queues.
+
+    async def test_a_queue_nobody_declared_is_a_worker_queue(
+        self, store: Store
+    ) -> None:
+        assert await store.queue_kind("default") is QueueKind.WORKER
+        assert await store.queues() == []
+
+    async def test_a_queue_is_declared_and_declared_again(self, store: Store) -> None:
+        await store.declare_queue("editors", QueueKind.EXTERNAL)
+        await store.declare_queue("billing", QueueKind.EXTERNAL)
+        await store.declare_queue("default", QueueKind.WORKER)
+        await store.declare_queue("billing", QueueKind.WORKER)
+        await store.declare_queue("editors", QueueKind.EXTERNAL)
+
+        assert await store.queue_kind("editors") is QueueKind.EXTERNAL
+        assert await store.queue_kind("billing") is QueueKind.WORKER
+        assert await store.queues() == [
+            Queue("billing", QueueKind.WORKER),
+            Queue("default", QueueKind.WORKER),
+            Queue("editors", QueueKind.EXTERNAL),
+        ]
+
+    async def test_an_external_queue_hands_no_task_to_a_worker(
+        self, store: Store
+    ) -> None:
+        await self.upload(store)
+        run = await self.start(store)
+        await store.declare_queue("editors", QueueKind.EXTERNAL)
+        external = await self.publish(store, run, Address("one"), queue="editors")
+        ordinary = await self.publish(store, run, Address("two"))
+
+        assert await store.receive_task("editors", lease_seconds=30) is None
+        received = await store.receive_task("default", lease_seconds=30)
+        completed = await store.complete_task(external, result="by a responder")
+
+        assert received is not None and received.id == ordinary
+        assert [task.id for task in await store.pending_tasks("editors")] == []
+        assert completed.status is TaskStatus.SUCCEEDED
+
+    async def test_a_queue_declared_a_worker_queue_again_hands_its_tasks_out(
+        self, store: Store
+    ) -> None:
+        await self.upload(store)
+        run = await self.start(store)
+        await store.declare_queue("editors", QueueKind.EXTERNAL)
+        task_id = await self.publish(store, run, queue="editors")
+        assert await store.receive_task("editors", lease_seconds=30) is None
+
+        await store.declare_queue("editors", QueueKind.WORKER)
+        received = await store.receive_task("editors", lease_seconds=30)
+
+        assert received is not None and received.id == task_id
 
     # Listing and times.
 

@@ -112,6 +112,7 @@ def test_the_task_forms() -> None:
     _exactly(schemas.TaskListResponse, {"tasks": [wire.task_to(TASK)]})
     delivery = TaskDelivery(TASK, {"x": 1, "n": 3})
     _exactly(schemas.DeliveryResponse, wire.delivery_to(delivery))
+    _exactly(schemas.PendingTasksResponse, {"tasks": [wire.delivery_to(delivery)]})
     step = TaskStep(
         "work",
         handler="tasks:work",

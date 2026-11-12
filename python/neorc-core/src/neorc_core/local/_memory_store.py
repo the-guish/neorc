@@ -18,6 +18,7 @@ from neorc_core._errors import (
     TaskNotFoundError,
     TaskStateError,
 )
+from neorc_core._queues import Queue, QueueKind
 from neorc_core._runs import (
     Event,
     EventKind,
@@ -32,7 +33,13 @@ from neorc_core._runs import (
     storable_text,
     sub_run_id_for,
 )
-from neorc_core._task import LEASED_STATUSES, TaskId, TaskStatus, ensure_transition
+from neorc_core._task import (
+    LEASED_STATUSES,
+    TaskId,
+    TaskStatus,
+    ensure_completable,
+    ensure_transition,
+)
 from neorc_core._values import JsonValue
 from neorc_core.flows import Address, Reference, RunState, Version
 from neorc_core.ports._clients import DEFAULT_LEASE_SECONDS
@@ -52,6 +59,7 @@ class MemoryStore(Store):
         self._tasks: dict[TaskId, Task] = {}
         self._task_ids: dict[tuple[RunId, Address], TaskId] = {}
         self._events: list[Event] = []
+        self._queues: dict[str, QueueKind] = {}
 
     async def store_flows(self, uploads: Sequence[StoredFlow]) -> list[bool]:
         async with self._lock:
@@ -242,6 +250,8 @@ class MemoryStore(Store):
     ) -> Task | None:
         now = datetime.now(UTC)
         async with self._lock:
+            if self._queues.get(queue) is QueueKind.EXTERNAL:
+                return None
             for task in self._tasks.values():  # in publishing order: oldest first
                 if task.queue == queue and _is_receivable(task, now):
                     received = replace(
@@ -307,9 +317,53 @@ class MemoryStore(Store):
             self._append(task.run_id, EventKind.TASK_FINISHED)
             return finished
 
+    async def pending_tasks(
+        self, queue: str, *, limit: int = DEFAULT_PAGE
+    ) -> list[Task]:
+        async with self._lock:
+            pending = (
+                task
+                for task in self._tasks.values()  # in publishing order
+                if task.queue == queue
+                and task.status is TaskStatus.PENDING
+                and self._run(task.run_id).status is RunStatus.ACTIVE
+            )
+            return [task for task, _ in zip(pending, range(limit), strict=False)]
+
+    async def complete_task(
+        self, task_id: TaskId, *, result: JsonValue = None, error: str | None = None
+    ) -> Task:
+        status = TaskStatus.FAILED if error is not None else TaskStatus.SUCCEEDED
+        async with self._lock:
+            task = self._task(task_id)
+            ensure_completable(task.status)
+            ensure_active(self._run(task.run_id))
+            completed = replace(
+                task,
+                status=status,
+                result=result if error is None else None,
+                error=storable_text(error) if error is not None else None,
+                finished_at=datetime.now(UTC),
+            )
+            self._tasks[task_id] = completed
+            self._append(task.run_id, EventKind.TASK_FINISHED)
+            return completed
+
     async def get_task(self, task_id: TaskId) -> Task:
         async with self._lock:
             return self._task(task_id)
+
+    async def declare_queue(self, name: str, kind: QueueKind) -> None:
+        async with self._lock:
+            self._queues[name] = kind
+
+    async def queues(self) -> list[Queue]:
+        async with self._lock:
+            return [Queue(name, kind) for name, kind in sorted(self._queues.items())]
+
+    async def queue_kind(self, name: str) -> QueueKind:
+        async with self._lock:
+            return self._queues.get(name, QueueKind.WORKER)
 
     async def events_after(self, sequence: int, *, limit: int = 100) -> list[Event]:
         async with self._lock:

@@ -14,6 +14,7 @@ from types import TracebackType
 
 from neorc_core._errors import RunStateError
 from neorc_core._manager import Manager
+from neorc_core._queues import QueueKind
 from neorc_core._runs import Run, RunId, RunStatus
 from neorc_core._scheduler import Scheduler
 from neorc_core._values import JsonValue
@@ -92,7 +93,11 @@ class LocalCluster:
             await self.start_workers()
 
     async def start_workers(self) -> None:
-        """Start a worker for every queue in the latest flows that has none yet."""
+        """Start a worker for every worker queue in the latest flows that has none yet.
+
+        An external queue gets none: its tasks wait for a completion, through
+        ``manager.complete_task``.
+        """
         queues = sorted(
             {
                 task.queue
@@ -102,6 +107,8 @@ class LocalCluster:
         )
         for queue in queues:
             if queue in self._workers:
+                continue
+            if await self.manager.queue_kind(queue) is QueueKind.EXTERNAL:
                 continue
             worker = Worker(
                 DirectQueueClient(self.manager),

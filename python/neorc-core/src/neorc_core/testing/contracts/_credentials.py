@@ -74,10 +74,16 @@ class CredentialStoreContract:
             "webhook", secret_hash("t"), role=Role.EXTERNAL_TRIGGER
         )
 
+        responder = await credentials.add_token(
+            "inbox", secret_hash("r"), role=Role.RESPONDER, queue="editors"
+        )
+
         assert (worker.role, worker.queue) == (Role.WORKER, "python-gpu")
         assert (trigger.role, trigger.queue) == (Role.EXTERNAL_TRIGGER, None)
+        assert (responder.role, responder.queue) == (Role.RESPONDER, "editors")
         assert await credentials.token_by_hash(secret_hash("w")) == worker
-        assert await credentials.tokens() == [trigger, worker]
+        assert await credentials.token_by_hash(secret_hash("r")) == responder
+        assert await credentials.tokens() == [responder, trigger, worker]
 
     async def test_tokens_are_listed_by_name(
         self, credentials: CredentialStore

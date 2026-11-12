@@ -15,6 +15,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 
+from neorc_core._queues import Queue, QueueKind
 from neorc_core._runs import Event, Run, RunId, RunStatus, StoredFlow, Task
 from neorc_core._task import TaskId
 from neorc_core._values import JsonValue
@@ -180,7 +181,8 @@ class Store(ABC):
 
         Ready means pending, or holding a lapsed lease. Taking the lease,
         changing the status and counting the attempt are one step, and no two
-        callers are given the same task.
+        callers are given the same task. An external queue hands out nothing:
+        its tasks end only by ``complete_task``.
         """
         raise NotImplementedError
 
@@ -213,8 +215,47 @@ class Store(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    async def pending_tasks(
+        self, queue: str, *, limit: int = DEFAULT_PAGE
+    ) -> list[Task]:
+        """Up to ``limit`` pending tasks of ``queue`` in active runs, oldest first.
+
+        Reads only: no lease is taken, and no task changes.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    async def complete_task(
+        self, task_id: TaskId, *, result: JsonValue = None, error: str | None = None
+    ) -> Task:
+        """End a pending task with its result, or its failure when ``error`` is set.
+
+        One step, with no lease before it: ``ensure_completable`` decides, so a
+        task a worker received, or one already ended, raises ``TaskStateError``,
+        and of two completions of a task one is refused. Raises
+        ``RunStateError``, leaving the task as it is, if its run is no longer
+        active. Records "task finished".
+        """
+        raise NotImplementedError
+
+    @abstractmethod
     async def get_task(self, task_id: TaskId) -> Task:
         """A task; ``TaskNotFoundError`` if there is none."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def declare_queue(self, name: str, kind: QueueKind) -> None:
+        """Declare ``name`` a queue of ``kind``, whatever it was declared before."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def queues(self) -> list[Queue]:
+        """Every declared queue, by name."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def queue_kind(self, name: str) -> QueueKind:
+        """The kind of the queue ``name``: ``WORKER`` for one nobody declared."""
         raise NotImplementedError
 
     @abstractmethod

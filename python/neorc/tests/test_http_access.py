@@ -251,6 +251,8 @@ ROUTE_PERMISSIONS = {
     ("POST", "/tasks/{task_id}/claim"): "tasks:claim",
     ("POST", "/tasks/{task_id}/heartbeat"): "tasks:heartbeat",
     ("POST", "/tasks/{task_id}/finished"): "tasks:finish",
+    ("GET", "/queues/{queue}/tasks/pending"): "queue:pending",
+    ("POST", "/tasks/{task_id}/complete"): "tasks:complete",
 }
 """The plan's table of routes, written out rather than read from the routes."""
 
@@ -262,6 +264,7 @@ ALLOWED = {
         "tasks:heartbeat",
         "tasks:finish",
     },
+    Role.RESPONDER: {"queue:pending", "tasks:complete"},
     Role.SCHEDULER: {"flows:read", "runs:read", "runs:schedule", "events:read"},
     Role.CI: {"flows:upload"},
     Role.USER: {"flows:read", "runs:start", "runs:read", "runs:cancel", "events:read"},
@@ -319,7 +322,7 @@ def sample_url(path: str, queue: str = "default") -> str:
 async def test_a_role_reaches_its_routes_and_is_refused_the_rest(
     guarded: httpx.AsyncClient, access: Access, role: Role
 ) -> None:
-    queue = "default" if role is Role.WORKER else None
+    queue = "default" if role in (Role.WORKER, Role.RESPONDER) else None
     secret, _ = await access.create_token("t", role, queue=queue)
 
     for (method, path), permission in ROUTE_PERMISSIONS.items():
@@ -382,6 +385,58 @@ async def test_a_worker_is_refused_another_queue_and_does_not_see_its_tasks(
         assert done.status_code in (200, 204), action
     task = await guarded.get(f"/tasks/{task_id}", headers=bearer(user))
     assert task.json()["status"] == "succeeded"
+
+
+async def test_a_responder_is_confined_to_its_queue_and_a_worker_cannot_complete(
+    guarded: httpx.AsyncClient, access: Access
+) -> None:
+    ci, _ = await access.create_token("ci", Role.CI)
+    user, _ = await access.create_token("person", Role.USER)
+    scheduler, _ = await access.create_token("scheduler", Role.SCHEDULER)
+    worker, _ = await access.create_token("w", Role.WORKER, queue="default")
+    responder, _ = await access.create_token("r1", Role.RESPONDER, queue="default")
+    other, _ = await access.create_token("r2", Role.RESPONDER, queue="other")
+    flow = {"name": "f", "version": "1.0.0", "steps": {"work": {"handler": "m:w"}}}
+    await guarded.post("/flows", json={"flows": [flow]}, headers=bearer(ci))
+    run = await guarded.post("/flows/f/runs", json={"inputs": {}}, headers=bearer(user))
+    published = await guarded.post(
+        f"/runs/{run.json()['id']}/tasks",
+        json={"address": {"step": "work", "scope": []}},
+        headers=bearer(scheduler),
+    )
+    task_id = published.json()["id"]
+    done = {"result": "done"}
+
+    elsewhere = await guarded.get(
+        "/queues/default/tasks/pending", headers=bearer(other)
+    )
+    assert (elsewhere.status_code, _error(elsewhere)) == (403, "PermissionDeniedError")
+    assert "bound to queue 'other'" in elsewhere.json()["detail"]
+    hidden = await guarded.post(
+        f"/tasks/{task_id}/complete", json=done, headers=bearer(other)
+    )
+    assert (hidden.status_code, _error(hidden)) == (404, "TaskNotFoundError")
+    for secret, role in ((worker, "worker"), (user, "user"), (scheduler, "scheduler")):
+        refused = await guarded.post(
+            f"/tasks/{task_id}/complete", json=done, headers=bearer(secret)
+        )
+        assert (refused.status_code, _error(refused)) == (403, "PermissionDeniedError")
+        assert f"a {role} token may not tasks:complete" in refused.json()["detail"]
+    for path in ("/queues/default/tasks", "/queues/default/tasks/receive"):
+        method = "GET" if path.endswith("/tasks") else "POST"
+        refused = await guarded.request(method, path, headers=bearer(responder))
+        assert (refused.status_code, _error(refused)) == (403, "PermissionDeniedError")
+
+    listed = await guarded.get(
+        "/queues/default/tasks/pending", headers=bearer(responder)
+    )
+    assert [d["task"]["id"] for d in listed.json()["tasks"]] == [task_id]
+    completed = await guarded.post(
+        f"/tasks/{task_id}/complete", json=done, headers=bearer(responder)
+    )
+    assert completed.status_code == 204
+    task = await guarded.get(f"/tasks/{task_id}", headers=bearer(user))
+    assert (task.json()["status"], task.json()["result"]) == ("succeeded", "done")
 
 
 async def test_with_authentication_off_every_route_is_open(

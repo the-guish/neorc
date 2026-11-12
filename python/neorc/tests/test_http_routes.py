@@ -20,7 +20,7 @@ import pytest
 
 from neorc.manager import create_app
 from neorc.manager._routes import MAX_BODY_BYTES
-from neorc_core import Manager
+from neorc_core import Manager, QueueKind
 from neorc_core._values import MAX_JSON_DEPTH, JsonValue
 
 MAIN: JsonValue = {
@@ -431,3 +431,100 @@ async def test_listing_requests_are_validated_and_misses_are_404(
     assert (no_task.status_code, _error(no_task)) == (404, "TaskNotFoundError")
     for response in (bad_before, bad_status, bad_limit, huge_limit, bad_flow):
         assert (response.status_code, _error(response)) == (422, "InvalidValueError")
+
+
+# The responders' routes: docs/specs/task-completion.md.
+
+
+async def test_a_pending_task_is_listed_and_completed_over_http(
+    http: httpx.AsyncClient,
+) -> None:
+    run_id = await _started(http)
+    published = await http.post(f"/runs/{run_id}/tasks", json={"address": WORK})
+    task_id = published.json()["id"]
+
+    listed = await http.get("/queues/default/tasks/pending")
+    empty = await http.get("/queues/elsewhere/tasks/pending")
+    completed = await http.post(f"/tasks/{task_id}/complete", json={"result": "hi!"})
+    again = await http.post(f"/tasks/{task_id}/complete", json={"result": "twice"})
+    after = await http.get("/queues/default/tasks/pending")
+    task = await http.get(f"/tasks/{task_id}")
+    succeeded = await http.post(
+        f"/runs/{run_id}/succeed", json={"output": "tasks.work"}
+    )
+
+    assert listed.status_code == 200
+    (delivery,) = listed.json()["tasks"]
+    assert delivery["task"]["id"] == task_id
+    assert delivery["task"]["status"] == "pending"
+    assert delivery["inputs"] == {"word": "hi"}
+    assert (empty.status_code, empty.json()) == (200, {"tasks": []})
+    assert (completed.status_code, completed.content) == (204, b"")
+    assert (again.status_code, again.json()["error"]) == (409, "TaskStateError")
+    assert after.json() == {"tasks": []}
+    assert task.json()["status"] == "succeeded"
+    assert task.json()["attempts"] == 0
+    assert succeeded.json()["output"] == "hi!"
+
+
+async def test_completions_the_manager_refuses_carry_the_error_they_hit(
+    http: httpx.AsyncClient,
+) -> None:
+    run_id = await _started(http)
+    published = await http.post(f"/runs/{run_id}/tasks", json={"address": WORK})
+    task_id = published.json()["id"]
+
+    unknown = await http.post(f"/tasks/{uuid.uuid4()}/complete", json={"result": 1})
+    not_an_id = await http.post("/tasks/nope/complete", json={"result": 1})
+    reserved = await http.post(
+        f"/tasks/{task_id}/complete", json={"result": {"$oops": 1}}
+    )
+    no_body = await http.post(f"/tasks/{task_id}/complete")
+    bad_limit = await http.get("/queues/default/tasks/pending", params={"limit": 0})
+    bad_queue = await http.get("/queues/a.b/tasks/pending")
+    still = await http.get(f"/tasks/{task_id}")
+    await http.post(f"/runs/{run_id}/cancel")
+    inactive = await http.post(f"/tasks/{task_id}/complete", json={"result": 1})
+
+    assert (unknown.status_code, unknown.json()["error"]) == (404, "TaskNotFoundError")
+    assert not_an_id.status_code == 422
+    for invalid in (reserved, no_body, bad_queue):
+        assert (invalid.status_code, invalid.json()["error"]) == (
+            422,
+            "InvalidValueError",
+        )
+    assert bad_limit.status_code == 422
+    assert still.json()["status"] == "pending"
+    assert (inactive.status_code, inactive.json()["error"]) == (409, "RunStateError")
+
+
+async def test_a_completion_with_an_error_fails_the_task_over_http(
+    http: httpx.AsyncClient,
+) -> None:
+    run_id = await _started(http)
+    published = await http.post(f"/runs/{run_id}/tasks", json={"address": WORK})
+    task_id = published.json()["id"]
+
+    failed = await http.post(f"/tasks/{task_id}/complete", json={"error": "refused"})
+    task = await http.get(f"/tasks/{task_id}")
+
+    assert failed.status_code == 204
+    assert (task.json()["status"], task.json()["error"]) == ("failed", "refused")
+
+
+async def test_an_external_queue_is_refused_to_workers_over_http(
+    manager: Manager, http: httpx.AsyncClient
+) -> None:
+    await manager.declare_queue("editors", QueueKind.EXTERNAL)
+
+    definitions = await http.get("/queues/editors/tasks")
+    received = await http.post("/queues/editors/tasks/receive", params={"timeout": 0})
+    pending = await http.get("/queues/editors/tasks/pending")
+
+    for refused in (definitions, received):
+        assert (refused.status_code, refused.json()["error"]) == (
+            403,
+            "PermissionDeniedError",
+        )
+        assert "queue 'editors' is external" in refused.json()["detail"]
+    assert (pending.status_code, pending.json()) == (200, {"tasks": []})

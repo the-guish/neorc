@@ -24,7 +24,13 @@ from neorc_core import (
     SignInRefusedError,
     authorize,
 )
-from neorc_core._access import MAX_SECONDS, TOKEN_PREFIX, allowed, secret_hash
+from neorc_core._access import (
+    MAX_SECONDS,
+    QUEUE_ROLES,
+    TOKEN_PREFIX,
+    allowed,
+    secret_hash,
+)
 from neorc_core.local import MemoryCredentialStore
 
 ADA = Identity(
@@ -161,9 +167,11 @@ async def test_a_worker_token_is_bound_to_its_queue(access: Access) -> None:
         (Role.WORKER, "", "not a queue name"),
         (Role.WORKER, "python.gpu", "not a queue name"),
         (Role.WORKER, "a/b", "not a queue name"),
-        (Role.CI, "default", "only a worker token"),
-        (Role.USER, "default", "only a worker token"),
-        ("admin", None, "'admin' is not a role: one of worker, scheduler"),
+        (Role.RESPONDER, None, "a responder token is bound to a queue"),
+        (Role.RESPONDER, "a/b", "not a queue name"),
+        (Role.CI, "default", "only a worker or responder token"),
+        (Role.USER, "default", "only a worker or responder token"),
+        ("admin", None, "'admin' is not a role: one of worker, responder"),
     ],
 )
 async def test_a_token_with_a_role_it_cannot_have_is_refused(
@@ -458,6 +466,7 @@ ALLOWED = {
         "tasks:heartbeat",
         "tasks:finish",
     },
+    Role.RESPONDER: {"queue:pending", "tasks:complete"},
     Role.SCHEDULER: {"flows:read", "runs:read", "runs:schedule", "events:read"},
     Role.CI: {"flows:upload"},
     Role.USER: {
@@ -481,7 +490,7 @@ def token(role: Role, queue: str | None = None) -> Principal:
 def test_a_role_may_do_what_roles_md_lists_and_nothing_else(
     role: Role, permission: Permission
 ) -> None:
-    principal = token(role, "default" if role is Role.WORKER else None)
+    principal = token(role, "default" if role in QUEUE_ROLES else None)
 
     if permission.value in ALLOWED[role]:
         authorize(principal, permission)
@@ -508,6 +517,15 @@ def test_a_worker_may_act_on_its_own_queue_only() -> None:
         authorize(worker, Permission.QUEUE_RECEIVE, queue="python-gpu")
     with pytest.raises(PermissionDeniedError, match="on queue 'python-gpu'"):
         authorize(worker, Permission.QUEUE_DEFINITIONS, queue="python-gpu")
+
+
+def test_a_responder_may_act_on_its_own_queue_only() -> None:
+    responder = token(Role.RESPONDER, "editors")
+
+    authorize(responder, Permission.QUEUE_PENDING, queue="editors")
+    authorize(responder, Permission.TASKS_COMPLETE)
+    with pytest.raises(PermissionDeniedError, match="bound to queue 'editors'"):
+        authorize(responder, Permission.QUEUE_PENDING, queue="default")
 
 
 def test_a_refusal_says_who_was_refused_what() -> None:

@@ -58,6 +58,7 @@ from neorc.postgres._schema import (
     EVENTS_TABLE,
     FLOW_TASKS_TABLE,
     FLOW_VERSIONS_TABLE,
+    QUEUES_TABLE,
     RUNS_TABLE,
 )
 from neorc_core import (
@@ -66,6 +67,8 @@ from neorc_core import (
     EventKind,
     FlowNotFoundError,
     FlowVersionError,
+    Queue,
+    QueueKind,
     Run,
     RunId,
     RunNotFoundError,
@@ -77,6 +80,7 @@ from neorc_core import (
     TaskNotFoundError,
     TaskStateError,
     TaskStatus,
+    ensure_completable,
     ensure_transition,
 )
 from neorc_core._runs import (
@@ -230,7 +234,7 @@ RETURNING {TASK_COLUMNS}
 # One statement, so the lease and everything that goes with it are atomic. The
 # inner SELECT takes the oldest ready task of the queue and locks it, skipping
 # rows another receiver already holds; ready is pending, or leased past the
-# lease's end.
+# lease's end. An external queue has no ready task: no worker receives from it.
 _RECEIVE_TASK = f"""
 UPDATE {FLOW_TASKS_TABLE} AS t
    SET status = 'received',
@@ -243,11 +247,40 @@ UPDATE {FLOW_TASKS_TABLE} AS t
           AND (c.status = 'pending'
                OR (c.status IN ('received', 'running')
                    AND c.lease_expires_at <= now()))
+          AND NOT EXISTS (SELECT 1 FROM {QUEUES_TABLE} AS q
+                           WHERE q.name = $2 AND q.kind = 'external')
         ORDER BY c.position
-          FOR UPDATE SKIP LOCKED
+          FOR UPDATE OF c SKIP LOCKED
         LIMIT 1)
 RETURNING {TASK_COLUMNS}
 """
+
+# Reads only. The join leaves out the tasks of runs that ended: nothing will
+# be published after them, so they are no longer anyone's to complete.
+_PENDING_TASKS = f"""
+SELECT {", ".join(f"t.{column}" for column in TASK_COLUMNS.split(", "))}
+  FROM {FLOW_TASKS_TABLE} AS t
+  JOIN {RUNS_TABLE} AS r ON r.id = t.run_id
+ WHERE t.queue = $1 AND t.status = 'pending' AND r.status = 'active'
+ ORDER BY t.position
+ LIMIT $2
+"""
+
+_COMPLETE_TASK = f"""
+UPDATE {FLOW_TASKS_TABLE}
+   SET status = $1, result = $2, error = $3, finished_at = now()
+ WHERE id = $4
+RETURNING {TASK_COLUMNS}
+"""
+
+_DECLARE_QUEUE = f"""
+INSERT INTO {QUEUES_TABLE} (name, kind) VALUES ($1, $2)
+ON CONFLICT (name) DO UPDATE SET kind = EXCLUDED.kind
+"""
+
+_SELECT_QUEUES = f"SELECT name, kind FROM {QUEUES_TABLE} ORDER BY name"
+
+_SELECT_QUEUE_KIND = f"SELECT kind FROM {QUEUES_TABLE} WHERE name = $1"
 
 _CLAIM_TASK = f"""
 UPDATE {FLOW_TASKS_TABLE}
@@ -576,9 +609,53 @@ class PostgresStore(Pooled, Store):
             await _append_events(conn, [(task.run_id, EventKind.TASK_FINISHED)])
             return task_from_row(row)
 
+    async def pending_tasks(
+        self, queue: str, *, limit: int = DEFAULT_PAGE
+    ) -> list[Task]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(_PENDING_TASKS, queue, limit)
+        return [task_from_row(row) for row in rows]
+
+    async def complete_task(
+        self, task_id: TaskId, *, result: JsonValue = None, error: str | None = None
+    ) -> Task:
+        status = TaskStatus.FAILED if error is not None else TaskStatus.SUCCEEDED
+        async with self.pool.acquire() as conn, conn.transaction():
+            run = await _run(conn, (await _task(conn, task_id)).run_id)
+            await _lock_roots(conn, [run.root_id])
+            task = await _task(conn, task_id, lock=True)
+            ensure_completable(task.status)
+            # Under the root lock, the run's status is settled.
+            ensure_active(await _run(conn, run.id))
+            row = await conn.fetchrow(
+                _COMPLETE_TASK,
+                status.value,
+                dumps_json(result if error is None else None),
+                storable_text(error) if error is not None else None,
+                task_id,
+            )
+            if row is None:  # unreachable: the row was locked just above
+                raise TaskNotFoundError(str(task_id))
+            await _append_events(conn, [(task.run_id, EventKind.TASK_FINISHED)])
+            return task_from_row(row)
+
     async def get_task(self, task_id: TaskId) -> Task:
         async with self.pool.acquire() as conn:
             return await _task(conn, task_id)
+
+    async def declare_queue(self, name: str, kind: QueueKind) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(_DECLARE_QUEUE, name, kind.value)
+
+    async def queues(self) -> list[Queue]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(_SELECT_QUEUES)
+        return [Queue(row["name"], QueueKind(row["kind"])) for row in rows]
+
+    async def queue_kind(self, name: str) -> QueueKind:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(_SELECT_QUEUE_KIND, name)
+        return QueueKind.WORKER if row is None else QueueKind(row["kind"])
 
     async def events_after(self, sequence: int, *, limit: int = 100) -> list[Event]:
         async with self.pool.acquire() as conn:

@@ -61,3 +61,15 @@ def ensure_transition(current: TaskStatus, target: TaskStatus) -> None:
         raise TaskStateError(
             f"a {current.value} task cannot become {target.value}",
         )
+
+
+def ensure_completable(current: TaskStatus) -> None:
+    """Raise ``TaskStateError`` unless a task that is ``current`` may be completed.
+
+    A pending task is the only one: once a worker received a task, the task
+    is the worker's to finish, and a task already ended stays as it ended.
+    """
+    if current is not TaskStatus.PENDING:
+        raise TaskStateError(
+            f"a {current.value} task cannot be completed: only a pending one can",
+        )

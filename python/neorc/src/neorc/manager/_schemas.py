@@ -124,6 +124,11 @@ class DeliveryResponse(_Exact):
     """Every param and fixed param in its JSON form, references filled in."""
 
 
+class PendingTasksResponse(_Exact):
+    tasks: list[DeliveryResponse]
+    """A queue's pending tasks, oldest first, each as a worker would receive it."""
+
+
 class TaskStepResponse(_Exact):
     name: str
     handler: str

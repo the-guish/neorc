@@ -580,12 +580,85 @@ def test_a_created_token_is_one_the_manager_accepts(
 
 
 @pytest.mark.postgres
+def test_queues_are_declared_and_listed_on_the_database(
+    pg_schema: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv(_cli.DATABASE_URL_ENV, pg_schema)
+
+    assert _cli.main(["queues", "list"]) == 0
+    nothing = capsys.readouterr().out
+    assert _cli.main(["queues", "declare", "editors", "--kind", "external"]) == 0
+    declared = capsys.readouterr().out
+    assert _cli.main(["queues", "declare", "gpu", "--kind", "worker"]) == 0
+    capsys.readouterr()
+    assert _cli.main(["queues", "list", "--database-url", pg_schema]) == 0
+    listed = capsys.readouterr().out
+
+    assert nothing == ""
+    assert declared == "declared queue 'editors' as external\n"
+    assert listed == "editors\texternal\ngpu\tworker\n"
+
+
+@pytest.mark.postgres
+def test_a_worker_token_and_an_external_queue_do_not_meet(
+    pg_schema: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv(_cli.DATABASE_URL_ENV, pg_schema)
+    worker = ["tokens", "create", "w", "--role", "worker", "--queue"]
+    responder = ["tokens", "create", "r", "--role", "responder", "--queue"]
+    external = ["queues", "declare", "--kind", "external"]
+
+    assert _cli.main([*external, "editors"]) == 0
+    with pytest.raises(SystemExit, match="queue 'editors' is external"):
+        _cli.main([*worker, "editors"])
+    assert _cli.main([*responder, "editors"]) == 0
+    created = capsys.readouterr().err
+    assert _cli.main([*worker, "default"]) == 0
+    with pytest.raises(
+        SystemExit, match=r"cannot declare the queue: .* revoke w first"
+    ):
+        _cli.main([*external, "default"])
+    with pytest.raises(SystemExit, match=r"'a\.b' is not a queue name"):
+        _cli.main([*external, "a.b"])
+    capsys.readouterr()
+    assert _cli.main(["tokens", "revoke", "w"]) == 0
+    assert _cli.main([*external, "default"]) == 0
+    capsys.readouterr()
+    assert _cli.main(["queues", "list"]) == 0
+    queues = capsys.readouterr().out
+    assert _cli.main(["tokens", "list"]) == 0
+    tokens = capsys.readouterr().out
+
+    assert "responder on queue 'editors' token 'r'" in created
+    assert queues == "default\texternal\neditors\texternal\n"
+    assert [line.split("\t")[:2] for line in tokens.splitlines()] == [
+        ["r", "responder on queue 'editors'"]
+    ]
+
+
+def test_a_queue_kind_is_one_of_the_two(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit):
+        _cli.main(["queues", "declare", "editors", "--kind", "manual"])
+    assert "invalid choice: 'manual'" in capsys.readouterr().err
+    with pytest.raises(SystemExit, match="no database"):
+        _cli.main(["queues", "declare", "editors", "--kind", "external"])
+
+
+@pytest.mark.postgres
 @pytest.mark.parametrize(
     ("arguments", "problem"),
     [
         (["--role", "worker"], "cannot create the token: a worker token is bound"),
         (["--role", "worker", "--queue", "a.b"], "'a.b' is not a queue name"),
-        (["--role", "ci", "--queue", "default"], "only a worker token is bound"),
+        (["--role", "responder"], "a responder token is bound to a queue"),
+        (
+            ["--role", "ci", "--queue", "default"],
+            "only a worker or responder token is bound",
+        ),
     ],
 )
 def test_a_token_with_a_role_it_cannot_have_is_not_created(

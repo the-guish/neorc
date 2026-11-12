@@ -31,7 +31,7 @@ from fastapi import APIRouter, Depends, Query, Request, Response, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
 
-from neorc.manager._access import permit, worker_queue
+from neorc.manager._access import bound_queue, permit
 from neorc.manager._schemas import (
     DeliveryResponse,
     EventListResponse,
@@ -40,6 +40,7 @@ from neorc.manager._schemas import (
     FlowVersionsResponse,
     HeartbeatResponse,
     LatestEventResponse,
+    PendingTasksResponse,
     RunListResponse,
     RunResponse,
     RunStateResponse,
@@ -73,7 +74,7 @@ what the in-memory manager receives too.
 """
 
 MAX_PAGE = 500
-"""The most runs one page of ``GET /runs`` may ask for."""
+"""The most runs, or pending tasks, one page of a listing may ask for."""
 
 
 def _get_manager(request: Request) -> Manager:
@@ -546,7 +547,7 @@ async def claim_task(
     principal: Annotated[Principal | None, permit(Permission.TASKS_CLAIM)],
 ) -> Response:
     """A worker claims a task it received; 409 if its run is no longer active."""
-    await manager.claim_task(task_id, queue=worker_queue(principal))
+    await manager.claim_task(task_id, queue=bound_queue(principal))
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -564,7 +565,7 @@ async def extend_lease(
     """A worker keeping the task it holds; when its lease now lapses."""
     body = await read_body(request, HeartbeatRequest)
     expires_at = await manager.extend_lease(
-        task_id, lease_seconds=body.lease_seconds, queue=worker_queue(principal)
+        task_id, lease_seconds=body.lease_seconds, queue=bound_queue(principal)
     )
     return {"lease_expires_at": expires_at.isoformat()}
 
@@ -579,6 +580,46 @@ async def report_finished(
     """A worker's result in its JSON form, or its failure."""
     body = await read_body(request, FinishedRequest)
     await manager.report_finished(
-        task_id, result=body.result, error=body.error, queue=worker_queue(principal)
+        task_id, result=body.result, error=body.error, queue=bound_queue(principal)
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# Responders: a person or another system, completing tasks with no lease.
+# See docs/specs/task-completion.md.
+
+
+class CompleteRequest(BaseModel):
+    result: Any = None
+    error: str | None = None
+
+
+@router.get(
+    "/queues/{queue}/tasks/pending",
+    dependencies=[permit(Permission.QUEUE_PENDING)],
+    response_model=None,
+    responses=documented(PendingTasksResponse),
+)
+async def pending_tasks(
+    manager: Managed,
+    queue: str,
+    limit: Annotated[int, Query(ge=1, le=MAX_PAGE)] = DEFAULT_PAGE,
+) -> dict[str, list[dict[str, Any]]]:
+    """A queue's pending tasks, oldest first, inputs filled in. Leases nothing."""
+    deliveries = await manager.pending_tasks(queue, limit=limit)
+    return {"tasks": [wire.delivery_to(delivery) for delivery in deliveries]}
+
+
+@router.post("/tasks/{task_id}/complete", status_code=status.HTTP_204_NO_CONTENT)
+async def complete_task(
+    request: Request,
+    manager: Managed,
+    task_id: TaskId,
+    principal: Annotated[Principal | None, permit(Permission.TASKS_COMPLETE)],
+) -> Response:
+    """End a pending task with a result, or an error; 409 unless it is pending."""
+    body = await read_body(request, CompleteRequest)
+    await manager.complete_task(
+        task_id, result=body.result, error=body.error, queue=bound_queue(principal)
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)

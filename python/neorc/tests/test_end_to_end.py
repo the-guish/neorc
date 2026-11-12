@@ -12,6 +12,7 @@ role, and a worker token per queue.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -21,7 +22,8 @@ import pytest
 from conftest import EXAMPLES, Tokens, deployed_example, role_tokens, serve_app
 
 from neorc.manager import build_app
-from neorc_core import Access, Role, RunStatus
+from neorc_core import Access, InvalidValueError, QueueKind, Role, RunStatus
+from neorc_core._values import JsonValue
 from neorc_core.flows import read_flows
 from neorc_core.testing import examples
 
@@ -135,3 +137,100 @@ async def test_an_external_trigger_starts_runs_and_reads_nothing(
     assert (read.status_code, read.json()["error"]) == (403, "PermissionDeniedError")
     assert "external-trigger token may not runs:read" in read.json()["detail"]
     assert cancel.status_code == 403
+
+
+# Task completion, deployed: docs/specs/task-completion.md.
+
+APPROVAL: JsonValue = {
+    "name": "approval",
+    "version": "1.0.0",
+    "output": "tasks.approve",
+    "steps": {
+        # hello's handler, on a worker queue; it prints, and returns nothing.
+        "a": {"queue": "default", "handler": "tasks:a"},
+        "approve": {
+            "queue": "editors",
+            "handler": "approve-draft",
+            "params": {"written": "tasks.a", "id": "neorc.task_id"},
+            "fixed_params": {"form": "approval"},
+        },
+    },
+}
+
+
+@pytest.mark.usefixtures("own_tasks_module")
+async def test_a_run_waits_for_a_responder_deployed(
+    pg_schema: str, manager_address: str, tokens: Tokens
+) -> None:
+    """A worker runs one step, a responder completes the next, over HTTP.
+
+    The queue is declared and the tokens created as the commands do it, on the
+    database. Nothing takes the external task but the responder: not the
+    worker's token, not a person's, and not a second completion.
+    """
+    from neorc.postgres import PostgresCredentialStore, PostgresStore
+
+    async with (
+        PostgresCredentialStore(pg_schema) as credentials,
+        PostgresStore(pg_schema) as store,
+    ):
+        access = Access(credentials, queues=store)
+        await access.declare_queue("editors", QueueKind.EXTERNAL)
+        responder, _ = await access.create_token(
+            "inbox", Role.RESPONDER, queue="editors"
+        )
+        with pytest.raises(InvalidValueError, match="queue 'editors' is external"):
+            await access.create_token("w", Role.WORKER, queue="editors")
+
+    def bearer(secret: str) -> dict[str, str]:
+        return {"authorization": f"Bearer {secret}", "content-type": "application/json"}
+
+    async with (
+        deployed_example(
+            manager_address, "hello", ["default"], tokens=tokens
+        ) as client,
+        httpx.AsyncClient(base_url=manager_address) as http,
+    ):
+        await client.upload_flows([APPROVAL])
+        run = await client.start_run("approval", {})
+
+        async with asyncio.timeout(30):
+            while True:
+                listed = await http.get(
+                    "/queues/editors/tasks/pending", headers=bearer(responder)
+                )
+                assert listed.status_code == 200
+                if listed.json()["tasks"]:
+                    break
+                await asyncio.sleep(0.05)
+        (delivery,) = listed.json()["tasks"]
+        task_id = delivery["task"]["id"]
+        complete = f"/tasks/{task_id}/complete"
+        answer = {"result": {"approved": True, "by": "ada"}}
+
+        by_a_worker = await http.post(
+            "/queues/editors/tasks/receive",
+            params={"timeout": 0},
+            headers=bearer(tokens.workers["default"]),
+        )
+        by_a_person = await http.post(
+            complete, json=answer, headers=bearer(tokens.user)
+        )
+        waiting = await client.get_run(run.id)
+        completed = await http.post(complete, json=answer, headers=bearer(responder))
+        again = await http.post(complete, json=answer, headers=bearer(responder))
+        finished = await examples.wait_for_run(client, run.id)
+        after = await http.get(
+            "/queues/editors/tasks/pending", headers=bearer(responder)
+        )
+
+    assert delivery["task"]["handler"] == "approve-draft"
+    assert delivery["inputs"] == {"form": "approval", "written": None, "id": task_id}
+    assert by_a_worker.status_code == 403
+    assert by_a_person.status_code == 403
+    assert waiting.status is RunStatus.ACTIVE
+    assert completed.status_code == 204
+    assert (again.status_code, again.json()["error"]) == (409, "TaskStateError")
+    assert finished.status is RunStatus.SUCCEEDED
+    assert finished.output == {"approved": True, "by": "ada"}
+    assert after.json() == {"tasks": []}

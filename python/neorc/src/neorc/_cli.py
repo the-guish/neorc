@@ -44,6 +44,7 @@ from neorc_core import (
     InvalidValueError,
     ManagerUnavailableError,
     NeorcError,
+    QueueKind,
     Role,
     RunStatus,
     Scheduler,
@@ -60,6 +61,7 @@ DATABASE_URL_ENV = "NEORC_DATABASE_URL"
 AUTH_CONFIG_ENV = "NEORC_AUTH_CONFIG"
 
 ROLES = tuple(role.value for role in Role)
+QUEUE_KINDS = tuple(kind.value for kind in QueueKind)
 
 DEFAULT_HOST = "0.0.0.0"  # a manager serves workers on other hosts
 DEFAULT_PORT = 8420
@@ -136,7 +138,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="what the token is for; each role may do a fixed set of things",
     )
     tokens_create.add_argument(
-        "--queue", default=None, help="the queue a worker token is bound to"
+        "--queue",
+        default=None,
+        help="the queue a worker or responder token is bound to",
     )
     tokens_create.add_argument(
         "--expires-days",
@@ -155,6 +159,28 @@ def build_parser() -> argparse.ArgumentParser:
     tokens_revoke.add_argument("name")
     _database_url_option(tokens_revoke)
     tokens_revoke.set_defaults(handler=tokens_revoke_command)
+
+    queues = commands.add_parser(
+        "queues", help="declare what kind the queues are, on the manager's database"
+    )
+    queues_commands = queues.add_subparsers(dest="subcommand", required=True)
+    queues_declare = queues_commands.add_parser(
+        "declare",
+        help="say what kind a queue is; one nobody declared is a worker queue",
+    )
+    queues_declare.add_argument("name", help="letters, digits, _ and -")
+    queues_declare.add_argument(
+        "--kind",
+        required=True,
+        choices=QUEUE_KINDS,
+        help="worker: workers receive its tasks; external: its tasks wait for a "
+        "responder to complete them",
+    )
+    _database_url_option(queues_declare)
+    queues_declare.set_defaults(handler=queues_declare_command)
+    queues_list = queues_commands.add_parser("list", help="list the declared queues")
+    _database_url_option(queues_list)
+    queues_list.set_defaults(handler=queues_list_command)
 
     sessions = commands.add_parser(
         "sessions", help="manage the sessions of people signed in to the UI"
@@ -507,7 +533,7 @@ def tokens_list_command(args: argparse.Namespace) -> int:
 
 
 def _described(token: ApiToken) -> str:
-    """A token's role, with the queue a worker token is bound to."""
+    """A token's role, with the queue a worker or responder token is bound to."""
     if token.queue is None:
         return token.role.value
     return f"{token.role.value} on queue {token.queue!r}"
@@ -527,6 +553,33 @@ def tokens_revoke_command(args: argparse.Namespace) -> int:
     return _on_credentials(args, revoke)
 
 
+def queues_declare_command(args: argparse.Namespace) -> int:
+    """Declare a queue's kind; exits 1, saying why, when it is refused."""
+    from neorc_core import Access
+
+    async def declare(access: Access) -> int:
+        try:
+            await access.declare_queue(args.name, QueueKind(args.kind))
+        except InvalidValueError as exc:
+            raise SystemExit(f"cannot declare the queue: {exc}") from None
+        print(f"declared queue {args.name!r} as {args.kind}")
+        return 0
+
+    return _on_credentials(args, declare)
+
+
+def queues_list_command(args: argparse.Namespace) -> int:
+    """One line per declared queue: name, kind."""
+    from neorc_core import Access
+
+    async def listing(access: Access) -> int:
+        for queue in await access.queues():
+            print(f"{queue.name}\t{queue.kind.value}")
+        return 0
+
+    return _on_credentials(args, listing)
+
+
 def sessions_clear_command(args: argparse.Namespace) -> int:
     """End every session: everyone signed in signs in again."""
     from neorc_core import Access
@@ -544,13 +597,19 @@ def _on_credentials(
 ) -> int:
     """Run ``act`` on an ``Access`` over the manager's database.
 
-    The credential tables must be there already: these commands create none,
-    so a mistyped database URL is not given a set of empty tables.
+    The tables of credentials and of queue declarations must be there already:
+    these commands create none, so a mistyped database URL is not given a set
+    of empty tables.
     """
     with _needs("postgres"):
-        from neorc.postgres import PostgresCredentialStore
+        from neorc.postgres import PostgresCredentialStore, PostgresStore
         from neorc.postgres._driver import CONNECTION_ERRORS
-        from neorc.postgres._schema import MissingTablesError, ensure_credential_tables
+        from neorc.postgres._schema import (
+            CREDENTIAL_TABLES,
+            QUEUES_TABLE,
+            MissingTablesError,
+            ensure_tables,
+        )
 
     from neorc_core import Access
 
@@ -559,9 +618,12 @@ def _on_credentials(
         raise SystemExit(f"no database: pass --database-url or set ${DATABASE_URL_ENV}")
 
     async def main() -> int:
-        await ensure_credential_tables(dsn)
-        async with PostgresCredentialStore(dsn, max_size=1) as credentials:
-            return await act(Access(credentials))
+        await ensure_tables(dsn, (*CREDENTIAL_TABLES, QUEUES_TABLE))
+        async with (
+            PostgresCredentialStore(dsn, max_size=1) as credentials,
+            PostgresStore(dsn, max_size=1) as store,
+        ):
+            return await act(Access(credentials, queues=store))
 
     try:
         return asyncio.run(main())

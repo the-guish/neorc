@@ -123,8 +123,8 @@ def permit(permission: Permission) -> Any:
     return Depends(dependency)
 
 
-def worker_queue(principal: Principal | None) -> str | None:
-    """The queue a worker's request is confined to: its token's, if any."""
+def bound_queue(principal: Principal | None) -> str | None:
+    """The queue a worker's or responder's request is confined to: its token's."""
     return None if principal is None else principal.queue
 
 

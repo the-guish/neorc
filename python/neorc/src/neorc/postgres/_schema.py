@@ -33,7 +33,8 @@ of ``information_schema`` finds them missing; the check comes first because
 ``ALTER TABLE`` locks the table exclusively before it looks. Later changes,
 such as the unique task address and the roles on credentials, are made to the
 statements alone: neorc is installed nowhere yet, so there is no database to
-keep.
+keep. The responder role is one of those: a database created before it keeps
+``CHECK`` constraints that refuse a responder token.
 """
 
 from __future__ import annotations
@@ -44,6 +45,7 @@ FLOW_VERSIONS_TABLE = "neorc_flow_versions"
 RUNS_TABLE = "neorc_runs"
 FLOW_TASKS_TABLE = "neorc_flow_tasks"
 EVENTS_TABLE = "neorc_events"
+QUEUES_TABLE = "neorc_queues"
 TOKENS_TABLE = "neorc_api_tokens"
 SESSIONS_TABLE = "neorc_sessions"
 PENDING_LOGINS_TABLE = "neorc_pending_logins"
@@ -56,6 +58,7 @@ TABLES = (
     RUNS_TABLE,
     FLOW_TASKS_TABLE,
     EVENTS_TABLE,
+    QUEUES_TABLE,
     *CREDENTIAL_TABLES,
 )
 """Every table ``create_schema`` creates."""
@@ -206,21 +209,29 @@ CREATE TABLE IF NOT EXISTS {EVENTS_TABLE} (
                                      'run_finished'))
 );
 
+-- The declared queues; kind mirrors QueueKind. A queue with no row is a worker
+-- queue, so only the external ones need one.
+CREATE TABLE IF NOT EXISTS {QUEUES_TABLE} (
+    name             text PRIMARY KEY,
+    kind             text NOT NULL CHECK (kind IN ('worker', 'external')),
+    created_at       timestamptz NOT NULL DEFAULT now()
+);
+
 -- Credentials. Secrets are never stored, only their SHA-256 in hex, which
 -- rows are found by. Times come from now(), so expiry is decided by one clock.
--- role mirrors Role; a worker token alone is bound to a queue.
+-- role mirrors Role; a worker or responder token alone is bound to a queue.
 CREATE TABLE IF NOT EXISTS {TOKENS_TABLE} (
     id               uuid PRIMARY KEY,
     name             text NOT NULL UNIQUE,
     secret_hash      text NOT NULL UNIQUE,
     role             text NOT NULL
-                     CHECK (role IN ('worker', 'scheduler', 'ci', 'user',
-                                     'external-trigger')),
+                     CHECK (role IN ('worker', 'responder', 'scheduler', 'ci',
+                                     'user', 'external-trigger')),
     queue            text,
     created_at       timestamptz NOT NULL DEFAULT now(),
     expires_at       timestamptz,
     CONSTRAINT {TOKENS_TABLE}_queue_check
-        CHECK ((role = 'worker') = (queue IS NOT NULL))
+        CHECK ((role IN ('worker', 'responder')) = (queue IS NOT NULL))
 );
 
 -- Who signed in, as their provider said; kind mirrors PrincipalKind, role Role.
@@ -230,15 +241,15 @@ CREATE TABLE IF NOT EXISTS {SESSIONS_TABLE} (
     subject          text NOT NULL,
     name             text NOT NULL,
     role             text NOT NULL
-                     CHECK (role IN ('worker', 'scheduler', 'ci', 'user',
-                                     'external-trigger')),
+                     CHECK (role IN ('worker', 'responder', 'scheduler', 'ci',
+                                     'user', 'external-trigger')),
     queue            text,
     provider         text,
     email            text,
     created_at       timestamptz NOT NULL DEFAULT now(),
     expires_at       timestamptz NOT NULL,
     CONSTRAINT {SESSIONS_TABLE}_queue_check
-        CHECK ((role = 'worker') = (queue IS NOT NULL))
+        CHECK ((role IN ('worker', 'responder')) = (queue IS NOT NULL))
 );
 
 CREATE TABLE IF NOT EXISTS {PENDING_LOGINS_TABLE} (
@@ -299,7 +310,14 @@ async def ensure_credential_tables(dsn: str, *, schema: str | None = None) -> No
     A manager with authentication on would otherwise answer every request with
     a 500, which workers and schedulers take for an outage and retry forever.
     """
-    missing = await missing_tables(dsn, CREDENTIAL_TABLES, schema=schema)
+    await ensure_tables(dsn, CREDENTIAL_TABLES, schema=schema)
+
+
+async def ensure_tables(
+    dsn: str, tables: tuple[str, ...], *, schema: str | None = None
+) -> None:
+    """Raise ``MissingTablesError`` naming the fix if any of ``tables`` is missing."""
+    missing = await missing_tables(dsn, tables, schema=schema)
     if missing:
         raise MissingTablesError(
             f"the database has no {', '.join(missing)}: start the manager once "
