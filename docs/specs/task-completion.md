@@ -25,8 +25,8 @@ The manager lists the pending tasks of a queue. Each task in the list has its
 inputs filled in, as a worker receives them (see [core.md](core.md), "Task
 payloads").
 
-Listing does not lease or change any task. A task stays in the list until
-someone completes it or its run ends.
+Listing does not lease or change any task. A task leaves the list when someone
+completes it, when a worker receives it, or when its run ends.
 
 Uploading a new version of a flow cancels its runs in progress (see
 [flows.md](flows.md), "Sub-flows and versions"). Their pending tasks leave the
@@ -35,18 +35,21 @@ list.
 ## In a flow file
 
 A flow file declares the task as any other task, with a queue, a handler and
-params. The queue says who completes it.
+params. The handler is the fixed text `external`.
 
 ```yaml
 approve_draft:
   queue: editors
-  handler: approve-draft
+  handler: external
   params:
     draft: tasks.write_draft
 ```
 
-The handler is a text for whoever completes the task. The manager and the
-scheduler store it and pass it on.
+- An `external` task ends only by a completion. Workers receive the other
+  tasks of the queue.
+- The text `external` is reserved. A worker runtime names its handlers with
+  other texts.
+- The queue says who completes the task.
 
 ## Who may complete
 
@@ -62,8 +65,9 @@ queue, as a worker token is (see [roles.md](roles.md)).
   receiving it.
 - A queue takes completions once it has a responder token. Tokens are created
   on the database, and the operator chooses those queues.
-- A queue belongs to workers or to responders. Its tokens all have the same
-  role.
+- A queue has worker tokens, responder tokens, or both.
+- A responder completes any pending task of its queue. A task meant for a
+  worker can be completed until a worker receives it.
 
 ## Not in scope
 
