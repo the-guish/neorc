@@ -43,13 +43,29 @@ after a sequence misses none.
 
 The journal is a write-ahead log, so readers never wait for a writer. A
 writer waits for another process's write for up to `busy_seconds`, 30 by
-default.
+default. A file that cannot keep a write-ahead log is refused at `open`:
+SQLite answers the request for one with the journal it kept, and no error, so
+the store reads the answer. Several processes may open a new file at the same
+moment: SQLite does not wait for a lock while a file's journal changes, so
+the store waits for it.
 
 SQLite's calls block, so the connection lives on one thread of its own and
 the event loop is never held. An operation the caller stops waiting for still
 runs to its end on that thread: a `receive_task` cancelled at that moment
 leaves its task leased until the lease lapses, as a worker lost between its
 request and the reply does.
+
+## When SQLite refuses
+
+Whatever SQLite refuses is raised as `ManagerUnavailableError`, as a manager
+that did not answer is: a file still locked after `busy_seconds` first of
+all, and a full disk or a damaged file as well. A worker and a scheduler log
+it and ask again a second later. A scheduler fails no run for it, as it does
+for a request the manager rejected: the action was not refused, only not
+done yet.
+
+A transaction SQLite refused, at its `COMMIT` too, is rolled back before the
+error is raised, so the connection takes the next one.
 
 ## The tables
 
@@ -81,8 +97,14 @@ wakes every waiter when it moved.
 
 It cannot tell a published task from any other commit, so a waiter is woken
 more often than it has something to receive. A wakeup is a hint, as
-everywhere: the waiter reads the store and waits again. A file it finds
-locked whole, as by a backup, counts as changed.
+everywhere: the waiter reads the store and waits again.
+
+The watch does not end by itself. A reading SQLite refuses, of a file locked
+whole, as by a backup, or of one that is no database any more, closes the
+watch's connection, and the next reading opens another. The waiters are woken
+when the readings stop and again when they come back; in between they wait
+out their poll timeout. A file deleted and made again under a running process
+is not noticed: the connections hold the one that was deleted.
 
 ## Leases and restarts
 

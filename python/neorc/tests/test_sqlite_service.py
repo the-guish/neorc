@@ -13,6 +13,7 @@ again, and a run goes on from where it was.
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
@@ -44,14 +45,18 @@ def path(tmp_path: Path) -> Path:
 
 
 @asynccontextmanager
-async def process(path: Path, *, alone: bool) -> AsyncIterator[Manager]:
+async def process(
+    path: Path, *, alone: bool, busy_seconds: float = 30.0
+) -> AsyncIterator[Manager]:
     """What one process holds: a manager on a store and notifiers of its own.
 
     ``alone`` on the file, it wakes its waiters in memory; otherwise it
     watches the file for the other processes' commits.
     """
     async with AsyncExitStack() as stack:
-        store = await stack.enter_async_context(SqliteStore(path))
+        store = await stack.enter_async_context(
+            SqliteStore(path, busy_seconds=busy_seconds)
+        )
         tasks: TaskNotifier
         events: TaskNotifier
         if alone:
@@ -245,3 +250,35 @@ async def test_a_run_goes_on_after_everything_stopped_and_started_again(
     assert task.status is TaskStatus.SUCCEEDED
     assert task.attempts == 2
     assert capfd.readouterr().out == "a\n"
+
+
+async def test_a_worker_and_a_scheduler_outlast_a_locked_file(path: Path) -> None:
+    """Another process writing for longer than they wait: they ask again.
+
+    The scheduler's request to publish the task is not one the manager
+    rejected, so it fails no run; and neither loop ends, or the run would
+    never finish once the file is free.
+    """
+    async with process(path, alone=True, busy_seconds=0.05) as manager:
+        client = DirectManagerClient(manager)
+        await client.upload_flows(read_flows(EXAMPLES / "hello" / "flows"))
+        writing = sqlite3.connect(path, isolation_level=None)
+        try:
+            async with running(
+                scheduler_on=manager,
+                workers_on=manager,
+                code_location=EXAMPLES / "hello",
+                poll_seconds=0.1,
+            ):
+                run = await client.start_run("a", {})
+                writing.execute("BEGIN IMMEDIATE")  # before either loop goes on
+                await asyncio.sleep(0.5)
+                assert (await client.get_run(run.id)).status is RunStatus.ACTIVE
+                assert await manager.run_tasks(run.id) == []
+
+                writing.execute("ROLLBACK")
+                finished = await examples.wait_for_run(client, run.id)
+        finally:
+            writing.close()
+
+    assert finished.status is RunStatus.SUCCEEDED
