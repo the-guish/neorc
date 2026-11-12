@@ -16,6 +16,7 @@ import re
 import sqlite3
 import subprocess
 import sys
+import time
 from collections.abc import AsyncIterator
 from enum import StrEnum
 from pathlib import Path
@@ -23,6 +24,7 @@ from pathlib import Path
 import pytest
 
 from neorc.sqlite import SqliteStore, create_schema
+from neorc.sqlite._db import Database
 from neorc.sqlite._schema import (
     EVENTS_TABLE,
     FLOW_TASKS_TABLE,
@@ -32,6 +34,7 @@ from neorc.sqlite._schema import (
 )
 from neorc_core import (
     EventKind,
+    ManagerUnavailableError,
     NeorcError,
     Run,
     RunStatus,
@@ -205,6 +208,103 @@ async def test_a_sqlite_too_old_for_the_statements_is_refused_at_open(
 
     with pytest.raises(NeorcError, match=r"too old: neorc needs 3\.35\.0"):
         await SqliteStore(path).open()
+
+
+async def test_a_file_locked_past_the_wait_is_the_manager_unavailable(
+    path: Path,
+) -> None:
+    """Another process writing for longer than the wait: said as a manager that
+    did not answer is, which a worker and a scheduler try again after."""
+    async with SqliteStore(path, busy_seconds=0.05) as store:
+        run = await _started(store)
+        writing = sqlite3.connect(path, isolation_level=None)
+        try:
+            writing.execute("BEGIN IMMEDIATE")
+
+            with pytest.raises(ManagerUnavailableError, match="database is locked"):
+                await _publish(store, run, 1)
+            # Readers never wait for a writer.
+            assert await store.get_run(run.id) == run
+
+            writing.execute("ROLLBACK")
+            assert len(await _publish(store, run, 1)) == 1
+        finally:
+            writing.close()
+
+
+async def test_a_commit_sqlite_refuses_leaves_no_transaction_open(path: Path) -> None:
+    """A transaction left open would have every later one refused."""
+    async with Database(path) as database:
+        await database.script(
+            "PRAGMA foreign_keys = ON;"
+            "CREATE TABLE parent (id integer PRIMARY KEY);"
+            "CREATE TABLE child (parent integer REFERENCES parent"
+            " DEFERRABLE INITIALLY DEFERRED);"
+        )
+
+        def orphan(connection: sqlite3.Connection) -> None:
+            connection.execute("INSERT INTO child VALUES (1)")  # refused at COMMIT
+
+        with pytest.raises(ManagerUnavailableError, match="FOREIGN KEY"):
+            await database.write(orphan)
+
+        def count(connection: sqlite3.Connection) -> int:
+            connection.execute("INSERT INTO parent VALUES (1)")
+            rows: int = connection.execute("SELECT count(*) FROM child").fetchone()[0]
+            return rows
+
+        assert await database.write(count) == 0
+
+
+@pytest.mark.parametrize("target", [":memory:", ""], ids=["memory", "temporary"])
+async def test_a_database_that_cannot_keep_a_write_ahead_log_is_refused(
+    target: str,
+) -> None:
+    """SQLite answers the pragma with the journal it kept, and raises nothing."""
+    store = SqliteStore(target)
+
+    with pytest.raises(NeorcError, match="cannot keep a write-ahead log"):
+        await store.open()
+
+    with pytest.raises(NeorcError, match="not open"):
+        await store.last_sequence()
+
+
+_OPEN_EACH = """
+import asyncio, sys, time
+from neorc.sqlite import SqliteStore
+
+async def main() -> None:
+    begin, step = float(sys.argv[1]), float(sys.argv[2])
+    for index, path in enumerate(sys.argv[3:]):
+        await asyncio.sleep(max(0.0, begin + index * step - time.time()))
+        async with SqliteStore(path) as store:
+            await store.last_sequence()
+
+asyncio.run(main())
+"""
+
+
+async def test_processes_opening_a_new_file_at_once_all_open_it(tmp_path: Path) -> None:
+    """SQLite does not wait for the lock when the journal changes: the store does.
+
+    Each process opens the same new files at the same moments, one file after
+    another, so that some of them meet in the change of a file's journal.
+    """
+    paths = [str(tmp_path / f"new-{index}.db") for index in range(40)]
+    begin = str(time.time() + 1.5)  # once every interpreter has started
+
+    def open_each() -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, "-c", _OPEN_EACH, begin, "0.02", *paths],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+    opened = await asyncio.gather(*(asyncio.to_thread(open_each) for _ in range(6)))
+
+    assert [done.stderr for done in opened] == [""] * 6
 
 
 def _names(path: Path, kind: str) -> set[str]:

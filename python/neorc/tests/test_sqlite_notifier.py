@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 from neorc.sqlite import SqliteStore, SqliteTaskNotifier
-from neorc_core import StoredFlow
+from neorc_core import ManagerUnavailableError, StoredFlow
 from neorc_core._values import JsonValue
 from neorc_core.flows import parse_flow
 
@@ -138,6 +138,45 @@ async def test_a_locked_file_wakes_the_waiters_and_the_watch_goes_on(
             assert await subscription.wait(timeout=5) is True
     finally:
         locking.close()
+
+
+async def test_the_watch_comes_back_once_the_file_is_a_database_again(
+    path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A reading SQLite refuses for good ends no watch: the next opens anew."""
+    async with SqliteStore(path):
+        pass
+    notifier = SqliteTaskNotifier(path, poll_seconds=POLL_SECONDS)
+    await notifier.start()
+    async with notifier.subscribe() as subscription:
+        await asyncio.sleep(POLL_SECONDS * 2)  # the watch has its first reading
+        path.write_bytes(b"not a database at all. " * 200)  # written over, in place
+        for beside in ("-wal", "-shm"):
+            Path(f"{path}{beside}").unlink(missing_ok=True)
+        assert await subscription.wait(timeout=5) is True
+        await asyncio.sleep(POLL_SECONDS * 10)  # many readings, all refused
+
+        path.unlink()
+        async with SqliteStore(path) as store:
+            assert await subscription.wait(timeout=5) is True
+            await subscription.wait(timeout=POLL_SECONDS * 5)  # the store's opening
+            await _commit(store)
+            assert await subscription.wait(timeout=5) is True
+
+    await notifier.aclose()  # nothing to raise: the watch never ended
+    said = [record for record in caplog.records if "cannot watch" in record.message]
+    assert len(said) == 1  # the first refusal of the many, not each
+
+
+async def test_a_file_that_cannot_be_opened_is_said_at_the_start(
+    tmp_path: Path,
+) -> None:
+    notifier = SqliteTaskNotifier(tmp_path / "no-such-directory" / "neorc.db")
+
+    with pytest.raises(ManagerUnavailableError, match="unable to open"):
+        await notifier.start()
+
+    await notifier.aclose()
 
 
 async def test_starting_and_closing_are_safe_to_repeat(path: Path) -> None:
