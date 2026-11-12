@@ -35,8 +35,9 @@ from neorc_core.flows._definition import (
     is_queue_name,
 )
 from neorc_core.flows._validation import check_flow, check_flow_set
+from neorc_core.forms import form_problems, inline_form
 
-_TOP_KEYS = {"name", "version", "inputs", "output", "steps"}
+_TOP_KEYS = {"name", "version", "inputs", "output", "steps", "form"}
 _KIND_KEYS = ("handler", "loop", "fan_out", "flow")
 _STEP_KEYS = {
     "handler": {"handler", "queue", "params", "fixed_params"},
@@ -177,14 +178,17 @@ def read_flow_json(text: str) -> Any:
     return data
 
 
-def load_flow_yaml(text: str) -> FlowDefinition:
+def load_flow_yaml(text: str, *, directory: Path | None = None) -> FlowDefinition:
     """Parse and validate one flow from YAML text.
 
     A flow file also has to start with ``name`` and ``version``, so both read
     first in the repository. JSON object order carries no meaning, so
     ``parse_flow`` does not ask it of uploads.
+
+    ``directory`` is where the text's file is: a form the flow names is read
+    from there, and without one a flow cannot name a form.
     """
-    data = read_flow_yaml(text)
+    data = inline_form(read_flow_yaml(text), directory, read_flow_json)
     order = []
     if isinstance(data, Mapping) and list(data)[:2] != ["name", "version"]:
         order = ["flow: 'name' and 'version' must be the first two fields"]
@@ -199,7 +203,7 @@ def load_flow_yaml(text: str) -> FlowDefinition:
 
 def load_flow_file(path: Path) -> FlowDefinition:
     """Parse and validate one flow file."""
-    return load_flow_yaml(path.read_text(encoding="utf-8"))
+    return load_flow_yaml(path.read_text(encoding="utf-8"), directory=path.parent)
 
 
 def load_flows(directory: Path) -> list[FlowDefinition]:
@@ -219,18 +223,21 @@ def read_flows(directory: Path) -> list[Any]:
 
     Each file is validated on its own first, as a file must be, with ``name``
     and ``version`` first; the set is validated by the manager on upload.
-    Raises ``FlowDefinitionError`` naming the file for the first invalid one.
+    A form a flow names is read in from beside it, so the structure holds the
+    form itself. Raises ``FlowDefinitionError`` naming the file for the first
+    invalid one.
     """
     contents = []
     for path in flow_files(directory):
         text = path.read_text(encoding="utf-8")
         try:
-            load_flow_yaml(text)
+            load_flow_yaml(text, directory=path.parent)
+            content = inline_form(read_flow_yaml(text), path.parent, read_flow_json)
         except FlowDefinitionError as exc:
             raise FlowDefinitionError(
                 [f"{path.name}: {problem}" for problem in exc.problems]
             ) from None
-        contents.append(read_flow_yaml(text))
+        contents.append(content)
     return contents
 
 
@@ -299,6 +306,8 @@ class _Parser:
         name = self.name(data.get("name"), "name")
         version = self.version(data.get("version"))
         inputs = self.inputs(data.get("inputs", {}))
+        if "form" in data:
+            self.problems.extend(form_problems(data["form"], inputs))
         output = None
         if "output" in data:
             output = self.reference(data["output"], "output")

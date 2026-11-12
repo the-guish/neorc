@@ -109,6 +109,10 @@ each, live, as an outline or as a zoomable graph of the run's steps, with a
 form to start a run and a button to cancel one. People sign in to it with an identity provider, as below; a
 manager started with `--no-auth` asks nobody, and says so on every page.
 
+A flow can give that form its own fields, a list of values, radio buttons, a
+check box, in a file next to the flow's: [docs/architecture/forms.md](docs/architecture/forms.md),
+and [examples/code_task](examples/code_task) to try one.
+
 [examples/hello](examples/hello) and [examples/wordplay](examples/wordplay)
 walk through both ways of running, step by step.
 

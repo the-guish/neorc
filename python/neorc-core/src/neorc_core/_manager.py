@@ -52,6 +52,7 @@ from neorc_core.flows import (
     resolve,
 )
 from neorc_core.flows._validation import check_output
+from neorc_core.forms import check_form_inputs
 from neorc_core.ports._clients import DEFAULT_LEASE_SECONDS, check_lease_seconds
 from neorc_core.ports._store import DEFAULT_PAGE, Store
 from neorc_core.ports._task_notifier import TaskNotifier
@@ -408,6 +409,7 @@ class Manager:
         for attempt in range(_START_ATTEMPTS):
             stored = await self._store.get_flow(flow)
             check_inputs(stored.definition, inputs)
+            check_form_inputs(flow, stored.content, inputs)
             try:
                 return await self._store.start_run(
                     flow,
