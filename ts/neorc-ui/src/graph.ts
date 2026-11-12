@@ -20,12 +20,19 @@ import {
 } from "./definition";
 import { formatDuration } from "./format";
 
-/** What a node shows. `task` and `run` are there for the details panel. */
+/**
+ * What a node shows. `task` and `run` are there for the details panel of a
+ * run; the queue, the params and the fixed params for a definition's, which
+ * has no run to show.
+ */
 export type NodeData =
   | {
       kind: "task";
       name: string;
       handler: string;
+      queue: string;
+      params: Record<string, string>;
+      fixedParams: Record<string, unknown>;
       status: TaskStatus | "none";
       duration: string;
       task?: Task;
@@ -34,6 +41,7 @@ export type NodeData =
       kind: "flow";
       name: string;
       flow: string;
+      params: Record<string, string>;
       status: RunStatus | "none";
       duration: string;
       run?: Run;
@@ -281,6 +289,9 @@ function build(
             kind: "task",
             name: step.name,
             handler: step.handler,
+            queue: step.queue,
+            params: step.params,
+            fixedParams: step.fixedParams,
             status: task?.status ?? "none",
             duration: task
               ? formatDuration(task.started_at ?? task.created_at, task.finished_at)
@@ -303,6 +314,7 @@ function build(
             kind: "flow",
             name: step.name,
             flow: step.flow,
+            params: step.params,
             status: run?.status ?? "none",
             duration: run ? formatDuration(run.created_at, run.finished_at) : "",
             ...(run && { run }),
