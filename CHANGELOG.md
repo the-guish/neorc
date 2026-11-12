@@ -265,6 +265,14 @@ one version, cut from a single tag on `main`.
   many times a loop goes round and how many branches a fan-out over a list
   has wait for a run. The page now goes: version, steps, the form to start a
   run, then the definition as text.
+- `neorc.sqlite`: `SqliteStore`, the store port on one SQLite file, for a
+  manager embedded in an application: what it holds survives the process, and
+  a run goes on when the application starts again. It needs no extra, only the
+  standard library. Several processes may open the same file, each with a
+  manager of its own; `SqliteTaskNotifier` wakes their waiters on each
+  other's commits by watching the file, where a manager alone on its file
+  uses `MemoryTaskNotifier`. Both pass the suites the Postgres adapters pass.
+  See [docs/specs/sqlite-implementation.md](docs/specs/sqlite-implementation.md).
 
 ### Changed
 

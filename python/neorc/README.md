@@ -51,6 +51,8 @@ thread, and they need not import neorc.
   long-polling clients the scheduler and workers use
 - `neorc.manager` — the FastAPI application and the service that runs it
 - `neorc.postgres` — the store, the LISTEN/NOTIFY notifier, and the schema
+- `neorc.sqlite` — the store on one SQLite file, for a manager embedded in an
+  application, and a notifier for processes that share the file; no extra
 
 See the [repository](https://github.com/open-shipyard/neorc) for the full
 picture, and
