@@ -9,9 +9,9 @@ notifier ports, and it passes the same contract suite.
 
 ## Scope
 
-- `SqliteStore`: flows, runs, tasks and events in one file. What it holds
-  survives the process: an application that stops and starts again finds its
-  runs where they were.
+- `SqliteStore`: flows, runs, tasks, events and the declared queues in one
+  file. What it holds survives the process: an application that stops and
+  starts again finds its runs where they were.
 - `SqliteTaskNotifier`: wakes waiters when another process wrote to the file.
 
 Not here yet: a credential store, so a manager on SQLite serves no API tokens
@@ -20,12 +20,18 @@ alone. An application builds the `Manager` itself:
 
 ```python
 from neorc.sqlite import SqliteStore
-from neorc_core import Manager
+from neorc_core import Manager, QueueKind
 from neorc_core.local import MemoryTaskNotifier
 
 async with SqliteStore("neorc.db") as store:
     manager = Manager(store, tasks=MemoryTaskNotifier(), events=MemoryTaskNotifier())
+    await manager.declare_queue("default", QueueKind.WORKER)
 ```
+
+The application declares its queues too, before it uploads the flows that
+name them ([task-completion.md](task-completion.md)): the commands that do it
+for a deployment reach Postgres alone. A declaration is kept in the file, and
+declaring a queue again changes nothing.
 
 ## One write lock
 

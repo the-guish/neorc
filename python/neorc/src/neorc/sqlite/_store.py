@@ -44,6 +44,7 @@ from neorc.sqlite._schema import (
     EVENTS_TABLE,
     FLOW_TASKS_TABLE,
     FLOW_VERSIONS_TABLE,
+    QUEUES_TABLE,
     RUNS_TABLE,
 )
 from neorc_core import (
@@ -52,6 +53,8 @@ from neorc_core import (
     EventKind,
     FlowNotFoundError,
     FlowVersionError,
+    Queue,
+    QueueKind,
     Run,
     RunId,
     RunNotFoundError,
@@ -63,6 +66,7 @@ from neorc_core import (
     TaskNotFoundError,
     TaskStateError,
     TaskStatus,
+    ensure_completable,
     ensure_transition,
 )
 from neorc_core._runs import (
@@ -155,7 +159,9 @@ INSERT INTO {FLOW_TASKS_TABLE} ({TASK_COLUMNS})
 VALUES ({placeholders(TASK_COLUMNS)})
 """
 
-# Ready is pending, or leased past the lease's end; the oldest first.
+# Ready is pending, or leased past the lease's end; the oldest first. Only a
+# declared worker queue has ready tasks: no worker receives from an external
+# queue, or from one nobody declared.
 _RECEIVE_TASK = f"""
 UPDATE {FLOW_TASKS_TABLE}
    SET status = 'received', attempts = attempts + 1, lease_expires_at = ?
@@ -164,10 +170,39 @@ UPDATE {FLOW_TASKS_TABLE}
         WHERE queue = ?
           AND (status = 'pending'
                OR (status IN ('received', 'running') AND lease_expires_at <= ?))
+          AND EXISTS (SELECT 1 FROM {QUEUES_TABLE}
+                       WHERE name = ? AND kind = 'worker')
         ORDER BY position
         LIMIT 1)
 RETURNING {TASK_COLUMNS}
 """
+
+# Reads only. The join leaves out the tasks of runs that ended: nothing will
+# be published after them, so they are no longer anyone's to complete.
+_PENDING_TASKS = f"""
+SELECT {", ".join(f"t.{column}" for column in TASK_COLUMNS.split(", "))}
+  FROM {FLOW_TASKS_TABLE} AS t
+  JOIN {RUNS_TABLE} AS r ON r.id = t.run_id
+ WHERE t.queue = ? AND t.status = 'pending' AND r.status = 'active'
+ ORDER BY t.position
+ LIMIT ?
+"""
+
+_COMPLETE_TASK = f"""
+UPDATE {FLOW_TASKS_TABLE}
+   SET status = ?, result = ?, error = ?, finished_at = ?
+ WHERE id = ?
+RETURNING {TASK_COLUMNS}
+"""
+
+_DECLARE_QUEUE = f"""
+INSERT INTO {QUEUES_TABLE} (name, kind, created_at) VALUES (?, ?, ?)
+ON CONFLICT (name) DO UPDATE SET kind = excluded.kind
+"""
+
+_SELECT_QUEUES = f"SELECT name, kind FROM {QUEUES_TABLE} ORDER BY name"
+
+_SELECT_QUEUE_KIND = f"SELECT kind FROM {QUEUES_TABLE} WHERE name = ?"
 
 _CLAIM_TASK = f"""
 UPDATE {FLOW_TASKS_TABLE}
@@ -427,7 +462,9 @@ class SqliteStore(Store):
         def operation(conn: Connection) -> Task | None:
             now = _now()
             expires = to_time(now + timedelta(seconds=lease_seconds))
-            row = conn.execute(_RECEIVE_TASK, (expires, queue, to_time(now))).fetchone()
+            row = conn.execute(
+                _RECEIVE_TASK, (expires, queue, to_time(now), queue)
+            ).fetchone()
             return None if row is None else task_from_row(row)
 
         return await self._database.write(operation)
@@ -500,8 +537,63 @@ class SqliteStore(Store):
 
         return await self._database.write(operation)
 
+    async def pending_tasks(
+        self, queue: str, *, limit: int = DEFAULT_PAGE
+    ) -> list[Task]:
+        return await self._database.read(
+            lambda conn: [
+                task_from_row(row)
+                for row in conn.execute(_PENDING_TASKS, (queue, limit))
+            ]
+        )
+
+    async def complete_task(
+        self, task_id: TaskId, *, result: JsonValue = None, error: str | None = None
+    ) -> Task:
+        status = TaskStatus.FAILED if error is not None else TaskStatus.SUCCEEDED
+
+        def operation(conn: Connection) -> Task:
+            task = _task(conn, task_id)
+            ensure_completable(task.status)
+            ensure_active(_run(conn, task.run_id))
+            row = conn.execute(
+                _COMPLETE_TASK,
+                (
+                    status.value,
+                    dumps_json(result if error is None else None),
+                    storable_text(error) if error is not None else None,
+                    to_time(_now()),
+                    str(task_id),
+                ),
+            ).fetchone()
+            _append(conn, task.run_id, EventKind.TASK_FINISHED)
+            return task_from_row(row)
+
+        return await self._database.write(operation)
+
     async def get_task(self, task_id: TaskId) -> Task:
         return await self._database.read(lambda conn: _task(conn, task_id))
+
+    async def declare_queue(self, name: str, kind: QueueKind) -> None:
+        def operation(conn: Connection) -> None:
+            conn.execute(_DECLARE_QUEUE, (name, kind.value, to_time(_now())))
+
+        await self._database.write(operation)
+
+    async def queues(self) -> list[Queue]:
+        return await self._database.read(
+            lambda conn: [
+                Queue(row["name"], QueueKind(row["kind"]))
+                for row in conn.execute(_SELECT_QUEUES)
+            ]
+        )
+
+    async def queue_kind(self, name: str) -> QueueKind | None:
+        def operation(conn: Connection) -> QueueKind | None:
+            row = conn.execute(_SELECT_QUEUE_KIND, (name,)).fetchone()
+            return None if row is None else QueueKind(row["kind"])
+
+        return await self._database.read(operation)
 
     async def events_after(self, sequence: int, *, limit: int = 100) -> list[Event]:
         return await self._database.read(

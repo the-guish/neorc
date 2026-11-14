@@ -22,7 +22,15 @@ import pytest
 from conftest import EXAMPLES
 
 from neorc.sqlite import SqliteStore, SqliteTaskNotifier
-from neorc_core import Manager, RunStatus, Scheduler, TaskNotifier, TaskStatus, Worker
+from neorc_core import (
+    Manager,
+    QueueKind,
+    RunStatus,
+    Scheduler,
+    TaskNotifier,
+    TaskStatus,
+    Worker,
+)
 from neorc_core.flows import Address, read_flows
 from neorc_core.local import (
     DirectManagerClient,
@@ -51,7 +59,9 @@ async def process(
     """What one process holds: a manager on a store and notifiers of its own.
 
     ``alone`` on the file, it wakes its waiters in memory; otherwise it
-    watches the file for the other processes' commits.
+    watches the file for the other processes' commits. The examples' queues
+    are declared on the file, as an application's are before its flows are
+    uploaded.
     """
     async with AsyncExitStack() as stack:
         store = await stack.enter_async_context(
@@ -68,7 +78,10 @@ async def process(
             events = await stack.enter_async_context(
                 SqliteTaskNotifier(path, poll_seconds=WATCH_SECONDS)
             )
-        yield Manager(store, tasks=tasks, events=events)
+        manager = Manager(store, tasks=tasks, events=events)
+        for queue in ("default", "scoring"):
+            await manager.declare_queue(queue, QueueKind.WORKER)
+        yield manager
 
 
 @asynccontextmanager

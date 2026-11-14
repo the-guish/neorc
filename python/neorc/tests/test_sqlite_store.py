@@ -29,6 +29,7 @@ from neorc.sqlite._schema import (
     EVENTS_TABLE,
     FLOW_TASKS_TABLE,
     INDEXES,
+    QUEUES_TABLE,
     RUNS_TABLE,
     TABLES,
 )
@@ -36,6 +37,8 @@ from neorc_core import (
     EventKind,
     ManagerUnavailableError,
     NeorcError,
+    Queue,
+    QueueKind,
     Run,
     RunStatus,
     Store,
@@ -66,6 +69,7 @@ def path(tmp_path: Path) -> Path:
 
 
 async def _started(store: Store) -> Run:
+    await store.declare_queue("default", QueueKind.WORKER)
     await store.store_flows([StoredFlow(parse_flow(CONTENT), CONTENT)])
     return await store.start_run("f", parse_flow(CONTENT).version, {"x": 1.5})
 
@@ -97,6 +101,7 @@ async def test_what_was_stored_is_there_when_the_file_is_opened_again(
         finished = await store.finish_task(received.id, result={"n": 1e16})
 
     async with SqliteStore(path) as store:
+        assert await store.queues() == [Queue("default", QueueKind.WORKER)]
         assert await store.get_run(run.id) == run
         assert await store.get_task(finished.id) == finished
         assert str(finished.id) == task_id
@@ -333,8 +338,9 @@ def test_create_schema_is_idempotent_and_creates_everything(path: Path) -> None:
         (FLOW_TASKS_TABLE, "status", TaskStatus),
         (RUNS_TABLE, "status", RunStatus),
         (EVENTS_TABLE, "kind", EventKind),
+        (QUEUES_TABLE, "kind", QueueKind),
     ],
-    ids=["tasks", "runs", "events"],
+    ids=["tasks", "runs", "events", "queues"],
 )
 def test_check_constraints_are_in_step_with_the_enums(
     path: Path, table: str, column: str, enum: type[StrEnum]

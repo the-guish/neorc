@@ -22,8 +22,15 @@ FLOW_VERSIONS_TABLE = "neorc_flow_versions"
 RUNS_TABLE = "neorc_runs"
 FLOW_TASKS_TABLE = "neorc_flow_tasks"
 EVENTS_TABLE = "neorc_events"
+QUEUES_TABLE = "neorc_queues"
 
-TABLES = (FLOW_VERSIONS_TABLE, RUNS_TABLE, FLOW_TASKS_TABLE, EVENTS_TABLE)
+TABLES = (
+    FLOW_VERSIONS_TABLE,
+    RUNS_TABLE,
+    FLOW_TASKS_TABLE,
+    EVENTS_TABLE,
+    QUEUES_TABLE,
+)
 """Every table ``create_schema`` creates."""
 
 INDEXES = (
@@ -105,6 +112,13 @@ CREATE TABLE IF NOT EXISTS {EVENTS_TABLE} (
     kind             text NOT NULL
                      CHECK (kind IN ('run_started', 'task_finished',
                                      'run_finished'))
+);
+
+-- The declared queues; kind mirrors QueueKind.
+CREATE TABLE IF NOT EXISTS {QUEUES_TABLE} (
+    name             text PRIMARY KEY,
+    kind             text NOT NULL CHECK (kind IN ('worker', 'external')),
+    created_at       integer NOT NULL
 );
 """
 
