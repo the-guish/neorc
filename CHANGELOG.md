@@ -36,7 +36,9 @@ one version, cut from a single tag on `main`.
   keeps role constraints that refuse a responder token.
 - `neorc-core`, `neorc`, `neorc-ui`: a person completes tasks in the web UI.
   "Queues" lists the declared queues, filtered by kind, in the sidebar and on
-  a page of its own. A queue's page lists its tasks in any state that changed
+  a page of its own. In the sidebar, each entry of the navigation now has its
+  list below it, the latest runs, the flows and the queues, and an arrow that
+  folds the list away. A queue's page lists its tasks in any state that changed
   in the last 24 hours, or 7 days, 30 days or 1 year, filtered by state,
   pending at first, and by flow. A pending task of an external queue opens
   with its inputs and a form that completes it, or fails it with a reason.

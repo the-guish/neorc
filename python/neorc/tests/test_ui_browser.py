@@ -226,7 +226,7 @@ async def test_a_run_is_started_watched_and_another_cancelled_in_the_browser(
     await expect(page).to_have_url(re.compile(r"/ui/#/flows$"))
     await expect(page.get_by_role("note")).to_have_count(0)
     main_nav = page.get_by_role("navigation", name="Main")
-    await main_nav.get_by_role("link", name="Flows").click()
+    await main_nav.get_by_role("link", name="Flows", exact=True).click()
     table = page.get_by_role("table")
     await expect(table.get_by_role("link", name="word_picker_rounds")).to_be_visible()
 
@@ -292,7 +292,7 @@ async def test_a_run_is_started_watched_and_another_cancelled_in_the_browser(
     await expect(page.locator("dd", has_text="cancelled by hand")).to_be_visible()
 
     # The runs list has both, newest first.
-    await main_nav.get_by_role("link", name="Runs").click()
+    await main_nav.get_by_role("link", name="Runs", exact=True).click()
     rows = page.get_by_role("row")
     await expect(rows).to_have_count(3)
     await expect(rows.nth(1)).to_contain_text("cancelled")
@@ -347,9 +347,18 @@ async def test_a_person_answers_the_tasks_of_an_external_queue_in_the_browser(
     await expect(rows).to_have_count(2)
     await expect(rows.nth(1)).to_contain_text("editors")
 
-    # The sidebar lists the queues too, of the kind chosen there.
-    sidebar = page.get_by_role("navigation", name="Queues")
+    # The sidebar lists the queues too, below its "Queues" entry, of the kind
+    # chosen there. The entry's arrow folds the list away and brings it back.
+    main_nav = page.get_by_role("navigation", name="Main")
+    sidebar = main_nav.get_by_role("navigation", name="Queues")
     kinds = sidebar.get_by_role("group", name="Kind of queue")
+    await expect(sidebar.get_by_role("link")).to_have_count(2)
+    await main_nav.get_by_role("button", name="Collapse Queues").click()
+    await expect(sidebar).to_have_count(0)
+    await expect(
+        main_nav.get_by_role("link", name="Queues", exact=True)
+    ).to_be_visible()
+    await main_nav.get_by_role("button", name="Expand Queues").click()
     await expect(sidebar.get_by_role("link")).to_have_count(2)
     await kinds.get_by_role("button", name="worker").click()
     await expect(sidebar.get_by_role("link")).to_have_text(["default"])

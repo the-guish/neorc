@@ -7,10 +7,12 @@ import { SESSION_KEY, signOut } from "../session";
 import { href, type Route } from "../router";
 import { shortId } from "../format";
 
-const NAV: { label: string; route: Route; icon: ReactNode }[] = [
-  { label: "Runs", route: { name: "runs" }, icon: <ListIcon /> },
-  { label: "Flows", route: { name: "flows" }, icon: <FlowIcon /> },
-  { label: "Queues", route: { name: "queues" }, icon: <QueueIcon /> },
+type NavKey = "runs" | "flows" | "queues";
+
+const NAV: { key: NavKey; label: string; route: Route; icon: ReactNode }[] = [
+  { key: "runs", label: "Runs", route: { name: "runs" }, icon: <ListIcon /> },
+  { key: "flows", label: "Flows", route: { name: "flows" }, icon: <FlowIcon /> },
+  { key: "queues", label: "Queues", route: { name: "queues" }, icon: <QueueIcon /> },
 ];
 
 /** How many of the latest runs the sidebar lists. */
@@ -19,13 +21,18 @@ export const RECENT_RUNS = 6;
 /** Where the sidebar's open or collapsed state is kept. */
 export const SIDEBAR_KEY = "neorc-ui.sidebar";
 
+/** Where the navigation entries whose lists are folded away are kept. */
+export const NAV_COLLAPSED_KEY = "neorc-ui.nav-collapsed";
+
 /** Where the kind of queue the sidebar lists is kept. */
 export const QUEUE_KIND_KEY = "neorc-ui.queue-kind";
 
 /**
- * The shell: a sidebar with the brand, a way to a new run, the navigation,
- * the flows, the latest runs and who is signed in, collapsible to a rail of
- * icons; the page beside it, under a strip when authentication is off.
+ * The shell: a sidebar with the brand, a way to a new run, the navigation
+ * and who is signed in, collapsible to a rail of icons; the page beside it,
+ * under a strip when authentication is off. Each entry of the navigation has
+ * its list below it, the latest runs, the flows and the queues, which its
+ * arrow folds away.
  *
  * `embedded`, for a page framed by an application with a navigation of its
  * own (`../embedding.ts`): the page and the strip alone, with no sidebar.
@@ -65,6 +72,7 @@ function WithSidebar({
   children: ReactNode;
 }) {
   const [collapsed, setCollapsed] = useSidebarCollapsed();
+  const [folded, fold] = useFoldedEntries();
   return (
     <div className={`shell${collapsed ? " shell-rail" : ""}`}>
       <aside className="sidebar" aria-label="Sidebar">
@@ -96,21 +104,36 @@ function WithSidebar({
           <span className="label">New run</span>
         </a>
         <nav aria-label="Main">
-          {NAV.map((item) => (
-            <a
-              key={item.label}
-              href={href(item.route)}
-              aria-current={current(route, item.route) ? "page" : undefined}
-              title={item.label}
-            >
-              {item.icon}
-              <span className="label">{item.label}</span>
-            </a>
-          ))}
+          {NAV.map((item) => {
+            const open = !folded.has(item.key);
+            return (
+              <div key={item.key} className="nav-group">
+                <div className="nav-entry">
+                  <a
+                    href={href(item.route)}
+                    aria-current={current(route, item.route) ? "page" : undefined}
+                    title={item.label}
+                  >
+                    {item.icon}
+                    <span className="label">{item.label}</span>
+                  </a>
+                  <button
+                    type="button"
+                    className="icon-button nav-toggle label"
+                    onClick={() => fold(item.key, open)}
+                    aria-label={`${open ? "Collapse" : "Expand"} ${item.label}`}
+                    aria-expanded={open}
+                  >
+                    <ArrowIcon open={open} />
+                  </button>
+                </div>
+                {open && item.key === "runs" && <RecentRuns route={route} />}
+                {open && item.key === "flows" && <PinnedFlows route={route} />}
+                {open && item.key === "queues" && <Queues route={route} />}
+              </div>
+            );
+          })}
         </nav>
-        <PinnedFlows route={route} />
-        <Queues route={route} />
-        <RecentRuns route={route} />
         <Profile session={session} />
       </aside>
       <Content session={session}>{children}</Content>
@@ -224,6 +247,37 @@ function useSidebarCollapsed(): [boolean, (collapsed: boolean) => void] {
   return [collapsed, setCollapsed];
 }
 
+/**
+ * The entries of the navigation whose lists are folded away, kept for the
+ * next page load; and folding or unfolding one.
+ */
+function useFoldedEntries(): [Set<NavKey>, (key: NavKey, fold: boolean) => void] {
+  const [folded, setFolded] = useState<Set<NavKey>>(() => {
+    try {
+      const kept: unknown = JSON.parse(localStorage.getItem(NAV_COLLAPSED_KEY) ?? "[]");
+      const keys = Array.isArray(kept) ? kept : [];
+      return new Set(NAV.map((item) => item.key).filter((key) => keys.includes(key)));
+    } catch {
+      return new Set();
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(NAV_COLLAPSED_KEY, JSON.stringify([...folded]));
+    } catch {
+      // Storage may be off; every list is shown again next time.
+    }
+  }, [folded]);
+  const fold = (key: NavKey, away: boolean) =>
+    setFolded((before) => {
+      const after = new Set(before);
+      if (away) after.add(key);
+      else after.delete(key);
+      return after;
+    });
+  return [folded, fold];
+}
+
 function current(route: Route, item: Route): boolean {
   if (item.name === "runs")
     return route.name === "runs" || route.name === "run";
@@ -257,7 +311,7 @@ function useQueueKind(): [KindFilter, (kind: KindFilter) => void] {
   return [kind, setKind];
 }
 
-/** The declared queues, of the kind chosen: worker, external, or all. */
+/** The declared queues, of the kind chosen, below "Queues": worker, external, or all. */
 function Queues({ route }: { route: Route }) {
   const queues = useQueues();
   const [kind, setKind] = useQueueKind();
@@ -265,7 +319,6 @@ function Queues({ route }: { route: Route }) {
   const listed = queues.data.filter((queue) => kind === "all" || queue.kind === kind);
   return (
     <nav className="sidebar-section" aria-label="Queues">
-      <h3 className="label">Queues</h3>
       <div className="segmented label" role="group" aria-label="Kind of queue">
         {KIND_FILTERS.map((each) => (
           <button
@@ -296,13 +349,12 @@ function Queues({ route }: { route: Route }) {
   );
 }
 
-/** The flows the manager holds, latest version each, as the pinned workflows. */
+/** The flows the manager holds, latest version each, below "Flows". */
 function PinnedFlows({ route }: { route: Route }) {
   const flows = useFlows();
   if (!flows.isSuccess || flows.data.length === 0) return null;
   return (
     <nav className="sidebar-section" aria-label="Flows">
-      <h3 className="label">Flows</h3>
       {flows.data.map((flow) => (
         <a
           key={flow.name}
@@ -322,14 +374,13 @@ function PinnedFlows({ route }: { route: Route }) {
   );
 }
 
-/** The latest runs, each with its status as a dot. */
+/** The latest runs, each with its status as a dot, below "Runs". */
 function RecentRuns({ route }: { route: Route }) {
   const runs = useRecentRuns(RECENT_RUNS);
   const recent = runs.data ?? [];
   if (recent.length === 0) return null;
   return (
     <nav className="sidebar-section" aria-label="Recent runs">
-      <h3 className="label">Recent runs</h3>
       {recent.map((run) => (
         <a
           key={run.id}
@@ -391,6 +442,15 @@ function MenuIcon() {
   return (
     <Icon>
       <path d="M2 4h12M2 8h12M2 12h12" />
+    </Icon>
+  );
+}
+
+/** Down while the list below its entry is shown, right while it is folded away. */
+function ArrowIcon({ open }: { open: boolean }) {
+  return (
+    <Icon>
+      <path d={open ? "M4 6l4 4 4-4" : "M6 4l4 4-4 4"} />
     </Icon>
   );
 }

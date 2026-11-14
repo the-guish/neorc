@@ -519,21 +519,35 @@ button.link {
   color: var(--on-accent);
 }
 
-.sidebar-section {
-  margin-top: 0.75rem;
+/* An entry of the navigation, its arrow, and its list below it. */
+
+.nav-entry {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
 }
 
-.sidebar-section h3 {
-  margin: 0 0 0.25rem 0.6rem;
-  font-size: 0.7rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--muted);
+.nav-entry > a {
+  flex: 1;
+  min-width: 0;
+}
+
+.nav-toggle {
+  flex: none;
+  padding: 0.3rem;
+}
+
+.sidebar-section {
+  margin-bottom: 0.4rem;
 }
 
 .sidebar-section a {
   font-size: 0.9rem;
+  padding-left: 1.7rem;
+}
+
+.shell-rail .sidebar-section a {
+  padding-left: 0.5rem;
 }
 
 .sidebar-section a .muted {
@@ -979,7 +993,7 @@ button:disabled {
 
 .segmented {
   display: flex;
-  margin: 0.25rem 0.6rem 0.4rem;
+  margin: 0.25rem 0.6rem 0.4rem 1.7rem;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   overflow: hidden;
@@ -1006,7 +1020,7 @@ button:disabled {
 }
 
 .sidebar-note {
-  margin: 0.25rem 0.6rem;
+  margin: 0.25rem 0.6rem 0.25rem 1.7rem;
   font-size: 0.85rem;
 }
 
