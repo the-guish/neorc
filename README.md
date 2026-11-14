@@ -153,24 +153,6 @@ A task is completed once: a second completion answers 409. Workers are kept
 off an external queue. A responder token for a worker queue completes a task
 there until a worker receives it.
 
-A person completes a task in the web UI. "Queues" lists the declared queues,
-and a queue's page lists its tasks by state, by flow and by how lately they
-changed. A pending task of an external queue opens with its inputs and a
-form. The step may name the form, a file in the A2UI subset a flow's form
-uses, and the result then has the form's fields:
-
-```yaml
-approve_draft:
-  queue: editors
-  handler: approve-draft
-  params: {draft: tasks.write_draft}
-  form: approve_draft.form.json
-```
-
-A step with no form gets a text field. Every signed-in person may complete a
-task of any queue. [examples/approval](examples/approval/README.md) runs
-such a flow on one machine.
-
 Every queue is declared before it is used, a worker queue with `--kind
 worker`. An upload naming a queue nobody declared is refused, and so is a
 token for one. `neorc queues list` shows the declared queues. `neorc run`
