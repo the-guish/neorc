@@ -145,13 +145,11 @@ So a form is not only how a page looks. It narrows what the flow accepts.
 
 ## A task with a form
 
-A task of an external queue waits for a person, and the queue's page of the
-web UI asks for the answer
-([task-completion.md](../specs/task-completion.md)). The task's step may name
-a form for that answer.
+A task of an external queue may name a form too, for the person who answers
+it on the queue's page ([task-completion.md](../specs/task-completion.md)).
+[examples/approval](../../examples/approval/README.md) is a whole one, to run.
 
 ```yaml
-# flows/approval.yaml
 review_draft:
   queue: editors
   handler: review-draft
@@ -160,26 +158,15 @@ review_draft:
   form: review_draft.form.json
 ```
 
-[examples/approval](../../examples/approval/README.md) is a whole one, to run.
-
-- The file is in the same subset, and is read in where the flow's own form
-  is. It is part of the flow's version.
-- A flow declares its inputs, and a task declares nothing about its result.
-  The form says it: **each control is a field of the result**, named by its
-  `value`. A check box at `/approved` and a text field at `/comment` make the
-  result `{"approved": true, "comment": "..."}`.
-- **At upload**, a form on a task of a worker queue is refused. So is a form
-  on the exit condition of a loop, whose result is true or false.
-- **At every completion**, the result must be a mapping with the form's
-  fields and no other, each of the type its control submits. A choice is one
-  of its options, and each check holds. That is for every completion, whoever
-  sends it: the page, or a responder with a token.
-
-        review_draft: field 'decision' is not one of approve, changes
-
-- A completion with an error fails the task, and has no result to hold.
-- `TaskPanel` draws the form with the page's own "Complete" button. A task
-  with no form gets a text field, and "Edit as JSON" is there for both.
+- **Each control is a field of the task's result**, named by its `value`: a
+  check box at `/approved` makes the result `{"approved": true}`.
+- **At upload**, a form on a task of a worker queue is refused, and so is a
+  form on the exit condition of a loop.
+- **At every completion**, the result must have the form's fields and keep
+  what the form says, whoever sends it. A completion with an error has no
+  result to hold.
+- A task with no form gets a text field, and the exit condition of a loop a
+  yes or no.
 
 ## What is ours and not A2UI's
 

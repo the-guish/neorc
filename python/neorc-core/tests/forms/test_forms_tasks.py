@@ -4,7 +4,7 @@
 """A task's form: what it may hold, and what it asks of the task's result.
 
 A task of an external queue may name a form, as a flow does. Its controls are
-the fields of the task's result: docs/specs/task-completion.md, "Forms".
+the fields of the task's result: docs/architecture/forms.md.
 """
 
 import asyncio

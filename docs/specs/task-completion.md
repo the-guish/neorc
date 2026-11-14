@@ -60,28 +60,6 @@ approve_draft:
 The handler of a task on an external queue is a text for the responder. The
 manager and the scheduler store it and pass it on.
 
-## Forms
-
-A task of an external queue may name a form. The form is a file next to the
-flow's file, in the subset of A2UI a flow's form uses (see
-[forms.md](../architecture/forms.md)).
-
-```yaml
-approve_draft:
-  queue: editors
-  handler: approve-draft
-  params:
-    draft: tasks.write_draft
-  form: approve_draft.form.json
-```
-
-- The controls of the form are the fields of the task's result. The result is
-  a mapping with one value per control.
-- The manager holds every completion of the task to its form. A completion
-  with an error has no result to hold.
-- A form belongs to a task of an external queue. The exit condition of a loop
-  has no form.
-
 ## Who may complete
 
 A system completes with the role `responder`. A responder token is bound to
@@ -110,8 +88,8 @@ lists its tasks in any state.
 - The page filters the tasks by state and by flow. The state filter starts at
   pending.
 - A pending task of an external queue opens with its inputs and a form. A
-  task with a form gets that form. A task with no form gets a text field, and
-  the exit condition of a loop gets a yes or no.
+  person completes the task with that form (see
+  [forms.md](../architecture/forms.md)).
 
 ## Not in scope
 
