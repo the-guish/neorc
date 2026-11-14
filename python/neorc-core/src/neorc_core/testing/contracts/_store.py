@@ -720,20 +720,16 @@ class StoreContract:
     ) -> None:
         await self.upload(store)
         run = await self.start(store)
-        ended = await self.start(store)
         succeeded = await self.publish(store, run, Address("one"))
         await self.publish(store, run, Address("two"), queue="scoring")
         failed = await self.publish(store, run, Address("three"))
         pending = await self.publish(store, run, Address("four"))
-        cancelled = await self.publish(store, ended)
         await store.complete_task(succeeded, result=1)
         await store.complete_task(failed, error="no")
-        await store.cancel_run_tree(ended.id, "by hand")
 
         listed = await store.queue_tasks("default", since=EPOCH)
 
         assert [(item.task.id, item.task.status) for item in listed] == [
-            (cancelled, TaskStatus.PENDING),
             (pending, TaskStatus.PENDING),
             (failed, TaskStatus.FAILED),
             (succeeded, TaskStatus.SUCCEEDED),
@@ -741,12 +737,36 @@ class StoreContract:
         assert {(item.flow, item.version) for item in listed} == {
             ("a", Version(1, 0, 0))
         }
-        assert listed[0].task == await store.get_task(cancelled)
+        assert listed[0].task == await store.get_task(pending)
         assert [
             item.task.id
             for item in await store.queue_tasks("default", since=EPOCH, limit=2)
-        ] == [cancelled, pending]
+        ] == [pending, failed]
         assert await store.queue_tasks("nobody", since=EPOCH) == []
+
+    async def test_a_queue_lists_an_unfinished_task_only_while_its_run_is_active(
+        self, store: Store
+    ) -> None:
+        await self.upload(store)
+        run = await self.start(store)
+        done = await self.publish(store, run, Address("one"))
+        waiting = await self.publish(store, run, Address("two"))
+        await self.publish(store, run, Address("three"))
+        await store.complete_task(done, result=1)
+        taken = await store.receive_task("default", lease_seconds=30)
+        assert taken is not None and taken.id == waiting
+
+        async def listed(**kept: Any) -> list[uuid.UUID]:
+            tasks = await store.queue_tasks("default", since=EPOCH, **kept)
+            return [item.task.id for item in tasks]
+
+        assert len(await listed()) == 3
+        await store.cancel_run_tree(run.id, "by hand")
+
+        # Nothing will finish the other two: only what finished is still listed.
+        assert await listed() == [done]
+        assert await listed(status=TaskStatus.PENDING) == []
+        assert await listed(status=TaskStatus.RECEIVED) == []
 
     async def test_a_queue_lists_the_tasks_that_changed_since_a_time(
         self, store: Store

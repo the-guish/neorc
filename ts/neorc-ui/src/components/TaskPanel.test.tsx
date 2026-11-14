@@ -200,6 +200,26 @@ describe("TaskPanel", () => {
     );
   });
 
+  it("has no form for a task whose run has ended, and says how it ended", async () => {
+    mockApi({
+      [`/tasks/${REVIEW.id}/inputs`]: delivered(REVIEW),
+      [`/runs/${WAITING.id}`]: {
+        ...WAITING,
+        status: "cancelled",
+        reason: "approval 1.1.0 was uploaded",
+      },
+    });
+
+    open(REVIEW);
+
+    expect(
+      await screen.findByText(
+        "Its run ended (cancelled: approval 1.1.0 was uploaded). Nothing can complete this task.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("form")).not.toBeInTheDocument();
+  });
+
   it("has no form for a task of a worker queue, or one that has ended", async () => {
     serve(TITLE);
     const first = open(TITLE, "worker");

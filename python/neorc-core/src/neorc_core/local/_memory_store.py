@@ -357,6 +357,7 @@ class MemoryStore(Store):
                     and changed >= since
                     and (status is None or task.status is status)
                     and (flow is None or run.flow == flow)
+                    and (task.finished_at is not None or run.status is RunStatus.ACTIVE)
                 ):
                     listed.append(QueueTask(task, run.flow, run.version))
             return listed

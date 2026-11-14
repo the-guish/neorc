@@ -245,10 +245,11 @@ class Store(ABC):
     ) -> list[QueueTask]:
         """Up to ``limit`` tasks of ``queue`` that changed at or after ``since``.
 
-        In any status and of runs in any status, the task published last
-        first. A task changes when it is published, started or finished
-        (``last_change``). ``status`` keeps only the tasks in that status, and
-        ``flow`` only those of that flow's runs. Reads only.
+        In any status, the task published last first. A task that has not
+        finished is listed only while its run is active: once the run ended,
+        nothing will finish it. A task changes when it is published, started
+        or finished (``last_change``). ``status`` keeps only the tasks in that
+        status, and ``flow`` only those of that flow's runs. Reads only.
         """
         raise NotImplementedError
 

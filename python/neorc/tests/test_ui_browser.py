@@ -449,5 +449,17 @@ async def test_a_person_answers_the_tasks_of_an_external_queue_in_the_browser(
     await expect(panel).to_contain_text("A first draft about tea.")
     await expect(panel.get_by_role("form")).to_have_count(0)
 
+    # A run that ends takes its waiting tasks with it: the list drops them,
+    # and the task that was open loses its form.
+    ended = await client.start_run("approval", {"topic": "coffee"})
+    await page.goto(f"{ui_address}/ui/#/queues/editors")
+    await expect(rows).to_have_count(3, timeout=RUN_TIMEOUT_MS)
+    await page.get_by_role("link", name=re.compile("review_draft")).click()
+    await expect(panel.get_by_role("form")).to_be_visible()
+    await client.cancel_run(ended.id)
+    await expect(panel).to_contain_text("Its run ended (cancelled: cancelled by hand)")
+    await expect(panel.get_by_role("form")).to_have_count(0)
+    await expect(page.get_by_text("No pending task")).to_be_visible()
+
     # The browser's console names the one completion the manager refused.
     assert len(complaints) == 1 and "status of 422" in complaints[0], complaints

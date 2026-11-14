@@ -59,11 +59,10 @@ export function useFlows() {
   });
 }
 
-export function useFlow(name: string, version?: string, enabled = true) {
+export function useFlow(name: string, version?: string) {
   return useQuery({
     queryKey: keys.flow(name, version),
     queryFn: () => getFlow(name, version),
-    enabled,
     // A stored version never changes; the latest may be replaced.
     staleTime: version ? Infinity : FLOWS_STALE_MS,
   });

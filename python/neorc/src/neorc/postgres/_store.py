@@ -269,7 +269,8 @@ SELECT {", ".join(f"t.{column}" for column in TASK_COLUMNS.split(", "))}
 """
 
 # Reads only. GREATEST skips the times a task does not have yet, so this is
-# the last of published, started and finished.
+# the last of published, started and finished. A task that has not finished
+# is left out once its run ended, as it is from the pending tasks.
 _QUEUE_TASKS = f"""
 SELECT {", ".join(f"t.{column}" for column in TASK_COLUMNS.split(", "))},
        r.flow AS run_flow, r.version AS run_version
@@ -279,6 +280,7 @@ SELECT {", ".join(f"t.{column}" for column in TASK_COLUMNS.split(", "))},
    AND GREATEST(t.created_at, t.started_at, t.finished_at) >= $2
    AND ($3::text IS NULL OR t.status = $3)
    AND ($4::text IS NULL OR r.flow = $4)
+   AND (t.finished_at IS NOT NULL OR r.status = 'active')
  ORDER BY t.position DESC
  LIMIT $5
 """

@@ -1,7 +1,13 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState, type FormEvent } from "react";
 
-import { completeTask, type Delivery, type QueueKind } from "../api";
+import {
+  completeTask,
+  type Delivery,
+  type QueueKind,
+  type Run,
+  type Task,
+} from "../api";
 import { isExitCondition, rawStep } from "../definition";
 import { answered, FlowForm, formOf, type Answers, type Form } from "../forms";
 import { formatTime, formatValue, shortId } from "../format";
@@ -93,15 +99,34 @@ function Opened({ delivery, kind }: { delivery: Delivery; kind: QueueKind | unde
           <pre className="error">{task.error}</pre>
         </>
       )}
-      {task.status === "pending" && kind === "external" && <Answer delivery={delivery} />}
-      {task.status === "pending" && kind === "worker" && (
-        <p className="muted">This task waits for a worker of its queue.</p>
-      )}
-      {(task.status === "received" || task.status === "running") && (
-        <p className="muted">A worker has this task.</p>
-      )}
+      {task.finished_at === null && <Unfinished task={task} kind={kind} />}
     </>
   );
+}
+
+/**
+ * What a task that has not finished waits for. Its run decides first: once
+ * the run ended, nothing finishes the task, and it has no form.
+ */
+function Unfinished({ task, kind }: { task: Task; kind: QueueKind | undefined }) {
+  const run = useRun(task.run_id);
+  if (run.isError) return <Failed what="the task's run" error={run.error} />;
+  if (!run.isSuccess) return <Loading what="the task's run" />;
+  const { status, reason } = run.data;
+  if (status !== "active") {
+    return (
+      <p className="muted">
+        Its run ended ({status}
+        {reason ? `: ${reason}` : ""}). Nothing can complete this task.
+      </p>
+    );
+  }
+  if (task.status !== "pending") return <p className="muted">A worker has this task.</p>;
+  if (kind === "external") return <Answer task={task} run={run.data} />;
+  if (kind === "worker") {
+    return <p className="muted">This task waits for a worker of its queue.</p>;
+  }
+  return null;
 }
 
 /** A value as a person reads it: a text as it is, anything else as JSON. */
@@ -113,15 +138,9 @@ function Value({ value }: { value: unknown }) {
   );
 }
 
-/**
- * The form of the task's step, read from the version of the flow its run is
- * on; while that loads, and for a step with none, there is no form.
- */
-function Answer({ delivery }: { delivery: Delivery }) {
-  const { task } = delivery;
-  const run = useRun(task.run_id);
-  const flow = useFlow(run.data?.flow ?? "", run.data?.version, run.isSuccess);
-  if (run.isError) return <Failed what="the task's run" error={run.error} />;
+/** The form of the task's step, read from the version of the flow its run is on. */
+function Answer({ task, run }: { task: Task; run: Run }) {
+  const flow = useFlow(run.flow, run.version);
   if (flow.isError) return <Failed what="the task's flow" error={flow.error} />;
   if (!flow.isSuccess) return <Loading what="the form" />;
   const step = task.address.step;
@@ -177,8 +196,10 @@ export function AnswerForm({
     mutationFn: (body: { result: unknown } | { error: string }) =>
       completeTask(taskId, body),
     onSettled: () => {
-      // Completed, or refused because someone else was first: read it again.
+      // Completed, or refused because someone was first or the run ended:
+      // read the task, its run and the list again.
       void refresh(client, { queryKey: ["task", taskId] });
+      void refresh(client, { queryKey: ["run"] });
       void refresh(client, { queryKey: ["queue-tasks"] });
     },
   });
