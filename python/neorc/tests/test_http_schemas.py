@@ -21,6 +21,9 @@ from neorc.manager._routes import _flow_response
 from neorc_core import (
     Event,
     EventKind,
+    Queue,
+    QueueKind,
+    QueueTask,
     Run,
     RunStatus,
     StoredFlow,
@@ -122,6 +125,16 @@ def test_the_task_forms() -> None:
     )
     _exactly(schemas.TaskDefinitionsResponse, {"tasks": [wire.task_step_to(step)]})
     _exactly(schemas.HeartbeatResponse, {"lease_expires_at": WHEN.isoformat()})
+
+
+def test_the_queue_forms() -> None:
+    queue = wire.queue_to(Queue("editors", QueueKind.EXTERNAL))
+    listed = wire.queue_task_to(QueueTask(TASK, "a", Version(1, 2, 3)))
+
+    assert queue == {"name": "editors", "kind": "external"}
+    assert (listed["flow"], listed["version"]) == ("a", "1.2.3")
+    _exactly(schemas.QueueListResponse, {"queues": [queue]})
+    _exactly(schemas.QueueTasksResponse, {"tasks": [listed]})
 
 
 def test_the_event_forms() -> None:

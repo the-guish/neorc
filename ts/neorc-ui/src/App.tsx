@@ -6,6 +6,8 @@ import { SignIn } from "./components/SignIn";
 import { isEmbedded } from "./embedding";
 import { FlowPage } from "./pages/FlowPage";
 import { FlowsPage } from "./pages/FlowsPage";
+import { QueuePage } from "./pages/QueuePage";
+import { QueuesPage } from "./pages/QueuesPage";
 import { RunPage } from "./pages/RunPage";
 import { RunsPage } from "./pages/RunsPage";
 import { useLiveEvents } from "./queries";
@@ -94,6 +96,10 @@ function Page({ route }: { route: Route }) {
       );
     case "run":
       return <RunPage key={route.id} id={route.id} view={route.view} />;
+    case "queues":
+      return <QueuesPage kind={route.kind} />;
+    case "queue":
+      return <QueuePage {...route} />;
     case "sign-in":
       return <SignedInAlready />;
     case "unknown":

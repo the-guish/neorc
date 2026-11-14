@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { addressKey, instancesOf, referencedStep, stepsOf } from "./definition";
+import {
+  addressKey,
+  instancesOf,
+  isExitCondition,
+  rawStep,
+  referencedStep,
+  stepsOf,
+} from "./definition";
 import { RECORDED } from "./test/recorded";
 
 describe("stepsOf", () => {
@@ -106,5 +113,36 @@ describe("referencedStep", () => {
     expect(referencedStep("neorc.item")).toBeUndefined();
     expect(referencedStep("tasks.")).toBeUndefined();
     expect(referencedStep("")).toBeUndefined();
+  });
+});
+
+describe("rawStep", () => {
+  const content = {
+    steps: {
+      write: { handler: "tasks:write" },
+      rounds: {
+        loop: { max_cycles: 3, exit_condition: "enough" },
+        steps: {
+          each: {
+            fan_out: { range: 2 },
+            steps: { ask: { queue: "editors", handler: "ask", form: [] } },
+          },
+          enough: { queue: "editors", handler: "enough" },
+        },
+      },
+    },
+  };
+
+  it("finds a step by its name, inside loops and fan-outs too", () => {
+    expect(rawStep(content, "write")).toEqual({ handler: "tasks:write" });
+    expect(rawStep(content, "ask")).toEqual({ queue: "editors", handler: "ask", form: [] });
+    expect(rawStep(content, "nobody")).toBeUndefined();
+    expect(rawStep(null, "write")).toBeUndefined();
+  });
+
+  it("says which step a loop exits on", () => {
+    expect(isExitCondition(content, "enough")).toBe(true);
+    expect(isExitCondition(content, "ask")).toBe(false);
+    expect(isExitCondition(content, "write")).toBe(false);
   });
 });

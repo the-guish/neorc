@@ -8,7 +8,8 @@ from __future__ import annotations
 import asyncio
 import math
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 
@@ -57,6 +58,8 @@ def _flow(content: JsonValue) -> FlowDefinition:
 
 
 WORK = Address("work")
+EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+"""Before every task: a listing since then holds every task of the queue."""
 ELSEWHERE = Address("elsewhere")
 
 
@@ -709,6 +712,117 @@ class StoreContract:
 
         assert taken is not None and taken.id == received
         assert [task.id for task in await store.pending_tasks("default")] == [waiting]
+
+    # A queue's tasks in any status, for a page people read.
+
+    async def test_a_queue_lists_its_tasks_in_any_status_published_last_first(
+        self, store: Store
+    ) -> None:
+        await self.upload(store)
+        run = await self.start(store)
+        succeeded = await self.publish(store, run, Address("one"))
+        await self.publish(store, run, Address("two"), queue="scoring")
+        failed = await self.publish(store, run, Address("three"))
+        pending = await self.publish(store, run, Address("four"))
+        await store.complete_task(succeeded, result=1)
+        await store.complete_task(failed, error="no")
+
+        listed = await store.queue_tasks("default", since=EPOCH)
+
+        assert [(item.task.id, item.task.status) for item in listed] == [
+            (pending, TaskStatus.PENDING),
+            (failed, TaskStatus.FAILED),
+            (succeeded, TaskStatus.SUCCEEDED),
+        ]
+        assert {(item.flow, item.version) for item in listed} == {
+            ("a", Version(1, 0, 0))
+        }
+        assert listed[0].task == await store.get_task(pending)
+        assert [
+            item.task.id
+            for item in await store.queue_tasks("default", since=EPOCH, limit=2)
+        ] == [pending, failed]
+        assert await store.queue_tasks("nobody", since=EPOCH) == []
+
+    async def test_a_queue_lists_an_unfinished_task_only_while_its_run_is_active(
+        self, store: Store
+    ) -> None:
+        await self.upload(store)
+        run = await self.start(store)
+        done = await self.publish(store, run, Address("one"))
+        waiting = await self.publish(store, run, Address("two"))
+        await self.publish(store, run, Address("three"))
+        await store.complete_task(done, result=1)
+        taken = await store.receive_task("default", lease_seconds=30)
+        assert taken is not None and taken.id == waiting
+
+        async def listed(**kept: Any) -> list[uuid.UUID]:
+            tasks = await store.queue_tasks("default", since=EPOCH, **kept)
+            return [item.task.id for item in tasks]
+
+        assert len(await listed()) == 3
+        await store.cancel_run_tree(run.id, "by hand")
+
+        # Nothing will finish the other two: only what finished is still listed.
+        assert await listed() == [done]
+        assert await listed(status=TaskStatus.PENDING) == []
+        assert await listed(status=TaskStatus.RECEIVED) == []
+
+    async def test_a_queue_lists_the_tasks_that_changed_since_a_time(
+        self, store: Store
+    ) -> None:
+        await self.upload(store)
+        run = await self.start(store)
+        earlier = await self.publish(store, run, Address("one"))
+        later = await self.publish(store, run, Address("two"))
+        await self.publish(store, run, Address("three"))
+        first = await store.complete_task(earlier, result=1)
+        await asyncio.sleep(0.01)  # two completions, at two times
+        second = await store.complete_task(later, result=2)
+        assert first.finished_at is not None and second.finished_at is not None
+
+        since_first = await store.queue_tasks("default", since=first.finished_at)
+        since_second = await store.queue_tasks("default", since=second.finished_at)
+        tomorrow = datetime.now(UTC) + timedelta(days=1)
+
+        # The third task was published before either time, and has not changed.
+        assert [item.task.id for item in since_first] == [later, earlier]
+        assert [item.task.id for item in since_second] == [later]
+        assert await store.queue_tasks("default", since=tomorrow) == []
+
+    async def test_a_queue_lists_the_tasks_in_a_status_and_of_a_flow(
+        self, store: Store
+    ) -> None:
+        await self.upload(store)
+        await self.upload(store, name="b")
+        run = await self.start(store)
+        other = await self.start(store, name="b")
+        done = await self.publish(store, run, Address("one"))
+        waiting = await self.publish(store, run, Address("two"))
+        elsewhere = await self.publish(store, other)
+        await store.complete_task(done, result=1)
+
+        async def listed(**kept: Any) -> list[uuid.UUID]:
+            tasks = await store.queue_tasks("default", since=EPOCH, **kept)
+            return [item.task.id for item in tasks]
+
+        assert await listed(status=TaskStatus.PENDING) == [elsewhere, waiting]
+        assert await listed(status=TaskStatus.SUCCEEDED) == [done]
+        assert await listed(status=TaskStatus.RUNNING) == []
+        assert await listed(flow="a") == [waiting, done]
+        assert await listed(flow="b", status=TaskStatus.PENDING) == [elsewhere]
+        assert await listed(flow="nobody") == []
+
+    async def test_listing_a_queue_does_not_change_any_task(self, store: Store) -> None:
+        await self.upload(store)
+        run = await self.start(store)
+        task_id = await self.publish(store, run)
+        before = await store.get_task(task_id)
+
+        await store.queue_tasks("default", since=EPOCH)
+
+        assert await store.get_task(task_id) == before
+        assert len(await store.events_after(0)) == 1  # the run's start alone
 
     async def test_a_pending_task_is_completed_with_its_result_and_an_event(
         self, store: Store

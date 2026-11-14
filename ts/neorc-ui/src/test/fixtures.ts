@@ -1,6 +1,16 @@
 // Responses as the manager sends them, typed by the schema so a drift shows
 // here at compile time.
-import type { ApiEvent, Flow, Run, Session, Task } from "../api";
+import type {
+  ApiEvent,
+  Delivery,
+  Flow,
+  Queue,
+  QueueTask,
+  Run,
+  Session,
+  Task,
+} from "../api";
+import reviewForm from "../forms/review_draft.form.json";
 
 /** A manager started with --no-auth. */
 export const OPEN: Session = {
@@ -130,4 +140,89 @@ export const SPLIT: Task = {
 
 export function event(sequence: number, run: Run): ApiEvent {
   return { sequence, run_id: run.id, kind: "run_finished" };
+}
+
+// A flow that waits for a person: examples/approval, as the manager stores it.
+
+export const QUEUES: Queue[] = [
+  { name: "default", kind: "worker" },
+  { name: "editors", kind: "external" },
+];
+
+export const APPROVAL: Flow = {
+  name: "approval",
+  version: "1.0.0",
+  content: {
+    name: "approval",
+    version: "1.0.0",
+    inputs: { topic: "string" },
+    output: "tasks.publish",
+    steps: {
+      write_draft: {
+        handler: "tasks:write_draft",
+        params: { topic: "inputs.topic" },
+      },
+      review_draft: {
+        queue: "editors",
+        handler: "review-draft",
+        params: { draft: "tasks.write_draft" },
+        form: reviewForm,
+      },
+      suggest_title: {
+        queue: "editors",
+        handler: "suggest-title",
+        params: { draft: "tasks.write_draft" },
+      },
+      publish: {
+        handler: "tasks:publish",
+        params: {
+          draft: "tasks.write_draft",
+          review: "tasks.review_draft",
+          title: "tasks.suggest_title",
+        },
+      },
+    },
+  },
+};
+
+export const WAITING: Run = {
+  ...ACTIVE,
+  id: "ed170000-1111-4bbb-8ccc-000000000004",
+  root_id: "ed170000-1111-4bbb-8ccc-000000000004",
+  flow: "approval",
+  version: "1.0.0",
+  inputs: { topic: "tea" },
+};
+
+export const REVIEW: Task = {
+  id: "4e71e000-0000-4000-8000-000000000001",
+  run_id: WAITING.id,
+  address: { step: "review_draft", scope: [] },
+  queue: "editors",
+  handler: "review-draft",
+  params: { draft: "tasks.write_draft" },
+  fixed_params: {},
+  status: "pending",
+  attempts: 0,
+  lease_expires_at: null,
+  result: null,
+  error: null,
+  created_at: "2026-09-13T10:05:01+00:00",
+  started_at: null,
+  finished_at: null,
+};
+
+export const TITLE: Task = {
+  ...REVIEW,
+  id: "717e0000-0000-4000-8000-000000000002",
+  address: { step: "suggest_title", scope: [] },
+  handler: "suggest-title",
+};
+
+export function listed(task: Task): QueueTask {
+  return { task, flow: "approval", version: "1.0.0" };
+}
+
+export function delivered(task: Task): Delivery {
+  return { task, inputs: { draft: "A first draft about tea." } };
 }

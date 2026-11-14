@@ -69,6 +69,7 @@ from neorc_core import (
     FlowVersionError,
     Queue,
     QueueKind,
+    QueueTask,
     Run,
     RunId,
     RunNotFoundError,
@@ -265,6 +266,23 @@ SELECT {", ".join(f"t.{column}" for column in TASK_COLUMNS.split(", "))}
  WHERE t.queue = $1 AND t.status = 'pending' AND r.status = 'active'
  ORDER BY t.position
  LIMIT $2
+"""
+
+# Reads only. GREATEST skips the times a task does not have yet, so this is
+# the last of published, started and finished. A task that has not finished
+# is left out once its run ended, as it is from the pending tasks.
+_QUEUE_TASKS = f"""
+SELECT {", ".join(f"t.{column}" for column in TASK_COLUMNS.split(", "))},
+       r.flow AS run_flow, r.version AS run_version
+  FROM {FLOW_TASKS_TABLE} AS t
+  JOIN {RUNS_TABLE} AS r ON r.id = t.run_id
+ WHERE t.queue = $1
+   AND GREATEST(t.created_at, t.started_at, t.finished_at) >= $2
+   AND ($3::text IS NULL OR t.status = $3)
+   AND ($4::text IS NULL OR r.flow = $4)
+   AND (t.finished_at IS NOT NULL OR r.status = 'active')
+ ORDER BY t.position DESC
+ LIMIT $5
 """
 
 _COMPLETE_TASK = f"""
@@ -616,6 +634,31 @@ class PostgresStore(Pooled, Store):
         async with self.pool.acquire() as conn:
             rows = await conn.fetch(_PENDING_TASKS, queue, limit)
         return [task_from_row(row) for row in rows]
+
+    async def queue_tasks(
+        self,
+        queue: str,
+        *,
+        since: datetime,
+        status: TaskStatus | None = None,
+        flow: str | None = None,
+        limit: int = DEFAULT_PAGE,
+    ) -> list[QueueTask]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                _QUEUE_TASKS,
+                queue,
+                since,
+                None if status is None else status.value,
+                flow,
+                limit,
+            )
+        return [
+            QueueTask(
+                task_from_row(row), row["run_flow"], Version.parse(row["run_version"])
+            )
+            for row in rows
+        ]
 
     async def complete_task(
         self, task_id: TaskId, *, result: JsonValue = None, error: str | None = None

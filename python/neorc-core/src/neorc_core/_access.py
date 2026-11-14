@@ -70,7 +70,11 @@ class Role(StrEnum):
     CI = "ci"
     """Uploads flows."""
     USER = "user"
-    """A person: signed in, or with a token for their scripts."""
+    """A person: signed in, or with a token for their scripts.
+
+    Bound to no queue: a person sees every queue and completes the pending
+    tasks of any.
+    """
     EXTERNAL_TRIGGER = "external-trigger"
     """Starts runs, and nothing else."""
 
@@ -96,6 +100,8 @@ class Permission(StrEnum):
     """List a queue's pending tasks, taking no lease."""
     TASKS_COMPLETE = "tasks:complete"
     """End a pending task by its id, with no lease before."""
+    QUEUES_READ = "queues:read"
+    """The declared queues, and the tasks of any of them in any status."""
 
 
 WORKER_PERMISSIONS: frozenset[Permission] = frozenset(
@@ -140,6 +146,8 @@ PERMISSIONS: Mapping[Role, frozenset[Permission]] = MappingProxyType(
                 Permission.RUNS_READ,
                 Permission.RUNS_CANCEL,
                 Permission.EVENTS_READ,
+                Permission.QUEUES_READ,
+                Permission.TASKS_COMPLETE,
             }
         ),
         Role.EXTERNAL_TRIGGER: frozenset({Permission.RUNS_START}),

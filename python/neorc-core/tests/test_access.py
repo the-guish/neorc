@@ -475,6 +475,8 @@ ALLOWED = {
         "runs:read",
         "runs:cancel",
         "events:read",
+        "queues:read",
+        "tasks:complete",
     },
     Role.EXTERNAL_TRIGGER: {"runs:start"},
 }

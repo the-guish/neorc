@@ -62,23 +62,26 @@ manager and the scheduler store it and pass it on.
 
 ## Who may complete
 
-Completing has its own role, `responder`. A responder token is bound to one
-queue of either kind (see [roles.md](roles.md)).
+A system completes with the role `responder`. A responder token is bound to
+one queue of either kind (see [roles.md](roles.md)). A person completes with
+the role `user`, which every signed-in person has.
 
-| Role        | May, on its one queue                                     |
-| ----------- | --------------------------------------------------------- |
-| `worker`    | fetch task definitions, receive, claim, heartbeat, finish |
-| `responder` | list pending tasks, complete                              |
+| Role        | Queues        | May                                                       |
+| ----------- | ------------- | --------------------------------------------------------- |
+| `worker`    | its one queue | fetch task definitions, receive, claim, heartbeat, finish |
+| `responder` | its one queue | list pending tasks, complete                              |
+| `user`      | every queue   | list queues and their tasks, complete                     |
 
 - Each role has only the operations in its row. A worker takes a task by
   receiving it.
-- A queue takes completions once it has a responder token. Tokens are created
-  on the database, and the operator chooses those queues.
 - A responder completes any pending task of its queue. A task on a worker
   queue can be completed until a worker receives it.
+- A manager with authentication off allows every operation to everyone.
 
 ## Not in scope
 
-- A person signed in to the UI completing tasks.
-- Declaring the shape of a result, for a form to collect it.
+- A fixed form for a task of a worker queue: mark it succeeded, mark it
+  failed, clear it.
+- Giving a person some queues only.
+- Recording who completed a task.
 - Deadlines and reminders for a task that waits.

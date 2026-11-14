@@ -15,7 +15,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
-from neorc_core import EventKind, RunStatus, TaskStatus
+from neorc_core import EventKind, QueueKind, RunStatus, TaskStatus
 from neorc_core.flows import Outcome
 
 
@@ -127,6 +127,30 @@ class DeliveryResponse(_Exact):
 class PendingTasksResponse(_Exact):
     tasks: list[DeliveryResponse]
     """A queue's pending tasks, oldest first, each as a worker would receive it."""
+
+
+class QueueResponse(_Exact):
+    name: str
+    kind: QueueKind
+    """Who takes its tasks: workers, or a person or another system."""
+
+
+class QueueListResponse(_Exact):
+    queues: list[QueueResponse]
+    """Every declared queue, by name."""
+
+
+class QueueTaskResponse(_Exact):
+    task: TaskResponse
+    flow: str
+    """The flow of the task's run."""
+    version: str
+    """The version of that flow the run is on."""
+
+
+class QueueTasksResponse(_Exact):
+    tasks: list[QueueTaskResponse]
+    """A queue's tasks in any status, the task published last first."""
 
 
 class TaskStepResponse(_Exact):

@@ -17,9 +17,11 @@ from typing import Any
 
 from neorc_core import _values
 from neorc_core._errors import InvalidValueError
+from neorc_core._queues import Queue
 from neorc_core._runs import (
     Event,
     EventKind,
+    QueueTask,
     Run,
     RunStatus,
     Task,
@@ -201,6 +203,18 @@ def delivery_to(delivery: TaskDelivery) -> Wire:
 
 def delivery_from(wire: Wire) -> TaskDelivery:
     return TaskDelivery(task_from(wire["task"]), wire["inputs"])
+
+
+def queue_to(queue: Queue) -> Wire:
+    return {"name": queue.name, "kind": queue.kind.value}
+
+
+def queue_task_to(listed: QueueTask) -> Wire:
+    return {
+        "task": task_to(listed.task),
+        "flow": listed.flow,
+        "version": str(listed.version),
+    }
 
 
 def task_step_to(step: TaskStep) -> Wire:

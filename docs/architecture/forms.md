@@ -5,6 +5,9 @@ values to pick from, radio buttons, a check box, a text area, in the place of
 one text box per input. The form is a file next to the flow's file, written in
 a small subset of [A2UI](https://github.com/a2ui-project/a2ui) v0.9.
 
+A task of an external queue can have a form too, for the person who answers
+it: [A task with a form](#a-task-with-a-form).
+
 This is one feature in one place. Everything about it is listed under
 [Where it is](#where-it-is), and [Taking it out](#taking-it-out) says how.
 
@@ -140,6 +143,31 @@ of at most one of its options' values.
 
 So a form is not only how a page looks. It narrows what the flow accepts.
 
+## A task with a form
+
+A task of an external queue may name a form too, for the person who answers
+it on the queue's page ([task-completion.md](../specs/task-completion.md)).
+[examples/approval](../../examples/approval/README.md) is a whole one, to run.
+
+```yaml
+review_draft:
+  queue: editors
+  handler: review-draft
+  params:
+    draft: tasks.write_draft
+  form: review_draft.form.json
+```
+
+- **Each control is a field of the task's result**, named by its `value`: a
+  check box at `/approved` makes the result `{"approved": true}`.
+- **At upload**, a form on a task of a worker queue is refused, and so is a
+  form on the exit condition of a loop.
+- **At every completion**, the result must have the form's fields and keep
+  what the form says, whoever sends it. A completion with an error has no
+  result to hold.
+- A task with no form gets a text field, and the exit condition of a loop a
+  yes or no.
+
 ## What is ours and not A2UI's
 
 A form file is A2UI v0.9: its messages, its components and their properties,
@@ -182,35 +210,42 @@ is a piece of work that was not needed to start a run.
 | drawing a form | `ts/neorc-ui/src/forms/` |
 | the tests of the first | `python/neorc-core/tests/forms/` |
 | the tests of the second | `ts/neorc-ui/src/forms/*.test.ts*` |
-| an example | `examples/code_task/` |
+| two examples | `examples/code_task/`, `examples/approval/` |
 | this page | `docs/architecture/forms.md` |
 
 `neorc_core.forms` imports nothing of `neorc_core` but its errors. The rest of
-neorc meets the feature in **four places**:
+neorc meets the feature in **eight places**, four for a flow's form and four
+for a task's:
 
 | where | what |
 |---|---|
 | `neorc_core/flows/_loader.py`, `_TOP_KEYS` and `_Parser.flow` | a flow may have a `form`, and `form_problems` says what is wrong with it |
-| `neorc_core/flows/_loader.py`, `load_flow_yaml`, `load_flow_file`, `read_flows` | `inline_form` reads the file a flow file names |
+| `neorc_core/flows/_loader.py`, `load_flow_yaml`, `load_flow_file`, `read_flows` | `inline_form` reads the files a flow file names, the tasks' too |
 | `neorc_core/_manager.py`, `_start_latest` | `check_form_inputs`, after `check_inputs` |
 | `ts/neorc-ui/src/components/StartRunForm.tsx` | `formOf`, `answered` and `<FlowForm>`, in the place of the fields |
+| `neorc_core/flows/_loader.py`, `_STEP_KEYS`, `_Parser.step` and `_Parser.loop` | a task may have a `form`, and an exit condition may not |
+| `neorc_core/_manager.py`, `upload_flows` | `step_forms`: a form is for a task of an external queue |
+| `neorc_core/_manager.py`, `complete_task` | `check_form_result`, before the completion is stored |
+| `ts/neorc-ui/src/components/TaskPanel.tsx` | `formOf`, `answered` and `<FlowForm>`, in the place of the text field |
 
 Nothing else knows what a form holds. The store keeps it as part of the flow's
 content, the HTTP routes carry that content as they did, and the adapters in
 `neorc` have no line about it.
 
-`ts/neorc-ui/src/forms/code_task.form.json` is a copy of the example's form,
-which the UI's tests read; a test in `python/neorc-core/tests/forms/` fails
-when the two differ.
+`ts/neorc-ui/src/forms/code_task.form.json` and `review_draft.form.json` are
+copies of the examples' forms, which the UI's tests read; a test in
+`python/neorc-core/tests/forms/` fails when a copy differs.
 
 ## Taking it out
 
-1. Delete the six paths of the first table.
-2. Undo the four places of the second: take `"form"` out of `_TOP_KEYS` and
-   the two lines under it in `_Parser.flow`; make the three readers of
-   `_loader.py` read a file's structure as it is; take the one line out of
-   `_start_latest`; give `StartRunForm` back its fields alone.
+1. Delete the paths of the first table.
+2. Undo the places of the second: take `"form"` out of `_TOP_KEYS` and
+   `_STEP_KEYS`, and the lines about it in `_Parser.flow`, `_Parser.step` and
+   `_Parser.loop`; make the three readers of `_loader.py` read a file's
+   structure as it is; take the lines out of `_start_latest`, `upload_flows`
+   and `complete_task`; give `StartRunForm` back its fields alone, and
+   `TaskPanel` its text field.
 3. Take the entry out of `CHANGELOG.md` and the paragraph out of `README.md`.
 
-A flow stored with a `form` is then a flow with an unknown field: it has to be
-uploaded again without one, under a new version.
+A flow stored with a `form`, its own or a task's, is then a flow with an
+unknown field: it has to be uploaded again without one, under a new version.

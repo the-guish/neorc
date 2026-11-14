@@ -34,6 +34,25 @@ one version, cut from a single tag on `main`.
   contract tests. A database created before this needs
   `neorc manager start --create-schema` for the new `neorc_queues` table, and
   keeps role constraints that refuse a responder token.
+- `neorc-core`, `neorc`, `neorc-ui`: a person completes tasks in the web UI.
+  "Queues" lists the declared queues, filtered by kind, in the sidebar and on
+  a page of its own. In the sidebar, each entry of the navigation now has its
+  list below it, the latest runs, the flows and the queues, and an arrow that
+  folds the list away. A queue's page lists its tasks in any state that
+  changed in the last 24 hours, or 7 days, 30 days or 1 year, filtered by
+  state, pending at first, and by flow. A task that has not finished is listed
+  only while its run is active. A pending task of an external queue opens with
+  its inputs and a form that completes it, or fails it with a reason. The form
+  is the one its step names, `form: <file>.form.json`, in the A2UI subset a
+  flow's form uses: its controls are the fields of the task's result, and the
+  manager holds every completion to them. A step with no form gets a text
+  field, and a loop's exit condition a yes or no. A form on a task of a worker
+  queue, or on an exit condition, is refused at upload. The `user` role gains
+  `queues:read` and `tasks:complete`, on every queue. New routes: `GET
+  /queues`, `GET /queues/{queue}/tasks/recent` and `GET
+  /tasks/{task_id}/inputs`. `Store` gains `queue_tasks`, with its contract
+  tests, and the tasks table an index on `(queue, position)`.
+  `examples/approval` is a flow that waits for a person twice.
 - `neorc-ui`: opened with `?embedded` in its URL (`/ui/?embedded#/runs`), the
   UI leaves out its sidebar and shows the page alone, for an application that
   frames it beside a navigation of its own.

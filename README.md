@@ -54,14 +54,14 @@ create` prints its secret once:
 Each token has a role, and may do only what its role allows
 ([roles.md](docs/specs/roles.md)):
 
-| Role               | May                                                                    |
-| ------------------ | ---------------------------------------------------------------------- |
-| `ci`               | upload flows                                                           |
-| `scheduler`        | read flows, runs and events; publish tasks, start sub-runs, end runs   |
-| `worker`           | fetch, receive, claim, heartbeat and finish the tasks of its one queue |
-| `responder`        | list and complete the pending tasks of its one queue                   |
-| `user`             | read flows, runs and events; start and cancel runs                     |
-| `external-trigger` | start runs                                                             |
+| Role               | May                                                                        |
+| ------------------ | -------------------------------------------------------------------------- |
+| `ci`               | upload flows                                                               |
+| `scheduler`        | read flows, runs and events; publish tasks, start sub-runs, end runs       |
+| `worker`           | fetch, receive, claim, heartbeat and finish the tasks of its one queue     |
+| `responder`        | list and complete the pending tasks of its one queue                       |
+| `user`             | read flows, runs, events and queues; start and cancel runs; complete tasks |
+| `external-trigger` | start runs                                                                 |
 
 A person signed in to the UI is a `user`; a `user` token is for their scripts.
 A token is sent only over HTTPS, or to a loopback address: serve the manager

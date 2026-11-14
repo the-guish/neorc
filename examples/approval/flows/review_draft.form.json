@@ -1,0 +1,63 @@
+[
+  {
+    "version": "v0.9",
+    "createSurface": {
+      "surfaceId": "review_draft",
+      "catalogId": "https://github.com/open-shipyard/neorc/forms/v1"
+    }
+  },
+  {
+    "version": "v0.9",
+    "updateComponents": {
+      "surfaceId": "review_draft",
+      "components": [
+        {
+          "id": "root",
+          "component": "Column",
+          "children": ["intro", "decision", "comment"]
+        },
+        {
+          "id": "intro",
+          "component": "Text",
+          "variant": "body",
+          "text": "Read the draft above, then decide."
+        },
+        {
+          "id": "decision",
+          "component": "ChoicePicker",
+          "label": "Decision",
+          "variant": "mutuallyExclusive",
+          "value": { "path": "/decision" },
+          "options": [
+            { "label": "Approve", "value": "approve" },
+            { "label": "Ask for changes", "value": "changes" }
+          ]
+        },
+        {
+          "id": "comment",
+          "component": "TextField",
+          "label": "Comment for the author",
+          "variant": "longText",
+          "value": { "path": "/comment" },
+          "checks": [
+            {
+              "condition": {
+                "call": "length",
+                "args": { "value": { "path": "/comment" }, "max": 500 }
+              },
+              "message": "Keep the comment under 500 characters."
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "version": "v0.9",
+    "updateDataModel": {
+      "surfaceId": "review_draft",
+      "path": "/",
+      "value": { "decision": ["approve"] }
+    }
+  }
+]

@@ -22,6 +22,7 @@ from neorc_core._queues import Queue, QueueKind
 from neorc_core._runs import (
     Event,
     EventKind,
+    QueueTask,
     Run,
     RunId,
     RunStatus,
@@ -29,6 +30,7 @@ from neorc_core._runs import (
     Task,
     check_uploads,
     ensure_active,
+    last_change,
     run_state_of,
     storable_text,
     sub_run_id_for,
@@ -332,6 +334,33 @@ class MemoryStore(Store):
                 and self._run(task.run_id).status is RunStatus.ACTIVE
             )
             return [task for task, _ in zip(pending, range(limit), strict=False)]
+
+    async def queue_tasks(
+        self,
+        queue: str,
+        *,
+        since: datetime,
+        status: TaskStatus | None = None,
+        flow: str | None = None,
+        limit: int = DEFAULT_PAGE,
+    ) -> list[QueueTask]:
+        async with self._lock:
+            listed: list[QueueTask] = []
+            for task in reversed(self._tasks.values()):  # published last, first
+                if len(listed) == limit:
+                    break
+                changed = last_change(task)
+                run = self._run(task.run_id)
+                if (
+                    task.queue == queue
+                    and changed is not None
+                    and changed >= since
+                    and (status is None or task.status is status)
+                    and (flow is None or run.flow == flow)
+                    and (task.finished_at is not None or run.status is RunStatus.ACTIVE)
+                ):
+                    listed.append(QueueTask(task, run.flow, run.version))
+            return listed
 
     async def complete_task(
         self, task_id: TaskId, *, result: JsonValue = None, error: str | None = None

@@ -55,6 +55,10 @@ def test_every_route_the_ui_reads_is_in_the_schema() -> None:
         ("/events/latest", "get"),
         ("/flows/{name}/runs", "post"),
         ("/runs/{run_id}/cancel", "post"),
+        ("/queues", "get"),
+        ("/queues/{queue}/tasks/recent", "get"),
+        ("/tasks/{task_id}/inputs", "get"),
+        ("/tasks/{task_id}/complete", "post"),
     ]:
         assert method in paths[path], f"{method.upper()} {path}"
 

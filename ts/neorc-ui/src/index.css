@@ -519,21 +519,35 @@ button.link {
   color: var(--on-accent);
 }
 
-.sidebar-section {
-  margin-top: 0.75rem;
+/* An entry of the navigation, its arrow, and its list below it. */
+
+.nav-entry {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
 }
 
-.sidebar-section h3 {
-  margin: 0 0 0.25rem 0.6rem;
-  font-size: 0.7rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--muted);
+.nav-entry > a {
+  flex: 1;
+  min-width: 0;
+}
+
+.nav-toggle {
+  flex: none;
+  padding: 0.3rem;
+}
+
+.sidebar-section {
+  margin-bottom: 0.4rem;
 }
 
 .sidebar-section a {
   font-size: 0.9rem;
+  padding-left: 1.7rem;
+}
+
+.shell-rail .sidebar-section a {
+  padding-left: 0.5rem;
 }
 
 .sidebar-section a .muted {
@@ -961,4 +975,182 @@ button:disabled {
   margin: 0.4rem 0 0.2rem;
   font-size: 0.85rem;
   font-weight: 600;
+}
+
+/* Queues: the sidebar's list with its filter by kind, a queue's tasks, and
+   the task opened beside them. */
+
+.dot-queue-worker {
+  background: transparent;
+  border: 1.5px solid var(--muted);
+  border-radius: 2px;
+}
+
+.dot-queue-external {
+  background: var(--going);
+  border-radius: 2px;
+}
+
+.segmented {
+  display: flex;
+  margin: 0.25rem 0.6rem 0.4rem 1.7rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.segmented button {
+  flex: 1;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.75rem;
+  padding: 0.15rem 0.25rem;
+}
+
+.segmented button + button {
+  border-left: 1px solid var(--line);
+}
+
+.segmented button[aria-pressed="true"] {
+  background: var(--tint);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.sidebar-note {
+  margin: 0.25rem 0.6rem 0.25rem 1.7rem;
+  font-size: 0.85rem;
+}
+
+.kind {
+  display: inline-block;
+  padding: 0.05rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--muted);
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.kind-external {
+  color: var(--going);
+  border-color: color-mix(in srgb, var(--going) 35%, transparent);
+  background: color-mix(in srgb, var(--going) 10%, transparent);
+}
+
+.filters {
+  flex-wrap: wrap;
+}
+
+.queue-body {
+  display: grid;
+  gap: 1rem;
+  align-items: start;
+}
+
+.queue-body > * {
+  min-width: 0;
+}
+
+@media (min-width: 1100px) {
+  .queue-body-open {
+    grid-template-columns: minmax(0, 1fr) minmax(22rem, 28rem);
+  }
+}
+
+.queue-tasks tr[aria-selected="true"] {
+  background: var(--hover);
+}
+
+.task-panel {
+  position: relative;
+  padding: 1rem;
+}
+
+.task-panel h2 {
+  margin: 0 3.5rem 0.75rem 0;
+  font-size: 1.1rem;
+}
+
+.task-panel h3 {
+  margin: 1rem 0 0.35rem;
+  font-size: 0.9rem;
+}
+
+.task-panel-close {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  font-size: 0.85rem;
+}
+
+.task-panel pre {
+  margin: 0;
+  overflow-x: auto;
+}
+
+.task-inputs {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0;
+}
+
+.task-inputs dt {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.task-inputs dd {
+  margin: 0;
+}
+
+.task-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.task-answer {
+  margin-top: 1rem;
+  padding: 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  max-width: none;
+}
+
+.task-answer fieldset {
+  border: 0;
+  margin: 0 0 1rem;
+  padding: 0;
+  min-width: 0;
+}
+
+.task-answer legend {
+  padding: 0;
+  margin-bottom: 0.25rem;
+}
+
+.task-answer label.flow-form-inline {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.task-answer textarea.plain {
+  font-family: inherit;
+  font-size: inherit;
+  margin-bottom: 0;
+}
+
+.task-answer-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
 }

@@ -253,6 +253,9 @@ ROUTE_PERMISSIONS = {
     ("POST", "/tasks/{task_id}/finished"): "tasks:finish",
     ("GET", "/queues/{queue}/tasks/pending"): "queue:pending",
     ("POST", "/tasks/{task_id}/complete"): "tasks:complete",
+    ("GET", "/queues"): "queues:read",
+    ("GET", "/queues/{queue}/tasks/recent"): "queues:read",
+    ("GET", "/tasks/{task_id}/inputs"): "runs:read",
 }
 """The plan's table of routes, written out rather than read from the routes."""
 
@@ -267,7 +270,15 @@ ALLOWED = {
     Role.RESPONDER: {"queue:pending", "tasks:complete"},
     Role.SCHEDULER: {"flows:read", "runs:read", "runs:schedule", "events:read"},
     Role.CI: {"flows:upload"},
-    Role.USER: {"flows:read", "runs:start", "runs:read", "runs:cancel", "events:read"},
+    Role.USER: {
+        "flows:read",
+        "runs:start",
+        "runs:read",
+        "runs:cancel",
+        "events:read",
+        "queues:read",
+        "tasks:complete",
+    },
     Role.EXTERNAL_TRIGGER: {"runs:start"},
 }
 
@@ -416,7 +427,7 @@ async def test_a_responder_is_confined_to_its_queue_and_a_worker_cannot_complete
         f"/tasks/{task_id}/complete", json=done, headers=bearer(other)
     )
     assert (hidden.status_code, _error(hidden)) == (404, "TaskNotFoundError")
-    for secret, role in ((worker, "worker"), (user, "user"), (scheduler, "scheduler")):
+    for secret, role in ((worker, "worker"), (ci, "ci"), (scheduler, "scheduler")):
         refused = await guarded.post(
             f"/tasks/{task_id}/complete", json=done, headers=bearer(secret)
         )
@@ -536,3 +547,38 @@ async def test_a_cross_site_write_is_refused_before_its_token_is_looked_at(
     )
 
     assert (response.status_code, _error(response)) == (403, "CrossSiteRequestError")
+
+
+async def test_a_person_sees_every_queue_and_completes_a_task_of_any(
+    guarded: httpx.AsyncClient, access: Access
+) -> None:
+    ci, _ = await access.create_token("ci", Role.CI)
+    user, _ = await access.create_token("person", Role.USER)
+    scheduler, _ = await access.create_token("scheduler", Role.SCHEDULER)
+    responder, _ = await access.create_token("r", Role.RESPONDER, queue="default")
+    flow = {"name": "f", "version": "1.0.0", "steps": {"work": {"handler": "m:w"}}}
+    await guarded.post("/flows", json={"flows": [flow]}, headers=bearer(ci))
+    run = await guarded.post("/flows/f/runs", json={"inputs": {}}, headers=bearer(user))
+    published = await guarded.post(
+        f"/runs/{run.json()['id']}/tasks",
+        json={"address": {"step": "work", "scope": []}},
+        headers=bearer(scheduler),
+    )
+    task_id = published.json()["id"]
+
+    queues = await guarded.get("/queues", headers=bearer(user))
+    listed = await guarded.get("/queues/default/tasks/recent", headers=bearer(user))
+    inputs = await guarded.get(f"/tasks/{task_id}/inputs", headers=bearer(user))
+    for path in ("/queues", "/queues/default/tasks/recent"):
+        refused = await guarded.get(path, headers=bearer(responder))
+        assert (refused.status_code, _error(refused)) == (403, "PermissionDeniedError")
+    completed = await guarded.post(
+        f"/tasks/{task_id}/complete", json={"result": "done"}, headers=bearer(user)
+    )
+    task = await guarded.get(f"/tasks/{task_id}", headers=bearer(user))
+
+    assert {"name": "default", "kind": "worker"} in queues.json()["queues"]
+    assert [t["task"]["id"] for t in listed.json()["tasks"]] == [task_id]
+    assert inputs.json()["inputs"] == {}
+    assert completed.status_code == 204
+    assert (task.json()["status"], task.json()["result"]) == ("succeeded", "done")

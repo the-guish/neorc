@@ -5,12 +5,13 @@ import {
   ACTIVE,
   HELLO,
   OPEN,
+  QUEUES,
   SIGNED_IN,
   SUCCEEDED,
   WORD_PICKER,
 } from "../test/fixtures";
 import { mockApi, refusal, renderWithClient } from "../test/render";
-import { Layout, SIDEBAR_KEY } from "./Layout";
+import { Layout, NAV_COLLAPSED_KEY, QUEUE_KIND_KEY, SIDEBAR_KEY } from "./Layout";
 
 function routes() {
   return {
@@ -241,5 +242,115 @@ describe("Layout", () => {
       }),
     );
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+  it("lists the queues under a filter by kind, which it keeps", async () => {
+    localStorage.removeItem(QUEUE_KIND_KEY);
+    mockApi({ ...routes(), "/queues": { queues: QUEUES } });
+
+    const view = renderWithClient(
+      <Layout route={{ name: "queue", queue: "editors" }} session={OPEN}>
+        <p>the page</p>
+      </Layout>,
+    );
+
+    const main = screen.getByRole("navigation", { name: "Main" });
+    expect(within(main).getByRole("link", { name: "Queues" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    const queues = await screen.findByRole("navigation", { name: "Queues" });
+    const names = () =>
+      within(queues)
+        .queryAllByRole("link")
+        .map((link) => link.textContent);
+    expect(names()).toEqual(["default", "editors"]);
+    expect(within(queues).getByRole("link", { name: "editors" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    const kinds = within(queues).getByRole("group", { name: "Kind of queue" });
+    expect(within(kinds).getByRole("button", { name: "all" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    fireEvent.click(within(kinds).getByRole("button", { name: "external" }));
+    expect(names()).toEqual(["editors"]);
+    fireEvent.click(within(kinds).getByRole("button", { name: "worker" }));
+    expect(names()).toEqual(["default"]);
+    expect(localStorage.getItem(QUEUE_KIND_KEY)).toBe("worker");
+
+    // Kept for the next page load.
+    view.unmount();
+    renderWithClient(
+      <Layout route={{ name: "queues" }} session={OPEN}>
+        <p>the page</p>
+      </Layout>,
+    );
+    const again = await screen.findByRole("navigation", { name: "Queues" });
+    expect(within(again).getAllByRole("link").map((link) => link.textContent)).toEqual([
+      "default",
+    ]);
+    localStorage.removeItem(QUEUE_KIND_KEY);
+  });
+  it("folds the list below an entry away with its arrow, and remembers it", async () => {
+    localStorage.removeItem(NAV_COLLAPSED_KEY);
+    mockApi({ ...routes(), "/queues": { queues: QUEUES } });
+
+    const view = renderWithClient(
+      <Layout route={{ name: "runs" }} session={OPEN}>
+        <p>the page</p>
+      </Layout>,
+    );
+
+    // Each list is below its own entry, inside the navigation.
+    const main = screen.getByRole("navigation", { name: "Main" });
+    const flows = await within(main).findByRole("navigation", { name: "Flows" });
+    await within(main).findByRole("navigation", { name: "Recent runs" });
+    await within(main).findByRole("navigation", { name: "Queues" });
+    const entry = within(main).getByRole("link", { name: "Flows" });
+    expect(
+      entry.compareDocumentPosition(flows) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    const queuesEntry = within(main).getByRole("link", { name: "Queues" });
+    expect(
+      flows.compareDocumentPosition(queuesEntry) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    const arrow = within(main).getByRole("button", { name: "Collapse Flows" });
+    expect(arrow).toHaveAttribute("aria-expanded", "true");
+    const down = arrow.querySelector("path")?.getAttribute("d");
+    fireEvent.click(arrow);
+
+    const folded = within(main).getByRole("button", { name: "Expand Flows" });
+    expect(folded).toHaveAttribute("aria-expanded", "false");
+    expect(folded.querySelector("path")?.getAttribute("d")).not.toBe(down);
+    expect(
+      within(main).queryByRole("navigation", { name: "Flows" }),
+    ).not.toBeInTheDocument();
+    // The entry stays, and so do the other lists.
+    expect(within(main).getByRole("link", { name: "Flows" })).toBeInTheDocument();
+    expect(
+      within(main).getByRole("navigation", { name: "Recent runs" }),
+    ).toBeInTheDocument();
+    expect(within(main).getByRole("navigation", { name: "Queues" })).toBeInTheDocument();
+    expect(localStorage.getItem(NAV_COLLAPSED_KEY)).toBe('["flows"]');
+
+    // Kept for the next page load, and unfolded again by the same arrow.
+    view.unmount();
+    renderWithClient(
+      <Layout route={{ name: "runs" }} session={OPEN}>
+        <p>the page</p>
+      </Layout>,
+    );
+    await screen.findByRole("navigation", { name: "Recent runs" });
+    expect(
+      screen.queryByRole("navigation", { name: "Flows" }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Expand Flows" }));
+    expect(
+      await screen.findByRole("navigation", { name: "Flows" }),
+    ).toBeInTheDocument();
+    expect(localStorage.getItem(NAV_COLLAPSED_KEY)).toBe("[]");
   });
 });

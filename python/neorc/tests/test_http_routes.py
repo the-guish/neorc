@@ -13,6 +13,7 @@ import asyncio
 import json
 import uuid
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -559,3 +560,93 @@ async def test_a_flow_naming_a_queue_nobody_declared_is_refused_over_http(
     assert "queue 'gpu' is not declared" in definitions.json()["detail"]
     assert stored.json() == {"stored": [True]}
     assert [task["name"] for task in served.json()["tasks"]] == ["draw"]
+
+
+# The routes a page for people reads: the queues, and a queue's tasks.
+
+
+async def test_the_queues_are_listed_with_their_kinds(
+    manager: Manager, http: httpx.AsyncClient
+) -> None:
+    await manager.declare_queue("editors", QueueKind.EXTERNAL)
+
+    listed = await http.get("/queues")
+
+    assert listed.status_code == 200
+    queues = listed.json()["queues"]
+    assert [queue["name"] for queue in queues] == sorted(q["name"] for q in queues)
+    assert {"name": "editors", "kind": "external"} in queues
+    assert {"name": "default", "kind": "worker"} in queues
+
+
+async def test_a_queues_tasks_are_listed_in_any_status_with_their_flow(
+    http: httpx.AsyncClient,
+) -> None:
+    run_id = await _started(http)
+    published = await http.post(f"/runs/{run_id}/tasks", json={"address": WORK})
+    task_id = published.json()["id"]
+    recent = "/queues/default/tasks/recent"
+    tomorrow = (datetime.now(UTC) + timedelta(days=1)).isoformat()
+    last_year = (datetime.now(UTC) - timedelta(days=365)).isoformat()
+
+    waiting = await http.get(recent)
+    await http.post(f"/tasks/{task_id}/complete", json={"result": "hi!"})
+    done = await http.get(recent, params={"status": "succeeded", "flow": "main"})
+    still_pending = await http.get(recent, params={"status": "pending"})
+    of_another_flow = await http.get(recent, params={"flow": "other"})
+    since_tomorrow = await http.get(recent, params={"since": tomorrow})
+    since_last_year = await http.get(recent, params={"since": last_year, "limit": 1})
+    elsewhere = await http.get("/queues/elsewhere/tasks/recent")
+
+    (listed,) = waiting.json()["tasks"]
+    assert (listed["flow"], listed["version"]) == ("main", "1.0.0")
+    assert (listed["task"]["id"], listed["task"]["status"]) == (task_id, "pending")
+    (finished,) = done.json()["tasks"]
+    assert (finished["task"]["status"], finished["task"]["result"]) == (
+        "succeeded",
+        "hi!",
+    )
+    assert [t["task"]["id"] for t in since_last_year.json()["tasks"]] == [task_id]
+    for empty in (still_pending, of_another_flow, since_tomorrow, elsewhere):
+        assert (empty.status_code, empty.json()) == (200, {"tasks": []})
+
+
+async def test_a_listing_of_a_queues_tasks_is_validated(
+    http: httpx.AsyncClient,
+) -> None:
+    recent = "/queues/default/tasks/recent"
+
+    refused = [
+        await http.get(recent, params={"status": "done"}),
+        await http.get(recent, params={"limit": 0}),
+        await http.get(recent, params={"limit": 10_000}),
+        await http.get(recent, params={"flow": "a/b"}),
+        await http.get(recent, params={"since": "yesterday"}),
+        await http.get(recent, params={"since": "2026-11-14T10:00:00"}),
+        await http.get("/queues/a.b/tasks/recent"),
+    ]
+
+    for response in refused:
+        assert (response.status_code, _error(response)) == (422, "InvalidValueError")
+
+
+async def test_a_task_is_read_with_its_inputs_filled_in(
+    http: httpx.AsyncClient,
+) -> None:
+    run_id = await _started(http)
+    published = await http.post(f"/runs/{run_id}/tasks", json={"address": WORK})
+    task_id = published.json()["id"]
+
+    read = await http.get(f"/tasks/{task_id}/inputs")
+    await http.post(f"/tasks/{task_id}/complete", json={"result": "hi!"})
+    after = await http.get(f"/tasks/{task_id}/inputs")
+    missing = await http.get(f"/tasks/{uuid.uuid4()}/inputs")
+
+    assert read.status_code == 200
+    assert read.json()["task"]["id"] == task_id
+    assert read.json()["inputs"] == {"word": "hi"}
+    assert (after.json()["task"]["status"], after.json()["inputs"]) == (
+        "succeeded",
+        {"word": "hi"},
+    )
+    assert (missing.status_code, _error(missing)) == (404, "TaskNotFoundError")

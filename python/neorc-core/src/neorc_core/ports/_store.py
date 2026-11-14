@@ -16,8 +16,16 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime
 
 from neorc_core._queues import Queue, QueueKind
-from neorc_core._runs import Event, Run, RunId, RunStatus, StoredFlow, Task
-from neorc_core._task import TaskId
+from neorc_core._runs import (
+    Event,
+    QueueTask,
+    Run,
+    RunId,
+    RunStatus,
+    StoredFlow,
+    Task,
+)
+from neorc_core._task import TaskId, TaskStatus
 from neorc_core._values import JsonValue
 from neorc_core.flows import Address, Reference, RunState, Version
 from neorc_core.ports._clients import DEFAULT_LEASE_SECONDS
@@ -222,6 +230,26 @@ class Store(ABC):
         """Up to ``limit`` pending tasks of ``queue`` in active runs, oldest first.
 
         Reads only: no lease is taken, and no task changes.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    async def queue_tasks(
+        self,
+        queue: str,
+        *,
+        since: datetime,
+        status: TaskStatus | None = None,
+        flow: str | None = None,
+        limit: int = DEFAULT_PAGE,
+    ) -> list[QueueTask]:
+        """Up to ``limit`` tasks of ``queue`` that changed at or after ``since``.
+
+        In any status, the task published last first. A task that has not
+        finished is listed only while its run is active: once the run ended,
+        nothing will finish it. A task changes when it is published, started
+        or finished (``last_change``). ``status`` keeps only the tasks in that
+        status, and ``flow`` only those of that flow's runs. Reads only.
         """
         raise NotImplementedError
 

@@ -16,12 +16,16 @@ import {
   getRun,
   latestSequence,
   listFlows,
+  listQueues,
   listRuns,
   PAGE_SIZE,
+  queueTasks,
   runTasks,
   subRuns,
+  taskInputs,
   waitForEvents,
   type ApiEvent,
+  type QueueTaskFilters,
   type RunFilters,
 } from "./api";
 
@@ -35,6 +39,10 @@ export const keys = {
   run: (id: string) => ["run", id] as const,
   tasks: (id: string) => ["run", id, "tasks"] as const,
   subRuns: (id: string) => ["run", id, "sub-runs"] as const,
+  queues: ["queues"] as const,
+  queueTasks: (queue: string, filters: QueueTaskFilters) =>
+    ["queue-tasks", queue, filters] as const,
+  taskInputs: (id: string) => ["task", id, "inputs"] as const,
 };
 
 /**
@@ -126,6 +134,42 @@ export function useSubRuns(id: string, live: LiveOptions) {
     queryKey: keys.subRuns(id),
     queryFn: () => subRuns(id),
     refetchInterval: whileActive(live),
+  });
+}
+
+/**
+ * How long the list of queues is trusted. A queue is declared on the
+ * database, with no event, and rarely.
+ */
+export const QUEUES_STALE_MS = 30_000;
+
+export function useQueues() {
+  return useQuery({
+    queryKey: keys.queues,
+    queryFn: listQueues,
+    staleTime: QUEUES_STALE_MS,
+  });
+}
+
+/** How often a queue's page asks for its tasks again. */
+export const QUEUE_POLL_MS = 5000;
+
+/**
+ * A queue's tasks. No event says a task was published or received, so the
+ * page asks again on its own; an event refreshes it at once.
+ */
+export function useQueueTasks(queue: string, filters: QueueTaskFilters) {
+  return useQuery({
+    queryKey: keys.queueTasks(queue, filters),
+    queryFn: () => queueTasks(queue, filters),
+    refetchInterval: QUEUE_POLL_MS,
+  });
+}
+
+export function useTaskInputs(id: string) {
+  return useQuery({
+    queryKey: keys.taskInputs(id),
+    queryFn: () => taskInputs(id),
   });
 }
 
@@ -254,6 +298,9 @@ export function isNotSession(query: Query): boolean {
 
 function invalidate(client: QueryClient, events: ApiEvent[]): void {
   void refresh(client, { queryKey: ["runs"] });
+  // A task finished, or a run ended with tasks still waiting.
+  void refresh(client, { queryKey: ["queue-tasks"] });
+  void refresh(client, { queryKey: ["task"] });
   for (const id of new Set(events.map((event) => event.run_id))) {
     void refresh(client, { queryKey: keys.run(id) });
   }

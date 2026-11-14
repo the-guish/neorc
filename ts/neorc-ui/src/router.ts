@@ -10,6 +10,18 @@ export type Route =
   | { name: "flows" }
   | { name: "flow"; flow: string; version?: string }
   | { name: "run"; id: string; view?: RunView }
+  | { name: "queues"; kind?: string }
+  | {
+      name: "queue";
+      queue: string;
+      /** A task status, or "all"; pending when left out. */
+      status?: string;
+      flow?: string;
+      /** How far back: one of the queue page's windows; 24 hours when left out. */
+      window?: string;
+      /** The task opened beside the list. */
+      task?: string;
+    }
   | { name: "sign-in"; error?: string }
   | { name: "unknown"; hash: string };
 
@@ -29,6 +41,19 @@ export function parseHash(hash: string): Route {
     };
   }
   if (parts.length === 1 && parts[0] === "flows") return { name: "flows" };
+  if (parts.length === 1 && parts[0] === "queues") {
+    return { name: "queues", kind: params.get("kind") ?? undefined };
+  }
+  if (parts.length === 2 && parts[0] === "queues" && parts[1]) {
+    return {
+      name: "queue",
+      queue: safeDecode(parts[1]) ?? parts[1],
+      status: params.get("status") ?? undefined,
+      flow: params.get("flow") ?? undefined,
+      window: params.get("window") ?? undefined,
+      task: params.get("task") ?? undefined,
+    };
+  }
   if (parts.length === 1 && parts[0] === "sign-in") {
     return { name: "sign-in", error: params.get("error") ?? undefined };
   }
@@ -79,6 +104,20 @@ export function href(route: Route): string {
     case "run": {
       const base = `#/runs/${encodeURIComponent(route.id)}`;
       return route.view ? `${base}?view=${route.view}` : base;
+    }
+    case "queues":
+      return route.kind
+        ? `#/queues?kind=${encodeURIComponent(route.kind)}`
+        : "#/queues";
+    case "queue": {
+      const params = new URLSearchParams();
+      if (route.status) params.set("status", route.status);
+      if (route.flow) params.set("flow", route.flow);
+      if (route.window) params.set("window", route.window);
+      if (route.task) params.set("task", route.task);
+      const query = params.toString();
+      const base = `#/queues/${encodeURIComponent(route.queue)}`;
+      return query ? `${base}?${query}` : base;
     }
     case "sign-in":
       return route.error
