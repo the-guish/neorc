@@ -13,7 +13,7 @@ from __future__ import annotations
 import time
 import uuid
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import TypeVar
 
 from neorc_core import _values
@@ -28,6 +28,7 @@ from neorc_core._errors import (
 from neorc_core._queues import Queue, QueueKind
 from neorc_core._runs import (
     Event,
+    QueueTask,
     Run,
     RunId,
     RunStatus,
@@ -36,7 +37,7 @@ from neorc_core._runs import (
     TaskDelivery,
     ensure_active,
 )
-from neorc_core._task import TaskId
+from neorc_core._task import TaskId, TaskStatus
 from neorc_core._values import JsonValue
 from neorc_core.flows import (
     Address,
@@ -54,12 +55,15 @@ from neorc_core.flows import (
     resolve,
 )
 from neorc_core.flows._validation import check_output
-from neorc_core.forms import check_form_inputs
+from neorc_core.forms import check_form_inputs, check_form_result, step_forms
 from neorc_core.ports._clients import DEFAULT_LEASE_SECONDS, check_lease_seconds
 from neorc_core.ports._store import DEFAULT_PAGE, Store
 from neorc_core.ports._task_notifier import TaskNotifier
 
 CANCELLED_BY_HAND = "cancelled by hand"
+
+QUEUE_WINDOW = timedelta(hours=24)
+"""How far back a queue's tasks are listed, when the caller does not say."""
 
 _START_ATTEMPTS = 3
 """Starts to try while uploads keep replacing a flow's latest version."""
@@ -96,9 +100,10 @@ class Manager:
         caller or before it. Returns, per flow, whether a new version was
         stored; ``False`` for an identical upload.
 
-        Raises ``FlowDefinitionError`` for an invalid flow or set, or a task on
-        a queue nobody declared, and ``FlowVersionError`` for a version rule
-        broken; either way nothing is stored.
+        Raises ``FlowDefinitionError`` for an invalid flow or set, a task on a
+        queue nobody declared, or a task with a form on a worker queue, and
+        ``FlowVersionError`` for a version rule broken; either way nothing is
+        stored.
         """
         definitions: list[FlowDefinition] = []
         problems: list[str] = []
@@ -111,7 +116,7 @@ class Manager:
             raise FlowDefinitionError(problems)
         # A declared queue stays declared, so this holds when the flows are
         # stored, though it is not one step with storing them.
-        declared = {queue.name for queue in await self._store.queues()}
+        declared = {queue.name: queue.kind for queue in await self._store.queues()}
         problems = [
             f"{definition.name}: {task.name} is on queue {task.queue!r}, which is "
             "not declared"
@@ -119,6 +124,16 @@ class Manager:
             for task in definition.tasks()
             if task.queue not in declared
         ]
+        # A form is how a person answers a task of an external queue.
+        for definition, content in zip(definitions, contents, strict=True):
+            with_form = step_forms(content)
+            problems.extend(
+                f"{definition.name}: {task.name} has a form and is on queue "
+                f"{task.queue!r}, which is not an external queue"
+                for task in definition.tasks()
+                if task.name in with_form
+                and declared.get(task.queue) is QueueKind.WORKER
+            )
         if problems:
             raise FlowDefinitionError(problems)
 
@@ -444,13 +459,22 @@ class Manager:
 
         Raises ``TaskStateError`` unless the task is pending, and
         ``RunStateError`` if its run is no longer active. A result that is not
-        a valid value, or is over the size limit, is refused with
-        ``InvalidValueError``, and the task stays pending for a result that is.
+        a valid value, is over the size limit, or is not what the form of the
+        task's step submits, is refused with ``InvalidValueError``, and the
+        task stays pending for a result that is.
         """
         await self._ensure_on_queue(task_id, queue)
         if error is None:
             result = _values.encode(_values.decode(result))
             _values.ensure_fits(_values.dumps_json(result))
+            # A task's step and its run's version never change, so what the
+            # form asks holds for the write after.
+            task = await self._store.get_task(task_id)
+            run = await self._store.get_run(task.run_id)
+            content = (await self._store.get_flow(run.flow, run.version)).content
+            form = step_forms(content).get(task.address.step)
+            if form is not None:
+                check_form_result(task.address.step, form, result)
         completed = await self._store.complete_task(task_id, result=result, error=error)
         await self._events.notify()
         return completed
@@ -458,6 +482,45 @@ class Manager:
     async def get_task(self, task_id: TaskId) -> Task:
         """A task, for a status query."""
         return await self._store.get_task(task_id)
+
+    # A page for people: a queue's tasks, and one task with its inputs.
+
+    async def queue_tasks(
+        self,
+        queue: str,
+        *,
+        since: datetime | None = None,
+        status: TaskStatus | None = None,
+        flow: str | None = None,
+        limit: int = DEFAULT_PAGE,
+    ) -> list[QueueTask]:
+        """Up to ``limit`` tasks of ``queue`` that changed since ``since``.
+
+        In any status, the task published last first, each with the flow and
+        version of its run. ``since`` is ``QUEUE_WINDOW`` ago when not given.
+        ``status`` and ``flow`` keep only the tasks in that status and of that
+        flow.
+        """
+        _queue(queue)
+        if flow is not None:
+            _lookup(flow, "flow")
+        if limit < 1:
+            raise InvalidValueError(f"limit is at least 1, not {limit}")
+        if since is None:
+            since = datetime.now(UTC) - QUEUE_WINDOW
+        elif since.tzinfo is None:
+            raise InvalidValueError("since needs a time zone")
+        return await self._store.queue_tasks(
+            queue, since=since, status=status, flow=flow, limit=limit
+        )
+
+    async def task_inputs(self, task_id: TaskId) -> TaskDelivery:
+        """A task with its inputs filled in, as a worker would receive it.
+
+        Nothing is leased or changed. Raises ``TaskNotFoundError`` for an
+        unknown task.
+        """
+        return await self._delivery(await self._store.get_task(task_id))
 
     # Queues.
 

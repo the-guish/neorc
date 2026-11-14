@@ -122,6 +122,21 @@ class TaskDelivery:
     inputs: Mapping[str, JsonValue]
 
 
+@dataclass(frozen=True, slots=True)
+class QueueTask:
+    """A task as a queue lists it: with the flow and version of its run."""
+
+    task: Task
+    flow: str
+    version: Version
+
+
+def last_change(task: Task) -> datetime | None:
+    """When a task last changed: it was published, started or finished."""
+    times = [t for t in (task.created_at, task.started_at, task.finished_at) if t]
+    return max(times) if times else None
+
+
 class EventKind(StrEnum):
     """What happened to a run, for the scheduler to act on."""
 

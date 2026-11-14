@@ -40,7 +40,7 @@ from neorc_core.forms import form_problems, inline_form
 _TOP_KEYS = {"name", "version", "inputs", "output", "steps", "form"}
 _KIND_KEYS = ("handler", "loop", "fan_out", "flow")
 _STEP_KEYS = {
-    "handler": {"handler", "queue", "params", "fixed_params"},
+    "handler": {"handler", "queue", "params", "fixed_params", "form"},
     "loop": {"loop", "steps"},
     "fan_out": {"fan_out", "steps"},
     "flow": {"flow", "params", "fixed_params"},
@@ -294,6 +294,7 @@ class _Parser:
     def __init__(self) -> None:
         self.problems: list[str] = []
         self._names: set[str] = set()
+        self._with_form: set[str] = set()
 
     def problem(self, path: str, message: str) -> None:
         self.problems.append(f"{path}: {message}")
@@ -392,6 +393,12 @@ class _Parser:
         if name is None:
             return None
         if kind == "handler":
+            if "form" in data:
+                # The form of a task: its controls are the fields of the result.
+                self._with_form.add(name)
+                self.problems.extend(
+                    f"{path}.{problem}" for problem in form_problems(data["form"], None)
+                )
             return TaskStep(
                 name,
                 handler=self.text(data["handler"], f"{path}.handler"),
@@ -426,6 +433,12 @@ class _Parser:
         exit_condition = self.text(
             config.get("exit_condition"), f"{path}.loop.exit_condition"
         )
+        if exit_condition in self._with_form:
+            self.problem(
+                f"{path}.loop.exit_condition",
+                f"{exit_condition} has a form, so its result is a mapping, and an "
+                "exit condition is true or false",
+            )
         if max_cycles is None:
             return None
         return LoopStep(name, max_cycles, exit_condition, steps)

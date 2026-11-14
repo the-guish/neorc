@@ -223,8 +223,8 @@ async def test_a_run_waits_for_a_responder_deployed(
             params={"timeout": 0},
             headers=bearer(tokens.workers["default"]),
         )
-        by_a_person = await http.post(
-            complete, json=answer, headers=bearer(tokens.user)
+        by_the_scheduler = await http.post(
+            complete, json=answer, headers=bearer(tokens.scheduler)
         )
         waiting = await client.get_run(run.id)
         completed = await http.post(complete, json=answer, headers=bearer(responder))
@@ -237,7 +237,7 @@ async def test_a_run_waits_for_a_responder_deployed(
     assert delivery["task"]["handler"] == "approve-draft"
     assert delivery["inputs"] == {"form": "approval", "written": None, "id": task_id}
     assert by_a_worker.status_code == 403
-    assert by_a_person.status_code == 403
+    assert by_the_scheduler.status_code == 403
     assert waiting.status is RunStatus.ACTIVE
     assert completed.status_code == 204
     assert (again.status_code, again.json()["error"]) == (409, "TaskStateError")

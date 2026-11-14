@@ -1,0 +1,41 @@
+# A flow that waits for a person. Two of its tasks are on `editors`, an
+# external queue: no worker runs them, and a person answers each on the
+# queue's page of the web UI. docs/specs/task-completion.md says how.
+name: approval
+version: 1.0.0
+
+inputs:
+  topic: string
+
+output: tasks.publish
+
+steps:
+  write_draft:
+    queue: default
+    handler: tasks:write_draft
+    params:
+      topic: inputs.topic
+
+  # With a form: the page draws review_draft.form.json, and the result is a
+  # mapping with the form's fields, `decision` and `comment`.
+  review_draft:
+    queue: editors
+    handler: review-draft
+    params:
+      draft: tasks.write_draft
+    form: review_draft.form.json
+
+  # With no form: the page asks for a text, and the result is that text.
+  suggest_title:
+    queue: editors
+    handler: suggest-title
+    params:
+      draft: tasks.write_draft
+
+  publish:
+    queue: default
+    handler: tasks:publish
+    params:
+      draft: tasks.write_draft
+      review: tasks.review_draft
+      title: tasks.suggest_title

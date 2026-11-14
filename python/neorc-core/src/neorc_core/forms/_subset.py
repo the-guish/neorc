@@ -121,17 +121,23 @@ def _components(form: Any) -> list[Mapping[str, Any]]:
     return listed
 
 
-def form_problems(form: Any, inputs: Mapping[str, str]) -> list[str]:
+def form_problems(form: Any, inputs: Mapping[str, str] | None) -> list[str]:
     """Every reason ``form`` is not a form for a flow declaring ``inputs``.
 
     ``inputs`` maps each input's name to its type, as the flow declares them.
-    An empty list is a form the UI draws whole and ``check_form_inputs`` reads.
+    ``None`` is for a task's form, which declares nothing beside it: its
+    controls say what the fields of the task's result are (``form_fields``).
+    An empty list is a form the UI draws whole, and one ``check_form_inputs``
+    and ``check_form_result`` read.
     """
     if isinstance(form, str):
         return [
             f"form: {form!r} names a file, which is read in where the flow's "
             "file is read; a flow that is uploaded holds the form itself"
         ]
+    of_task = inputs is None
+    if inputs is None:
+        inputs = form_fields(form)
     if not isinstance(form, list) or not form:
         return ["form: must be a list of A2UI messages"]
     problems: list[str] = []
@@ -207,13 +213,17 @@ def form_problems(form: Any, inputs: Mapping[str, str]) -> list[str]:
         bound = _input_of(component)
         if bound is None:
             problems.append(
-                f"{where}: value must be {{'path': '/<input>'}}, one of the "
+                f"{where}: value must be {{'path': '/<field>'}}, a field of the "
+                "task's result"
+                if of_task
+                else f"{where}: value must be {{'path': '/<input>'}}, one of the "
                 "flow's inputs"
             )
         elif bound not in inputs:
             problems.append(f"{where}: the flow declares no input {bound!r}")
         elif bound in controls:
-            problems.append(f"{where}: input {bound!r} already has a control")
+            what = "field" if of_task else "input"
+            problems.append(f"{where}: {what} {bound!r} already has a control")
         else:
             controls[bound] = component
             if inputs[bound] != _SUBMITS[kind]:
@@ -225,10 +235,27 @@ def form_problems(form: Any, inputs: Mapping[str, str]) -> list[str]:
         if name not in controls:
             problems.append(f"form: no control for input {name!r}")
 
+    if of_task and not controls:
+        problems.append("form: needs at least one control, for the result to hold")
     problems.extend(_tree_problems(by_id))
     if data and not problems:
         problems.extend(_data_problems(data[0], controls))
     return problems
+
+
+def form_fields(form: Any) -> dict[str, str]:
+    """What a form's controls submit: each one's name, and the type of its value.
+
+    ``{"approved": "boolean", "comment": "string"}`` for a check box bound to
+    ``/approved`` and a text field bound to ``/comment``. For a task's form
+    these are the fields of the task's result.
+    """
+    fields: dict[str, str] = {}
+    for component in _components(form):
+        kind, name = _kind(component), _input_of(component)
+        if kind is not None and name is not None:
+            fields.setdefault(name, _SUBMITS[kind])
+    return fields
 
 
 def _component_problems(
@@ -403,12 +430,55 @@ def check_form_inputs(flow: str, content: Any, inputs: Mapping[str, Any]) -> Non
     options, and each check holds.
     """
     form = content.get("form") if isinstance(content, Mapping) else None
+    problems = _unkept(form, inputs, "input")
+    if problems:
+        raise InvalidValueError(f"{flow}: " + "; ".join(problems))
+
+
+def check_form_result(step: str, form: Any, result: Any) -> None:
+    """Raise ``InvalidValueError`` unless ``result`` is what a task's form submits.
+
+    ``form`` is the form of the task's step, and ``result`` the result a
+    completion gives, in its JSON form. The result is a mapping with the form's
+    fields and no other, each of the type its control submits; a choice is one
+    of its options, and each check holds. That is for every completion,
+    whoever sends it.
+    """
+    fields = form_fields(form)
+    if not isinstance(result, Mapping):
+        listed = ", ".join(fields)
+        raise InvalidValueError(
+            f"{step}: the result must be a mapping with the form's fields: {listed}"
+        )
+    problems = [f"no field {name!r}" for name in fields if name not in result]
+    problems.extend(
+        f"the form has no field {name!r}" for name in result if name not in fields
+    )
+    for name, submits in fields.items():
+        if name in result and not _is_a(result[name], submits):
+            problems.append(f"field {name!r} must be a {submits}")
+    if not problems:
+        problems = _unkept(form, result, "field")
+    if problems:
+        raise InvalidValueError(f"{step}: " + "; ".join(problems))
+
+
+def _is_a(value: Any, submits: str) -> bool:
+    if submits == "boolean":
+        return isinstance(value, bool)
+    if submits == "number":
+        return _is_number(value)
+    return isinstance(value, str)
+
+
+def _unkept(form: Any, values: Mapping[str, Any], what: str) -> list[str]:
+    """How ``values`` break what the form's controls say; ``what`` names a value."""
     problems: list[str] = []
     for component in _components(form):
         kind, name = _kind(component), _input_of(component)
-        if kind is None or name is None or name not in inputs:
+        if kind is None or name is None or name not in values:
             continue
-        value = inputs[name]
+        value = values[name]
         if kind == "choice":
             options = [
                 option.get("value")
@@ -417,15 +487,14 @@ def check_form_inputs(flow: str, content: Any, inputs: Mapping[str, Any]) -> Non
             ]
             if value not in options:
                 listed = ", ".join(str(option) for option in options)
-                problems.append(f"input {name!r} is not one of {listed}")
+                problems.append(f"{what} {name!r} is not one of {listed}")
             continue
         checks = component.get("checks")
         for check in checks if isinstance(checks, list) else []:
             problem = _broken(check, value)
             if problem:
-                problems.append(f"input {name!r} {problem}")
-    if problems:
-        raise InvalidValueError(f"{flow}: " + "; ".join(problems))
+                problems.append(f"{what} {name!r} {problem}")
+    return problems
 
 
 def _broken(check: Any, value: Any) -> str | None:

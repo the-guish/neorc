@@ -45,6 +45,7 @@ from neorc_core._queues import Queue, QueueKind
 from neorc_core._runs import (
     Event,
     EventKind,
+    QueueTask,
     Run,
     RunId,
     RunStatus,
@@ -110,6 +111,7 @@ __all__ = [
     "Queue",
     "QueueClient",
     "QueueKind",
+    "QueueTask",
     "ResolutionError",
     "Role",
     "Run",

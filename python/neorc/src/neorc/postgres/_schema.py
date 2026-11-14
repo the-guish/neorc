@@ -74,6 +74,7 @@ INDEXES = (
     f"{RUNS_TABLE}_flow_position_idx",
     f"{FLOW_TASKS_TABLE}_run_address_idx",
     f"{FLOW_TASKS_TABLE}_receive_idx",
+    f"{FLOW_TASKS_TABLE}_queue_idx",
     f"{SESSIONS_TABLE}_expires_idx",
     f"{PENDING_LOGINS_TABLE}_expires_idx",
 )
@@ -198,6 +199,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS {FLOW_TASKS_TABLE}_run_address_idx
 CREATE INDEX IF NOT EXISTS {FLOW_TASKS_TABLE}_receive_idx
     ON {FLOW_TASKS_TABLE} (queue, position)
     WHERE status IN ('pending', 'received', 'running');
+
+-- Listing a queue's tasks in any status, the task published last first.
+CREATE INDEX IF NOT EXISTS {FLOW_TASKS_TABLE}_queue_idx
+    ON {FLOW_TASKS_TABLE} (queue, position);
 
 -- Sequences are allocated by the store, under its event lock, as max + 1: an
 -- identity column would let a later transaction commit a lower sequence first.

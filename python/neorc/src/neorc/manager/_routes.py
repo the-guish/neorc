@@ -25,6 +25,7 @@ is read.
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from typing import Annotated, Any, TypeVar
 
 from fastapi import APIRouter, Depends, Query, Request, Response, status
@@ -41,6 +42,8 @@ from neorc.manager._schemas import (
     HeartbeatResponse,
     LatestEventResponse,
     PendingTasksResponse,
+    QueueListResponse,
+    QueueTasksResponse,
     RunListResponse,
     RunResponse,
     RunStateResponse,
@@ -59,6 +62,7 @@ from neorc_core import (
     RunId,
     RunStatus,
     TaskId,
+    TaskStatus,
 )
 from neorc_core import _wire as wire
 from neorc_core._values import ensure_json_depth
@@ -74,7 +78,7 @@ what the in-memory manager receives too.
 """
 
 MAX_PAGE = 500
-"""The most runs, or pending tasks, one page of a listing may ask for."""
+"""The most runs, or tasks of a queue, one page of a listing may ask for."""
 
 
 def _get_manager(request: Request) -> Manager:
@@ -623,3 +627,54 @@ async def complete_task(
         task_id, result=body.result, error=body.error, queue=bound_queue(principal)
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# A page for people: the queues, a queue's tasks in any status, and a task
+# with its inputs filled in. A person completes with the route above.
+
+
+@router.get(
+    "/queues",
+    dependencies=[permit(Permission.QUEUES_READ)],
+    response_model=None,
+    responses=documented(QueueListResponse),
+)
+async def list_queues(manager: Managed) -> dict[str, list[dict[str, Any]]]:
+    """Every declared queue, by name, with its kind."""
+    return {"queues": [wire.queue_to(queue) for queue in await manager.queues()]}
+
+
+@router.get(
+    "/queues/{queue}/tasks/recent",
+    dependencies=[permit(Permission.QUEUES_READ)],
+    response_model=None,
+    responses=documented(QueueTasksResponse),
+)
+async def queue_tasks(
+    manager: Managed,
+    queue: str,
+    since: datetime | None = None,
+    status: TaskStatus | None = None,
+    flow: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=MAX_PAGE)] = DEFAULT_PAGE,
+) -> dict[str, list[dict[str, Any]]]:
+    """A queue's tasks that changed since ``since``, 24 hours ago when not given.
+
+    In any status, the task published last first; ``status`` and ``flow`` keep
+    only the tasks in that status and of that flow.
+    """
+    listed = await manager.queue_tasks(
+        queue, since=since, status=status, flow=flow, limit=limit
+    )
+    return {"tasks": [wire.queue_task_to(task) for task in listed]}
+
+
+@router.get(
+    "/tasks/{task_id}/inputs",
+    dependencies=[permit(Permission.RUNS_READ)],
+    response_model=None,
+    responses=documented(DeliveryResponse),
+)
+async def task_inputs(manager: Managed, task_id: TaskId) -> dict[str, Any]:
+    """A task with its inputs filled in, as a worker would receive it."""
+    return wire.delivery_to(await manager.task_inputs(task_id))
