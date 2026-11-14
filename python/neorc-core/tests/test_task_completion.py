@@ -69,16 +69,21 @@ APPROVE = Address("approve")
 FLOW_OUTPUT = Reference.parse("tasks.approve")
 
 
+QUEUES = {"default": QueueKind.WORKER, "editors": QueueKind.EXTERNAL}
+"""What an operator declared before the flow was uploaded."""
+
+
 @pytest.fixture
 def manager() -> Manager:
     return Manager(
-        MemoryStore(), tasks=MemoryTaskNotifier(), events=MemoryTaskNotifier()
+        MemoryStore(queues=QUEUES),
+        tasks=MemoryTaskNotifier(),
+        events=MemoryTaskNotifier(),
     )
 
 
 async def waiting_for_approval(manager: Manager, topic: str = "tea") -> uuid.UUID:
     """A run whose draft is written and whose approval is published; the task's id."""
-    await manager.declare_queue("editors", QueueKind.EXTERNAL)
     await manager.upload_flows([FLOW])
     run = await manager.start_run("review", {"topic": topic})
     await manager.publish_task(run.id, WRITE)
@@ -315,10 +320,10 @@ async def test_a_worker_stops_when_its_queue_is_declared_external(
     manager: Manager, tmp_path: Path
 ) -> None:
     """Refused as for a token: it ends, rather than poll a queue it is kept off."""
-    await manager.upload_flows([FLOW])
+    await manager.declare_queue("reviews", QueueKind.WORKER)
     worker = Worker(
         DirectQueueClient(manager),
-        queue="editors",
+        queue="reviews",
         code_location=tmp_path,
         poll_timeout=0.05,
     )
@@ -326,20 +331,36 @@ async def test_a_worker_stops_when_its_queue_is_declared_external(
     await asyncio.sleep(0.1)
     assert not running.done()
 
-    await manager.declare_queue("editors", QueueKind.EXTERNAL)
+    await manager.declare_queue("reviews", QueueKind.EXTERNAL)
 
-    with pytest.raises(PermissionDeniedError, match="queue 'editors' is external"):
+    with pytest.raises(PermissionDeniedError, match="queue 'reviews' is external"):
         await asyncio.wait_for(running, timeout=TIMEOUT)
 
 
+async def test_no_worker_is_served_from_a_queue_nobody_declared(
+    manager: Manager, tmp_path: Path
+) -> None:
+    worker = Worker(DirectQueueClient(manager), queue="typo", code_location=tmp_path)
+
+    with pytest.raises(PermissionDeniedError, match="queue 'typo' is not declared"):
+        await worker.prepare()
+    with pytest.raises(PermissionDeniedError, match="queue 'typo' is not declared"):
+        await manager.receive_task("typo", timeout=0)
+    assert await manager.pending_tasks("typo") == []
+
+
 async def test_queues_are_declared_and_listed(manager: Manager) -> None:
-    assert await manager.queue_kind("editors") is QueueKind.WORKER
+    assert await manager.queue_kind("billing") is None
 
-    await manager.declare_queue("editors", QueueKind.EXTERNAL)
+    await manager.declare_queue("billing", QueueKind.EXTERNAL)
 
-    assert await manager.queue_kind("editors") is QueueKind.EXTERNAL
+    assert await manager.queue_kind("billing") is QueueKind.EXTERNAL
     assert await manager.queue_kind("default") is QueueKind.WORKER
-    assert await manager.queues() == [Queue("editors", QueueKind.EXTERNAL)]
+    assert await manager.queues() == [
+        Queue("billing", QueueKind.EXTERNAL),
+        Queue("default", QueueKind.WORKER),
+        Queue("editors", QueueKind.EXTERNAL),
+    ]
 
 
 # Tokens and queue kinds.
@@ -347,7 +368,7 @@ async def test_queues_are_declared_and_listed(manager: Manager) -> None:
 
 @pytest.fixture
 def store() -> MemoryStore:
-    return MemoryStore()
+    return MemoryStore(queues=QUEUES)
 
 
 @pytest.fixture
@@ -355,9 +376,17 @@ def access(store: MemoryStore) -> Access:
     return Access(MemoryCredentialStore(), queues=store)
 
 
-async def test_a_worker_token_is_bound_to_a_worker_queue(access: Access) -> None:
-    await access.declare_queue("editors", QueueKind.EXTERNAL)
+async def test_a_token_is_bound_to_a_declared_queue(access: Access) -> None:
+    for role in (Role.WORKER, Role.RESPONDER):
+        with pytest.raises(InvalidValueError, match="queue 'typo' is not declared"):
+            await access.create_token("t", role, queue="typo")
+    assert await access.tokens() == []
 
+    await access.declare_queue("typo", QueueKind.WORKER)
+    await access.create_token("t", Role.WORKER, queue="typo")
+
+
+async def test_a_worker_token_is_bound_to_a_worker_queue(access: Access) -> None:
     with pytest.raises(InvalidValueError, match="queue 'editors' is external"):
         await access.create_token("w", Role.WORKER, queue="editors")
     await access.create_token("w", Role.WORKER, queue="default")
@@ -368,8 +397,6 @@ async def test_a_worker_token_is_bound_to_a_worker_queue(access: Access) -> None
 async def test_a_responder_token_is_bound_to_a_queue_of_either_kind(
     access: Access,
 ) -> None:
-    await access.declare_queue("editors", QueueKind.EXTERNAL)
-
     _, external = await access.create_token("r1", Role.RESPONDER, queue="editors")
     _, worker = await access.create_token("r2", Role.RESPONDER, queue="default")
 
@@ -380,32 +407,32 @@ async def test_a_responder_token_is_bound_to_a_queue_of_either_kind(
 async def test_a_queue_with_worker_tokens_cannot_be_declared_external(
     access: Access, store: MemoryStore
 ) -> None:
-    await access.create_token("w1", Role.WORKER, queue="editors")
-    await access.create_token("w2", Role.WORKER, queue="editors")
-    await access.create_token("r", Role.RESPONDER, queue="editors")
+    await access.declare_queue("reviews", QueueKind.WORKER)
+    await access.create_token("w1", Role.WORKER, queue="reviews")
+    await access.create_token("w2", Role.WORKER, queue="reviews")
+    await access.create_token("r", Role.RESPONDER, queue="reviews")
     await access.create_token("elsewhere", Role.WORKER, queue="default")
 
     with pytest.raises(InvalidValueError, match="revoke w1, w2 first"):
-        await access.declare_queue("editors", QueueKind.EXTERNAL)
-    assert await store.queue_kind("editors") is QueueKind.WORKER
+        await access.declare_queue("reviews", QueueKind.EXTERNAL)
+    assert await store.queue_kind("reviews") is QueueKind.WORKER
 
     await access.revoke_token("w1")
     await access.revoke_token("w2")
-    await access.declare_queue("editors", QueueKind.EXTERNAL)
+    await access.declare_queue("reviews", QueueKind.EXTERNAL)
 
-    assert await access.queues() == [Queue("editors", QueueKind.EXTERNAL)]
+    assert await store.queue_kind("reviews") is QueueKind.EXTERNAL
 
 
 async def test_a_queue_is_declared_a_worker_queue_whatever_its_tokens(
     access: Access,
 ) -> None:
-    await access.declare_queue("editors", QueueKind.EXTERNAL)
     await access.create_token("r", Role.RESPONDER, queue="editors")
 
     await access.declare_queue("editors", QueueKind.WORKER)
     await access.create_token("w", Role.WORKER, queue="editors")
 
-    assert await access.queues() == [Queue("editors", QueueKind.WORKER)]
+    assert Queue("editors", QueueKind.WORKER) in await access.queues()
 
 
 async def test_a_queue_name_is_checked_where_it_is_declared(access: Access) -> None:
@@ -413,10 +440,10 @@ async def test_a_queue_name_is_checked_where_it_is_declared(access: Access) -> N
         await access.declare_queue("a/b", QueueKind.EXTERNAL)
 
 
-async def test_an_access_without_declarations_checks_no_kind() -> None:
+async def test_an_access_without_declarations_checks_no_queue() -> None:
     access = Access(MemoryCredentialStore())
 
-    await access.create_token("w", Role.WORKER, queue="default")
+    await access.create_token("w", Role.WORKER, queue="anything")
     with pytest.raises(RuntimeError, match="no store of queue declarations"):
         await access.declare_queue("editors", QueueKind.EXTERNAL)
 

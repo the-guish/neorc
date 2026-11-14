@@ -14,6 +14,7 @@ from neorc_core import (
     InvalidValueError,
     Manager,
     PayloadTooLargeError,
+    QueueKind,
     ResolutionError,
     RunStateError,
     RunStatus,
@@ -68,7 +69,17 @@ FIRST = Address("first")
 @pytest.fixture
 def flows() -> Manager:
     return Manager(
-        MemoryStore(), tasks=MemoryTaskNotifier(), events=MemoryTaskNotifier()
+        MemoryStore(
+            queues=dict.fromkeys(
+                (
+                    "default",
+                    "other",
+                ),
+                QueueKind.WORKER,
+            )
+        ),
+        tasks=MemoryTaskNotifier(),
+        events=MemoryTaskNotifier(),
     )
 
 

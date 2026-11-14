@@ -17,6 +17,7 @@ from contextlib import AsyncExitStack
 
 import httpx
 import pytest
+from conftest import declare_queues
 
 from neorc.http import HttpManagerClient, HttpQueueClient
 from neorc.manager import build_app
@@ -43,6 +44,7 @@ class _Process:
 @pytest.fixture
 async def processes(pg_schema: str) -> AsyncIterator[tuple[_Process, _Process]]:
     """Two manager processes on the same database, their lifespans running."""
+    await declare_queues(pg_schema, "default")
     async with AsyncExitStack() as stack:
         built = []
         for _ in range(2):
@@ -108,6 +110,7 @@ async def test_the_flow_tables_are_created_at_startup(pg_schema: str) -> None:
     app = build_app(pg_schema, auth=False, create_schema=True, ui=False)
 
     async with app.router.lifespan_context(app):
+        await declare_queues(pg_schema, "default")
         transport = httpx.ASGITransport(app=app)
         async with HttpManagerClient("manager.test", transport=transport) as client:
             assert await client.upload_flows([FLOW]) == [True]

@@ -13,6 +13,7 @@ from neorc_core import (
     FlowVersionError,
     InvalidValueError,
     Manager,
+    QueueKind,
     RunStateError,
     RunStatus,
     Store,
@@ -53,7 +54,7 @@ def single(
 
 @pytest.fixture
 def store() -> MemoryStore:
-    return MemoryStore()
+    return MemoryStore(queues=dict.fromkeys(("default", "scoring"), QueueKind.WORKER))
 
 
 @pytest.fixture
@@ -325,3 +326,24 @@ async def test_listing_refuses_what_cannot_name_a_flow_or_a_page(
         await flows.list_runs(flow="a/b")
     with pytest.raises(InvalidValueError, match="limit"):
         await flows.list_runs(limit=0)
+
+
+# Queues are declared before a flow names them.
+
+
+async def test_a_flow_naming_a_queue_nobody_declared_is_refused(
+    flows: Manager, store: MemoryStore
+) -> None:
+    on_gpu = single("a", steps={"work": {"queue": "gpu", "handler": "tasks:work"}})
+    fine = single("b")
+
+    with pytest.raises(FlowDefinitionError) as refused:
+        await flows.upload_flows([on_gpu, fine])
+
+    assert refused.value.problems == [
+        "a: work is on queue 'gpu', which is not declared"
+    ]
+    assert await store.latest_flows() == []  # nothing of the set is stored
+
+    await flows.declare_queue("gpu", QueueKind.EXTERNAL)
+    assert await flows.upload_flows([on_gpu, fine]) == [True, True]

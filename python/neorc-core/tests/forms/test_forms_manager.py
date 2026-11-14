@@ -11,7 +11,13 @@ from typing import Any
 
 import pytest
 
-from neorc_core import FlowDefinitionError, InvalidValueError, Manager, RunStatus
+from neorc_core import (
+    FlowDefinitionError,
+    InvalidValueError,
+    Manager,
+    QueueKind,
+    RunStatus,
+)
 from neorc_core.flows import read_flows
 from neorc_core.local import LocalCluster, MemoryStore, MemoryTaskNotifier, run_local
 from neorc_core.testing.examples import wait_for_run
@@ -33,7 +39,9 @@ SAID = (
 @pytest.fixture
 def manager() -> Manager:
     return Manager(
-        MemoryStore(), tasks=MemoryTaskNotifier(), events=MemoryTaskNotifier()
+        MemoryStore(queues=dict.fromkeys(("default",), QueueKind.WORKER)),
+        tasks=MemoryTaskNotifier(),
+        events=MemoryTaskNotifier(),
     )
 
 

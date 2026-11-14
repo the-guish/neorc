@@ -12,8 +12,8 @@ of the queue.
   queue.
 - An external queue is served by responders. Its tasks end only by a
   completion.
-- An external queue is declared on the database, as tokens are. A queue nobody
-  declared is a worker queue.
+- A queue is declared on the database, as tokens are. A flow names only
+  declared queues.
 
 ## Completing a task
 

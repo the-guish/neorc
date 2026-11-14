@@ -3,8 +3,9 @@
 
 """A queue's kind: who takes its tasks. See docs/specs/task-completion.md.
 
-A queue is a name a step gives. Declaring it says what kind it is; a queue
-nobody declared is a worker queue, as every queue was before there were kinds.
+A queue is declared, with its kind, before anything uses it: a flow names only
+declared queues, a token is bound only to one, and tasks are handed out only
+from one.
 """
 
 from __future__ import annotations

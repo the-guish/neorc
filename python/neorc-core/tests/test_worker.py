@@ -13,6 +13,7 @@ import pytest
 from neorc_core import (
     HandlerError,
     Manager,
+    QueueKind,
     RunStatus,
     TaskStatus,
     Worker,
@@ -33,7 +34,17 @@ WHEN: JsonValue = {"$datetime": "2026-09-13T10:00:00+00:00"}
 @pytest.fixture
 def flows() -> Manager:
     return Manager(
-        MemoryStore(), tasks=MemoryTaskNotifier(), events=MemoryTaskNotifier()
+        MemoryStore(
+            queues=dict.fromkeys(
+                (
+                    "default",
+                    "elsewhere",
+                ),
+                QueueKind.WORKER,
+            )
+        ),
+        tasks=MemoryTaskNotifier(),
+        events=MemoryTaskNotifier(),
     )
 
 

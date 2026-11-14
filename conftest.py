@@ -36,7 +36,7 @@ import pytest
 # At module level: FastAPI resolves the stand-in provider's annotations here.
 from starlette.requests import Request
 
-from neorc_core import Access, Manager, ManagerClient, Role
+from neorc_core import Access, Manager, ManagerClient, QueueKind, Role
 from neorc_core.local import MemoryStore, MemoryTaskNotifier
 
 if TYPE_CHECKING:
@@ -58,7 +58,20 @@ DATABASE_URL_ENV = "NEORC_TEST_DATABASE_URL"
 def manager() -> Manager:
     """A manager on the memory store, holding nothing."""
     return Manager(
-        MemoryStore(), tasks=MemoryTaskNotifier(), events=MemoryTaskNotifier()
+        MemoryStore(
+            queues=dict.fromkeys(
+                (
+                    "default",
+                    "voice",
+                    "other",
+                    "scoring",
+                    "elsewhere",
+                ),
+                QueueKind.WORKER,
+            )
+        ),
+        tasks=MemoryTaskNotifier(),
+        events=MemoryTaskNotifier(),
     )
 
 
@@ -92,6 +105,17 @@ async def pg_schema(database_url: str) -> str:
     async with connected(database_url) as conn:
         await conn.execute(f"TRUNCATE {', '.join(TABLES)}")
     return database_url
+
+
+async def declare_queues(
+    database_url: str, *names: str, kind: QueueKind = QueueKind.WORKER
+) -> None:
+    """Declare queues on the database, as ``neorc queues declare`` does."""
+    from neorc.postgres import PostgresStore
+
+    async with PostgresStore(database_url, max_size=1) as store:
+        for name in names:
+            await store.declare_queue(name, kind)
 
 
 @pytest.fixture

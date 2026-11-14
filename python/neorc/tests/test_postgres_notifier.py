@@ -16,7 +16,7 @@ import pytest
 
 from neorc.postgres import PostgresStore, PostgresTaskNotifier
 from neorc.postgres._driver import connected
-from neorc_core import Manager
+from neorc_core import Manager, QueueKind
 from neorc_core._values import JsonValue
 from neorc_core.flows import Address
 
@@ -93,6 +93,7 @@ async def test_many_waiters_cost_no_connections(
     """Fifty idle workers on a pool of two, which is the whole point."""
     async with PostgresStore(pg_schema, min_size=1, max_size=2) as small_pool:
         manager = Manager(small_pool, tasks=pg_notifier, events=pg_notifier)
+        await manager.declare_queue("default", QueueKind.WORKER)
         await manager.upload_flows([FLOW])
         run = await manager.start_run("f", {})
         waiting = [
@@ -116,6 +117,7 @@ async def test_a_waiting_worker_is_woken_by_a_publish(
     pg_store: PostgresStore, pg_notifier: PostgresTaskNotifier
 ) -> None:
     manager = Manager(pg_store, tasks=pg_notifier, events=pg_notifier)
+    await manager.declare_queue("default", QueueKind.WORKER)
     await manager.upload_flows([FLOW])
     run = await manager.start_run("f", {})
 

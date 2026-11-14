@@ -5,7 +5,7 @@
 
 import pytest
 
-from neorc_core import Manager, ManagerClient, QueueClient
+from neorc_core import Manager, ManagerClient, QueueClient, QueueKind
 from neorc_core.local import (
     DirectManagerClient,
     DirectQueueClient,
@@ -18,7 +18,17 @@ from neorc_core.testing.contracts import ManagerClientContract, QueueClientContr
 @pytest.fixture
 def manager() -> Manager:
     return Manager(
-        MemoryStore(), tasks=MemoryTaskNotifier(), events=MemoryTaskNotifier()
+        MemoryStore(
+            queues=dict.fromkeys(
+                (
+                    "default",
+                    "voice",
+                ),
+                QueueKind.WORKER,
+            )
+        ),
+        tasks=MemoryTaskNotifier(),
+        events=MemoryTaskNotifier(),
     )
 
 

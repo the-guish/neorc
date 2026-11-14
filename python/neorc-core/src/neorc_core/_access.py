@@ -12,9 +12,10 @@ Every principal has a ``Role``: a token the one it was created with, a person
 signed in ``USER``. A worker's token is bound to the one queue it serves, and
 a responder's to the one queue whose tasks it completes.
 
-A queue has a kind (see ``neorc_core._queues``), and a worker token is bound to
-a worker queue. ``Access`` holds that rule where tokens are created and queues
-declared, when it is given the store that keeps the declarations.
+A queue is declared with its kind (see ``neorc_core._queues``). A token is
+bound to a declared queue, and a worker token to a worker queue. ``Access``
+holds those rules where tokens are created and queues declared, when it is
+given the store that keeps the declarations.
 
 Tokens, sessions and sign-ins in progress are secrets handed out once. The
 credential store keeps only their SHA-256: each has 256 random bits and is
@@ -399,8 +400,9 @@ class Access:
     of credential failed and never repeating it.
 
     ``queues`` is the store that keeps the queue declarations. With it, a
-    worker token is refused an external queue, and a queue is refused the
-    external kind while a worker token is bound to it. Tokens and declarations
+    token is refused a queue nobody declared, a worker token is refused an
+    external queue, and a queue is refused the external kind while a worker
+    token is bound to it. Tokens and declarations
     are in two stores, so the two checks are not one step with what they
     guard: the manager refusing workers an external queue is what holds.
     """
@@ -457,7 +459,8 @@ class Access:
 
         Raises ``InvalidValueError`` for a name that is not one or is taken, a
         worker or responder token without a queue or another role's with one,
-        a worker token for an external queue, or a life out of bounds.
+        a queue nobody declared, a worker token for an external queue, or a
+        life out of bounds.
         """
         if not is_token_name(name):
             raise InvalidValueError(
@@ -468,16 +471,18 @@ class Access:
         check_role(role, queue)
         if expires_seconds is not None:
             check_seconds(expires_seconds, "a token's life")
-        if (
-            role is Role.WORKER
-            and queue is not None
-            and self._queues is not None
-            and await self._queues.queue_kind(queue) is QueueKind.EXTERNAL
-        ):
-            raise InvalidValueError(
-                f"queue {queue!r} is external: a worker token is bound to a "
-                "worker queue"
-            )
+        if queue is not None and self._queues is not None:
+            kind = await self._queues.queue_kind(queue)
+            if kind is None:
+                raise InvalidValueError(
+                    f"queue {queue!r} is not declared: declare it before a token "
+                    "is bound to it"
+                )
+            if role is Role.WORKER and kind is QueueKind.EXTERNAL:
+                raise InvalidValueError(
+                    f"queue {queue!r} is external: a worker token is bound to a "
+                    "worker queue"
+                )
         secret = TOKEN_PREFIX + secrets.token_urlsafe(_SECRET_BYTES)
         token = await self._credentials.add_token(
             name,

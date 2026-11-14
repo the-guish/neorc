@@ -15,7 +15,12 @@ one version, cut from a single tag on `main`.
 - `neorc-core`, `neorc`: task completion, as
   [task-completion.md](docs/specs/task-completion.md) has it. A queue has a
   kind, `worker` or `external`, declared with `neorc queues declare` and
-  listed with `neorc queues list`; a queue nobody declared is a worker queue.
+  listed with `neorc queues list`. Every queue is declared before it is used:
+  an upload naming a queue nobody declared is refused, a worker or responder
+  token is bound only to a declared queue, and no worker is served from an
+  undeclared one. An existing deployment declares its queues, `default`
+  included, before its next upload. `neorc run` and `LocalCluster.upload`
+  declare the queues of their flow files as worker queues.
   The tasks of an external queue are handed to no worker: a responder lists a
   queue's pending tasks with their inputs filled in, at
   `GET /queues/{queue}/tasks/pending`, and completes one by its id, with a

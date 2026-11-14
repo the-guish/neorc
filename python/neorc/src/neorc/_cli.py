@@ -166,7 +166,7 @@ def build_parser() -> argparse.ArgumentParser:
     queues_commands = queues.add_subparsers(dest="subcommand", required=True)
     queues_declare = queues_commands.add_parser(
         "declare",
-        help="say what kind a queue is; one nobody declared is a worker queue",
+        help="declare a queue and its kind, before a flow names it",
     )
     queues_declare.add_argument("name", help="letters, digits, _ and -")
     queues_declare.add_argument(

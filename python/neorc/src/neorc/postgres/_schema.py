@@ -209,8 +209,8 @@ CREATE TABLE IF NOT EXISTS {EVENTS_TABLE} (
                                      'run_finished'))
 );
 
--- The declared queues; kind mirrors QueueKind. A queue with no row is a worker
--- queue, so only the external ones need one.
+-- The declared queues; kind mirrors QueueKind. Every queue has a row before a
+-- flow names it, a token is bound to it or a task is handed out from it.
 CREATE TABLE IF NOT EXISTS {QUEUES_TABLE} (
     name             text PRIMARY KEY,
     kind             text NOT NULL CHECK (kind IN ('worker', 'external')),

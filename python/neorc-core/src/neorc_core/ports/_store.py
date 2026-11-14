@@ -181,8 +181,9 @@ class Store(ABC):
 
         Ready means pending, or holding a lapsed lease. Taking the lease,
         changing the status and counting the attempt are one step, and no two
-        callers are given the same task. An external queue hands out nothing:
-        its tasks end only by ``complete_task``.
+        callers are given the same task. Only a declared worker queue hands
+        tasks out: an external queue's end only by ``complete_task``, and a
+        queue nobody declared is no queue.
         """
         raise NotImplementedError
 
@@ -254,8 +255,8 @@ class Store(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def queue_kind(self, name: str) -> QueueKind:
-        """The kind of the queue ``name``: ``WORKER`` for one nobody declared."""
+    async def queue_kind(self, name: str) -> QueueKind | None:
+        """The kind of the queue ``name``, or ``None`` if nobody declared it."""
         raise NotImplementedError
 
     @abstractmethod

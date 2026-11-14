@@ -38,6 +38,8 @@ are the same as in [hello](../hello/README.md#deployed).
        uv run neorc manager start --host 127.0.0.1 --create-schema --no-ui
 
        export NEORC_DATABASE_URL=...   # in another terminal
+       uv run neorc queues declare default --kind worker
+       uv run neorc queues declare scoring --kind worker
        uv run neorc tokens create ci --role ci
        uv run neorc tokens create scheduler --role scheduler
        uv run neorc tokens create worker --role worker --queue default

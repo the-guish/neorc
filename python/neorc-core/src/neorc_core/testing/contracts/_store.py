@@ -433,6 +433,9 @@ class StoreContract:
     async def publish(
         self, store: Store, run: Run, address: Address = WORK, queue: str = "default"
     ) -> uuid.UUID:
+        """Publish a task, on a queue declared a worker queue unless declared."""
+        if await store.queue_kind(queue) is None:
+            await store.declare_queue(queue, QueueKind.WORKER)
         task = await store.publish_task(
             run.id,
             address,
@@ -833,11 +836,24 @@ class StoreContract:
 
     # Queues.
 
-    async def test_a_queue_nobody_declared_is_a_worker_queue(
-        self, store: Store
-    ) -> None:
-        assert await store.queue_kind("default") is QueueKind.WORKER
+    async def test_a_queue_nobody_declared_is_no_queue(self, store: Store) -> None:
+        await self.upload(store)
+        run = await self.start(store)
+        await store.publish_task(
+            run.id,
+            WORK,
+            queue="nobody",
+            handler="tasks:work",
+            params={},
+            fixed_params={},
+        )
+
+        assert await store.queue_kind("nobody") is None
         assert await store.queues() == []
+        assert await store.receive_task("nobody", lease_seconds=30) is None
+
+        await store.declare_queue("nobody", QueueKind.WORKER)
+        assert await store.receive_task("nobody", lease_seconds=30) is not None
 
     async def test_a_queue_is_declared_and_declared_again(self, store: Store) -> None:
         await store.declare_queue("editors", QueueKind.EXTERNAL)

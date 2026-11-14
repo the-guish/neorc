@@ -521,6 +521,8 @@ def test_tokens_are_created_listed_and_revoked(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setenv(_cli.DATABASE_URL_ENV, pg_schema)
+    assert _cli.main(["queues", "declare", "gpu", "--kind", "worker"]) == 0
+    capsys.readouterr()
 
     worker = ["tokens", "create", "worker-1", "--role", "worker", "--queue", "gpu"]
     assert _cli.main(worker) == 0
@@ -563,6 +565,8 @@ def test_a_created_token_is_one_the_manager_accepts(
     from neorc_core import Access, Principal, Role
 
     monkeypatch.setenv(_cli.DATABASE_URL_ENV, pg_schema)
+    assert _cli.main(["queues", "declare", "default", "--kind", "worker"]) == 0
+    capsys.readouterr()
     created = ["tokens", "create", "worker-1", "--role", "worker", "--queue", "default"]
     assert _cli.main(created) == 0
     secret = capsys.readouterr().out.strip()
@@ -612,6 +616,10 @@ def test_a_worker_token_and_an_external_queue_do_not_meet(
     responder = ["tokens", "create", "r", "--role", "responder", "--queue"]
     external = ["queues", "declare", "--kind", "external"]
 
+    for token in (worker, responder):
+        with pytest.raises(SystemExit, match="queue 'default' is not declared"):
+            _cli.main([*token, "default"])
+    assert _cli.main(["queues", "declare", "default", "--kind", "worker"]) == 0
     assert _cli.main([*external, "editors"]) == 0
     with pytest.raises(SystemExit, match="queue 'editors' is external"):
         _cli.main([*worker, "editors"])

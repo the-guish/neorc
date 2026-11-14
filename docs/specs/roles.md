@@ -67,7 +67,7 @@ Can only start new runs, of any flow. It reads nothing but the run it gets back 
 
 ## Token creation
 
-Tokens are created, listed and revoked with the CLI connecting to the DB. A token's role is required; a queue is required for the worker and responder roles and refused for any other.
+Tokens are created, listed and revoked with the CLI connecting to the DB. A token's role is required; a queue is required for the worker and responder roles and refused for any other. The queue is declared before a token is bound to it.
 
 
 ## Not in scope

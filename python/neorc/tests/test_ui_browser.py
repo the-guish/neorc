@@ -26,6 +26,7 @@ from conftest import (
     EXAMPLES,
     StandInProvider,
     Tokens,
+    declare_queues,
     deployed_example,
     free_port,
     role_tokens,
@@ -98,6 +99,7 @@ async def deployed(
         {"STAND_IN_SECRET": stand_in.client_secret},
     )
     await create_schema(pg_schema)
+    await declare_queues(pg_schema, "default", "scoring")
     async with PostgresCredentialStore(pg_schema) as credentials:
         tokens = await role_tokens(Access(credentials), ["default", "scoring"])
     app = build_app(

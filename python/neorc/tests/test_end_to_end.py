@@ -32,12 +32,22 @@ pytestmark = pytest.mark.postgres
 
 @pytest.fixture
 async def tokens(pg_schema: str) -> Tokens:
-    """Tokens the manager accepts, one for each process's role."""
-    from neorc.postgres import PostgresCredentialStore, create_schema
+    """Tokens the manager accepts, one for each process's role.
+
+    Their queues are declared first, as an operator declares them: a worker
+    token is bound only to a declared worker queue.
+    """
+    from neorc.postgres import PostgresCredentialStore, PostgresStore, create_schema
 
     await create_schema(pg_schema)
-    async with PostgresCredentialStore(pg_schema) as credentials:
-        return await role_tokens(Access(credentials), ["default", "scoring"])
+    async with (
+        PostgresCredentialStore(pg_schema) as credentials,
+        PostgresStore(pg_schema) as store,
+    ):
+        access = Access(credentials, queues=store)
+        for queue in ("default", "scoring"):
+            await access.declare_queue(queue, QueueKind.WORKER)
+        return await role_tokens(access, ["default", "scoring"])
 
 
 @pytest.fixture

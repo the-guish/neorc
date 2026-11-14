@@ -528,3 +528,34 @@ async def test_an_external_queue_is_refused_to_workers_over_http(
         )
         assert "queue 'editors' is external" in refused.json()["detail"]
     assert (pending.status_code, pending.json()) == (200, {"tasks": []})
+
+
+async def test_a_flow_naming_a_queue_nobody_declared_is_refused_over_http(
+    manager: Manager, http: httpx.AsyncClient
+) -> None:
+    on_gpu = {
+        "name": "render",
+        "version": "1.0.0",
+        "steps": {"draw": {"queue": "gpu", "handler": "tasks:draw"}},
+    }
+
+    refused = await http.post("/flows", json={"flows": [on_gpu]})
+    definitions = await http.get("/queues/gpu/tasks")
+    await manager.declare_queue("gpu", QueueKind.WORKER)
+    stored = await http.post("/flows", json={"flows": [on_gpu]})
+    served = await http.get("/queues/gpu/tasks")
+
+    assert (refused.status_code, refused.json()["error"]) == (
+        422,
+        "FlowDefinitionError",
+    )
+    assert refused.json()["problems"] == [
+        "render: draw is on queue 'gpu', which is not declared"
+    ]
+    assert (definitions.status_code, definitions.json()["error"]) == (
+        403,
+        "PermissionDeniedError",
+    )
+    assert "queue 'gpu' is not declared" in definitions.json()["detail"]
+    assert stored.json() == {"stored": [True]}
+    assert [task["name"] for task in served.json()["tasks"]] == ["draw"]

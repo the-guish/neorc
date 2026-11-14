@@ -31,6 +31,7 @@ from neorc.postgres._store import EVENT_LOCK, UPLOAD_LOCK
 from neorc_core import (
     EventKind,
     FlowVersionError,
+    QueueKind,
     Run,
     RunId,
     RunNotFoundError,
@@ -166,6 +167,7 @@ async def _append_event_by_hand(
 
 
 async def _published(store: PostgresStore, run: Run, name: str) -> Task:
+    await store.declare_queue("default", QueueKind.WORKER)
     return await store.publish_task(
         run.id,
         Address(name),

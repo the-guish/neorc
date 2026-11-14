@@ -36,6 +36,9 @@ and each one has a role; a worker's token is bound to the queue it serves. See
 export NEORC_DATABASE_URL=postgresql://localhost/neorc
 neorc manager start --create-schema --ssl-certfile manager.pem --ssl-keyfile manager-key.pem
 
+neorc queues declare default --kind worker
+neorc queues declare python-gpu --kind worker
+
 neorc tokens create --role ci github-actions
 neorc tokens create --role scheduler scheduler
 neorc tokens create --role worker --queue default worker-1

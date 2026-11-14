@@ -96,9 +96,9 @@ class Manager:
         caller or before it. Returns, per flow, whether a new version was
         stored; ``False`` for an identical upload.
 
-        Raises ``FlowDefinitionError`` for an invalid flow or set, and
-        ``FlowVersionError`` for a version rule broken; either way nothing is
-        stored.
+        Raises ``FlowDefinitionError`` for an invalid flow or set, or a task on
+        a queue nobody declared, and ``FlowVersionError`` for a version rule
+        broken; either way nothing is stored.
         """
         definitions: list[FlowDefinition] = []
         problems: list[str] = []
@@ -107,6 +107,18 @@ class Manager:
                 definitions.append(parse_flow(content))
             except FlowDefinitionError as exc:
                 problems.extend(f"flow {index + 1}: {p}" for p in exc.problems)
+        if problems:
+            raise FlowDefinitionError(problems)
+        # A declared queue stays declared, so this holds when the flows are
+        # stored, though it is not one step with storing them.
+        declared = {queue.name for queue in await self._store.queues()}
+        problems = [
+            f"{definition.name}: {task.name} is on queue {task.queue!r}, which is "
+            "not declared"
+            for definition in definitions
+            for task in definition.tasks()
+            if task.queue not in declared
+        ]
         if problems:
             raise FlowDefinitionError(problems)
 
@@ -288,7 +300,8 @@ class Manager:
         """Every task on ``queue`` in the latest flows, for a worker to check.
 
         One task step per flow that defines it, flows in name order. Raises
-        ``PermissionDeniedError`` for an external queue, which no worker serves.
+        ``PermissionDeniedError`` for a queue that is not a declared worker
+        queue, which no worker serves.
         """
         _queue(queue)
         await self._ensure_worker_queue(queue)
@@ -319,8 +332,8 @@ class Manager:
         a worker known to be there a moment before. A worker lost between that
         moment and its reply keeps the lease until it lapses.
 
-        Raises ``PermissionDeniedError`` for an external queue: its tasks end
-        only by a completion.
+        Raises ``PermissionDeniedError`` for an external queue, whose tasks
+        end only by a completion, and for a queue nobody declared.
         """
         _queue(queue)
         check_lease_seconds(lease_seconds)
@@ -457,8 +470,8 @@ class Manager:
         """Every declared queue, by name."""
         return await self._store.queues()
 
-    async def queue_kind(self, name: str) -> QueueKind:
-        """The kind of a queue: a worker queue unless declared external."""
+    async def queue_kind(self, name: str) -> QueueKind | None:
+        """The kind of a queue, or ``None`` if nobody declared it."""
         _queue(name)
         return await self._store.queue_kind(name)
 
@@ -506,13 +519,18 @@ class Manager:
             raise TaskNotFoundError(str(task_id))
 
     async def _ensure_worker_queue(self, queue: str) -> None:
-        """Raise ``PermissionDeniedError`` for an external queue.
+        """Raise ``PermissionDeniedError`` unless ``queue`` is a declared worker queue.
 
         Whoever asks, and with authentication off too: a worker told so stops,
         as it does for a refused token, rather than poll a queue it will never
         be given a task from.
         """
-        if await self._store.queue_kind(queue) is QueueKind.EXTERNAL:
+        kind = await self._store.queue_kind(queue)
+        if kind is None:
+            raise PermissionDeniedError(
+                f"queue {queue!r} is not declared: no worker is served from it"
+            )
+        if kind is QueueKind.EXTERNAL:
             raise PermissionDeniedError(
                 f"queue {queue!r} is external: its tasks are completed, "
                 "and no worker receives them"

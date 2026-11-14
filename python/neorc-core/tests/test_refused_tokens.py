@@ -22,6 +22,7 @@ from neorc_core import (
     AuthenticationError,
     Manager,
     PermissionDeniedError,
+    QueueKind,
     RunStatus,
     Scheduler,
     TaskStatus,
@@ -54,7 +55,9 @@ def refusal(request: pytest.FixtureRequest) -> AccessError:
 @pytest.fixture
 def flows() -> Manager:
     return Manager(
-        MemoryStore(), tasks=MemoryTaskNotifier(), events=MemoryTaskNotifier()
+        MemoryStore(queues=dict.fromkeys(("default",), QueueKind.WORKER)),
+        tasks=MemoryTaskNotifier(),
+        events=MemoryTaskNotifier(),
     )
 
 

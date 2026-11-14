@@ -234,7 +234,8 @@ RETURNING {TASK_COLUMNS}
 # One statement, so the lease and everything that goes with it are atomic. The
 # inner SELECT takes the oldest ready task of the queue and locks it, skipping
 # rows another receiver already holds; ready is pending, or leased past the
-# lease's end. An external queue has no ready task: no worker receives from it.
+# lease's end. Only a declared worker queue has ready tasks: no worker receives
+# from an external queue, or from one nobody declared.
 _RECEIVE_TASK = f"""
 UPDATE {FLOW_TASKS_TABLE} AS t
    SET status = 'received',
@@ -247,8 +248,8 @@ UPDATE {FLOW_TASKS_TABLE} AS t
           AND (c.status = 'pending'
                OR (c.status IN ('received', 'running')
                    AND c.lease_expires_at <= now()))
-          AND NOT EXISTS (SELECT 1 FROM {QUEUES_TABLE} AS q
-                           WHERE q.name = $2 AND q.kind = 'external')
+          AND EXISTS (SELECT 1 FROM {QUEUES_TABLE} AS q
+                       WHERE q.name = $2 AND q.kind = 'worker')
         ORDER BY c.position
           FOR UPDATE OF c SKIP LOCKED
         LIMIT 1)
@@ -652,10 +653,10 @@ class PostgresStore(Pooled, Store):
             rows = await conn.fetch(_SELECT_QUEUES)
         return [Queue(row["name"], QueueKind(row["kind"])) for row in rows]
 
-    async def queue_kind(self, name: str) -> QueueKind:
+    async def queue_kind(self, name: str) -> QueueKind | None:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(_SELECT_QUEUE_KIND, name)
-        return QueueKind.WORKER if row is None else QueueKind(row["kind"])
+        return None if row is None else QueueKind(row["kind"])
 
     async def events_after(self, sequence: int, *, limit: int = 100) -> list[Event]:
         async with self.pool.acquire() as conn:

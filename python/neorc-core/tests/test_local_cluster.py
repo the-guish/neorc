@@ -10,7 +10,14 @@ from textwrap import dedent
 
 import pytest
 
-from neorc_core import HandlerError, RunStatus, TaskStatus
+from neorc_core import (
+    FlowDefinitionError,
+    HandlerError,
+    Queue,
+    QueueKind,
+    RunStatus,
+    TaskStatus,
+)
 from neorc_core._runs import RunId, sub_run_id_for
 from neorc_core._values import MAX_PAYLOAD_BYTES
 from neorc_core.flows import Address
@@ -312,3 +319,51 @@ async def test_a_run_that_times_out_is_cancelled_and_its_handler_not_waited_for(
     assert loop.time() - begun < 5
     (run_id,) = started
     assert (await cluster.client.get_run(run_id)).status is RunStatus.CANCELLED
+
+
+# Queues.
+
+TWO_QUEUES = """\
+    name: two
+    version: 1.0.0
+    steps:
+      here:
+        handler: MODULE:nothing
+      there:
+        queue: elsewhere
+        handler: MODULE:nothing
+    """
+
+
+async def test_uploading_declares_the_queues_the_files_name(tmp_path: Path) -> None:
+    """Nobody operates a local cluster, so its upload stands in for one."""
+    flows_dir, _ = project(tmp_path, "def nothing(): pass", two=TWO_QUEUES)
+
+    async with LocalCluster(code_location=tmp_path) as cluster:
+        await cluster.manager.declare_queue("elsewhere", QueueKind.EXTERNAL)
+        before = await cluster.manager.queues()
+        await cluster.upload(flows_dir)
+        after = await cluster.manager.queues()
+
+    assert before == [Queue("elsewhere", QueueKind.EXTERNAL)]
+    assert after == [
+        Queue("default", QueueKind.WORKER),
+        Queue("elsewhere", QueueKind.EXTERNAL),  # declared already: left as it is
+    ]
+
+
+async def test_flows_sent_to_the_manager_need_their_queues_declared(
+    tmp_path: Path,
+) -> None:
+    """Only ``upload`` declares: the manager itself is as strict as a deployed one."""
+    async with LocalCluster(code_location=tmp_path) as cluster:
+        with pytest.raises(FlowDefinitionError, match="'default', which is not"):
+            await cluster.client.upload_flows(
+                [
+                    {
+                        "name": "f",
+                        "version": "1.0.0",
+                        "steps": {"work": {"handler": "m:work"}},
+                    }
+                ]
+            )

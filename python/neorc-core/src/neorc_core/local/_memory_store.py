@@ -50,16 +50,19 @@ class MemoryStore(Store):
     """Flows, runs and tasks in dictionaries: one lock per operation.
 
     Applies the same rules, transitions and lease expiry as a deployed store.
+
+    ``queues`` are declared from the start, as a deployment's operator would
+    have declared them before anything ran.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, queues: Mapping[str, QueueKind] | None = None) -> None:
         self._lock = asyncio.Lock()
         self._flows: dict[str, dict[Version, StoredFlow]] = {}
         self._runs: dict[RunId, Run] = {}
         self._tasks: dict[TaskId, Task] = {}
         self._task_ids: dict[tuple[RunId, Address], TaskId] = {}
         self._events: list[Event] = []
-        self._queues: dict[str, QueueKind] = {}
+        self._queues: dict[str, QueueKind] = dict(queues or {})
 
     async def store_flows(self, uploads: Sequence[StoredFlow]) -> list[bool]:
         async with self._lock:
@@ -250,7 +253,7 @@ class MemoryStore(Store):
     ) -> Task | None:
         now = datetime.now(UTC)
         async with self._lock:
-            if self._queues.get(queue) is QueueKind.EXTERNAL:
+            if self._queues.get(queue) is not QueueKind.WORKER:
                 return None
             for task in self._tasks.values():  # in publishing order: oldest first
                 if task.queue == queue and _is_receivable(task, now):
@@ -361,9 +364,9 @@ class MemoryStore(Store):
         async with self._lock:
             return [Queue(name, kind) for name, kind in sorted(self._queues.items())]
 
-    async def queue_kind(self, name: str) -> QueueKind:
+    async def queue_kind(self, name: str) -> QueueKind | None:
         async with self._lock:
-            return self._queues.get(name, QueueKind.WORKER)
+            return self._queues.get(name)
 
     async def events_after(self, sequence: int, *, limit: int = 100) -> list[Event]:
         async with self._lock:

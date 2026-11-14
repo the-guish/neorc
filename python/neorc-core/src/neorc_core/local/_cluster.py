@@ -12,14 +12,14 @@ from collections.abc import Coroutine, Mapping
 from pathlib import Path
 from types import TracebackType
 
-from neorc_core._errors import RunStateError
+from neorc_core._errors import FlowDefinitionError, RunStateError
 from neorc_core._manager import Manager
 from neorc_core._queues import QueueKind
 from neorc_core._runs import Run, RunId, RunStatus
 from neorc_core._scheduler import Scheduler
 from neorc_core._values import JsonValue
 from neorc_core._worker import Worker
-from neorc_core.flows import read_flows
+from neorc_core.flows import parse_flow, read_flows
 from neorc_core.local._direct_clients import DirectManagerClient, DirectQueueClient
 from neorc_core.local._memory_store import MemoryStore
 from neorc_core.local._notifier import MemoryTaskNotifier
@@ -36,7 +36,7 @@ the task when its poll ends and it asks again.
 
 
 class LocalCluster:
-    """A manager, a scheduler and one worker per queue, in memory.
+    """A manager, a scheduler and one worker per worker queue, in memory.
 
     Use it as an async context manager: leaving it stops the scheduler and the
     workers, letting a task in hand finish. Clients reach the manager through
@@ -77,8 +77,23 @@ class LocalCluster:
         await self.close(cancel=exc is not None)
 
     async def upload(self, flows_dir: Path) -> list[bool]:
-        """Upload every ``*.yaml`` and ``*.yml`` flow file in ``flows_dir`` as a set."""
-        return await self.client.upload_flows(read_flows(flows_dir))
+        """Upload every ``*.yaml`` and ``*.yml`` flow file in ``flows_dir`` as a set.
+
+        A deployment's queues are declared by its operator. Here there is
+        none, so the queues the files name are declared first, as worker
+        queues, unless they are declared already: declare an external queue
+        with ``manager.declare_queue`` before uploading.
+        """
+        contents = read_flows(flows_dir)
+        for content in contents:
+            try:
+                definition = parse_flow(content)
+            except FlowDefinitionError:
+                continue  # the upload says what is wrong with it
+            for task in definition.tasks():
+                if await self.manager.queue_kind(task.queue) is None:
+                    await self.manager.declare_queue(task.queue, QueueKind.WORKER)
+        return await self.client.upload_flows(contents)
 
     async def start(self, *, workers: bool = True) -> None:
         """Start the scheduler, and a worker for every queue the latest flows use.

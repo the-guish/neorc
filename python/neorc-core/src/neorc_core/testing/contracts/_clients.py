@@ -18,6 +18,7 @@ from neorc_core._errors import (
     FlowVersionError,
     InvalidValueError,
     PayloadTooLargeError,
+    PermissionDeniedError,
     ResolutionError,
     RunNotFoundError,
     RunStateError,
@@ -296,7 +297,10 @@ class ManagerClientContract(_Clients):
 
 
 class QueueClientContract(_Clients):
-    """Subclass and provide ``manager_client`` and ``queue_client`` on one manager."""
+    """Subclass and provide ``manager_client`` and ``queue_client`` on one manager.
+
+    The manager has the worker queues ``default`` and ``voice`` declared.
+    """
 
     async def test_a_queues_task_definitions_are_listed(
         self, manager_client: ManagerClient, queue_client: QueueClient
@@ -317,7 +321,11 @@ class QueueClientContract(_Clients):
         }
         assert work.fixed_params == {"n": 2}
         assert say.handler == "tasks:say"
-        assert await queue_client.task_definitions("nobody") == []
+        # A queue nobody declared serves no worker; the refusal ends a worker.
+        with pytest.raises(PermissionDeniedError, match="'nobody' is not declared"):
+            await queue_client.task_definitions("nobody")
+        with pytest.raises(PermissionDeniedError, match="'nobody' is not declared"):
+            await queue_client.receive_task("nobody", timeout=0)
         # What cannot name a queue is refused, not looked up: a slash or a
         # dot could not travel in a URL path, and NUL in no store.
         for queue in ("voice\x00", "gpu/large", ".."):

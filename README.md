@@ -38,12 +38,14 @@ A deployment installs what each host needs — the base install pulls in nothing
     pip install 'neorc[manager,postgres]'   # the manager host
     pip install 'neorc[http]'               # scheduler and worker hosts
 
-Start the manager, and create an API token for each process that will reach
-it. Every request needs one; `neorc tokens create` prints its secret once:
+Start the manager, declare the queues, and create an API token for each
+process that will reach the manager. Every request needs one; `neorc tokens
+create` prints its secret once:
 
     export NEORC_DATABASE_URL=postgresql://localhost/neorc
     neorc manager start --create-schema \
         --ssl-certfile manager.pem --ssl-keyfile manager-key.pem
+    neorc queues declare default --kind worker
     neorc tokens create github-actions --role ci
     neorc tokens create scheduler --role scheduler
     neorc tokens create worker-1 --role worker --queue default
@@ -148,10 +150,14 @@ filled in, and completes one with a result, or with an error that fails it:
         -H 'content-type: application/json' -d '{"result": {"approved": true}}'
 
 A task is completed once: a second completion answers 409. Workers are kept
-off an external queue, and a queue nobody declared is a worker queue. A
-responder token for a worker queue completes a task there until a worker
-receives it. `neorc queues list` shows the declared queues. `neorc run` starts
-no responder, so a run with a task on an external queue waits there.
+off an external queue. A responder token for a worker queue completes a task
+there until a worker receives it.
+
+Every queue is declared before it is used, a worker queue with `--kind
+worker`. An upload naming a queue nobody declared is refused, and so is a
+token for one. `neorc queues list` shows the declared queues. `neorc run`
+declares the queues of its flow files as worker queues and starts no
+responder, so a run with a task for a person waits there.
 
 ## Signing in with Google or Okta
 
