@@ -12,6 +12,10 @@ export type Address = Schemas["AddressResponse"];
 export type ApiEvent = Schemas["EventResponse"];
 export type ErrorBody = Schemas["ErrorResponse"];
 export type Session = Schemas["SessionResponse"];
+export type Queue = Schemas["QueueResponse"];
+export type QueueKind = Schemas["QueueKind"];
+export type QueueTask = Schemas["QueueTaskResponse"];
+export type Delivery = Schemas["DeliveryResponse"];
 
 export const RUN_STATUSES: readonly RunStatus[] = [
   "active",
@@ -19,6 +23,16 @@ export const RUN_STATUSES: readonly RunStatus[] = [
   "failed",
   "cancelled",
 ];
+
+export const TASK_STATUSES: readonly TaskStatus[] = [
+  "pending",
+  "received",
+  "running",
+  "succeeded",
+  "failed",
+];
+
+export const QUEUE_KINDS: readonly QueueKind[] = ["worker", "external"];
 
 /** A refusal: `error` names the manager's exception, `detail` says why. */
 export class ApiError extends Error {
@@ -163,6 +177,49 @@ export function startRun(
 
 export function cancelRun(id: string): Promise<void> {
   return postJson<void>(`/runs/${encodeURIComponent(id)}/cancel`, {});
+}
+
+// Queues: the declared queues, a queue's tasks, and completing one.
+
+export async function listQueues(): Promise<Queue[]> {
+  return (await getJson<{ queues: Queue[] }>("/queues")).queues;
+}
+
+export interface QueueTaskFilters {
+  status?: TaskStatus;
+  flow?: string;
+  /** How far back to list, in milliseconds before now. */
+  windowMs: number;
+}
+
+/** The most tasks one listing of a queue asks for: the manager's own limit. */
+export const QUEUE_PAGE = 500;
+
+export async function queueTasks(
+  queue: string,
+  filters: QueueTaskFilters,
+): Promise<QueueTask[]> {
+  const path = `/queues/${encodeURIComponent(queue)}/tasks/recent`;
+  const params = {
+    since: new Date(Date.now() - filters.windowMs).toISOString(),
+    status: filters.status,
+    flow: filters.flow,
+    limit: QUEUE_PAGE,
+  };
+  return (await getJson<{ tasks: QueueTask[] }>(path, params)).tasks;
+}
+
+/** A task with its inputs filled in, as a worker would receive it. */
+export function taskInputs(id: string): Promise<Delivery> {
+  return getJson<Delivery>(`/tasks/${encodeURIComponent(id)}/inputs`);
+}
+
+/** End a pending task: with `result`, or with its failure when `error` is set. */
+export function completeTask(
+  id: string,
+  body: { result: unknown } | { error: string },
+): Promise<void> {
+  return postJson<void>(`/tasks/${encodeURIComponent(id)}/complete`, body);
 }
 
 // Events: the same long poll the scheduler uses, read, never consumed.

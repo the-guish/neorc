@@ -283,6 +283,13 @@ def test_a_loops_exit_condition_has_no_form() -> None:
     ]
 
 
+def test_the_ui_is_tested_on_the_examples_form() -> None:
+    """``ts/neorc-ui/src/forms`` keeps a copy of the form, for its own tests."""
+    copy = Path(__file__).parents[4] / "ts/neorc-ui/src/forms/review_draft.form.json"
+
+    assert copy.read_text() == (EXAMPLE / "flows/review_draft.form.json").read_text()
+
+
 # The manager: at upload, and at every completion.
 
 

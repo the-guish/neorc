@@ -5,12 +5,13 @@ import {
   ACTIVE,
   HELLO,
   OPEN,
+  QUEUES,
   SIGNED_IN,
   SUCCEEDED,
   WORD_PICKER,
 } from "../test/fixtures";
 import { mockApi, refusal, renderWithClient } from "../test/render";
-import { Layout, SIDEBAR_KEY } from "./Layout";
+import { Layout, QUEUE_KIND_KEY, SIDEBAR_KEY } from "./Layout";
 
 function routes() {
   return {
@@ -241,5 +242,55 @@ describe("Layout", () => {
       }),
     );
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+  it("lists the queues under a filter by kind, which it keeps", async () => {
+    localStorage.removeItem(QUEUE_KIND_KEY);
+    mockApi({ ...routes(), "/queues": { queues: QUEUES } });
+
+    const view = renderWithClient(
+      <Layout route={{ name: "queue", queue: "editors" }} session={OPEN}>
+        <p>the page</p>
+      </Layout>,
+    );
+
+    const main = screen.getByRole("navigation", { name: "Main" });
+    expect(within(main).getByRole("link", { name: "Queues" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    const queues = await screen.findByRole("navigation", { name: "Queues" });
+    const names = () =>
+      within(queues)
+        .queryAllByRole("link")
+        .map((link) => link.textContent);
+    expect(names()).toEqual(["default", "editors"]);
+    expect(within(queues).getByRole("link", { name: "editors" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    const kinds = within(queues).getByRole("group", { name: "Kind of queue" });
+    expect(within(kinds).getByRole("button", { name: "all" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    fireEvent.click(within(kinds).getByRole("button", { name: "external" }));
+    expect(names()).toEqual(["editors"]);
+    fireEvent.click(within(kinds).getByRole("button", { name: "worker" }));
+    expect(names()).toEqual(["default"]);
+    expect(localStorage.getItem(QUEUE_KIND_KEY)).toBe("worker");
+
+    // Kept for the next page load.
+    view.unmount();
+    renderWithClient(
+      <Layout route={{ name: "queues" }} session={OPEN}>
+        <p>the page</p>
+      </Layout>,
+    );
+    const again = await screen.findByRole("navigation", { name: "Queues" });
+    expect(within(again).getAllByRole("link").map((link) => link.textContent)).toEqual([
+      "default",
+    ]);
+    localStorage.removeItem(QUEUE_KIND_KEY);
   });
 });

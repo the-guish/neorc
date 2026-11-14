@@ -57,6 +57,8 @@ Uploading a new version cancels that flow's active runs (see [core.md](core.md),
 
 Anyone signed in to the UI will be able to list flows and read their versions, start new runs, read runs with their tasks and results, and cancel them. The UI reads events to refresh its pages.
 
+A user lists the queues and the tasks of any queue, in any state. A user completes a pending task of any queue (see [task-completion.md](task-completion.md)).
+
 A User token can also be created, for a person's scripts; it has the same permissions as a signed-in session.
 
 

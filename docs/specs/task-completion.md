@@ -60,25 +60,63 @@ approve_draft:
 The handler of a task on an external queue is a text for the responder. The
 manager and the scheduler store it and pass it on.
 
+## Forms
+
+A task of an external queue may name a form. The form is a file next to the
+flow's file, in the subset of A2UI a flow's form uses (see
+[forms.md](../architecture/forms.md)).
+
+```yaml
+approve_draft:
+  queue: editors
+  handler: approve-draft
+  params:
+    draft: tasks.write_draft
+  form: approve_draft.form.json
+```
+
+- The controls of the form are the fields of the task's result. The result is
+  a mapping with one value per control.
+- The manager holds every completion of the task to its form. A completion
+  with an error has no result to hold.
+- A form belongs to a task of an external queue. The exit condition of a loop
+  has no form.
+
 ## Who may complete
 
-Completing has its own role, `responder`. A responder token is bound to one
-queue of either kind (see [roles.md](roles.md)).
+A system completes with the role `responder`. A responder token is bound to
+one queue of either kind (see [roles.md](roles.md)). A person completes with
+the role `user`, which every signed-in person has.
 
-| Role        | May, on its one queue                                     |
-| ----------- | --------------------------------------------------------- |
-| `worker`    | fetch task definitions, receive, claim, heartbeat, finish |
-| `responder` | list pending tasks, complete                              |
+| Role        | Queues        | May                                                       |
+| ----------- | ------------- | --------------------------------------------------------- |
+| `worker`    | its one queue | fetch task definitions, receive, claim, heartbeat, finish |
+| `responder` | its one queue | list pending tasks, complete                              |
+| `user`      | every queue   | list queues and their tasks, complete                     |
 
 - Each role has only the operations in its row. A worker takes a task by
   receiving it.
-- A queue takes completions once it has a responder token. Tokens are created
-  on the database, and the operator chooses those queues.
 - A responder completes any pending task of its queue. A task on a worker
   queue can be completed until a worker receives it.
+- A manager with authentication off allows every operation to everyone.
+
+## In the web UI
+
+The web UI lists the declared queues, and filters them by kind. A queue's page
+lists its tasks in any state.
+
+- The page lists the tasks that changed in the last 24 hours. A person extends
+  that to 7 days, 30 days or 1 year.
+- The page filters the tasks by state and by flow. The state filter starts at
+  pending.
+- A pending task of an external queue opens with its inputs and a form. A
+  task with a form gets that form. A task with no form gets a text field, and
+  the exit condition of a loop gets a yes or no.
 
 ## Not in scope
 
-- A person signed in to the UI completing tasks.
-- Declaring the shape of a result, for a form to collect it.
+- A fixed form for a task of a worker queue: mark it succeeded, mark it
+  failed, clear it.
+- Giving a person some queues only.
+- Recording who completed a task.
 - Deadlines and reminders for a task that waits.

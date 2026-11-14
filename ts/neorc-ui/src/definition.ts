@@ -283,3 +283,30 @@ export function loopFailed(
   const last = lastIteration(loop.name, scope, done.addresses);
   return last > 0 && (iterationOutcome(loop, scope, last, done)?.failed ?? false);
 }
+
+/**
+ * A step as the flow's file wrote it, by its name, from anywhere in the flow:
+ * a step's name is its own within a flow. Undefined when there is none.
+ */
+export function rawStep(content: unknown, name: string): Json | undefined {
+  const pending = [record(record(content)["steps"])];
+  for (let steps = pending.pop(); steps !== undefined; steps = pending.pop()) {
+    for (const [key, raw] of Object.entries(steps)) {
+      const step = record(raw);
+      if (key === name) return step;
+      if ("steps" in step) pending.push(record(step["steps"]));
+    }
+  }
+  return undefined;
+}
+
+/** Whether a loop of the flow exits on the step: its result is true or false. */
+export function isExitCondition(content: unknown, name: string): boolean {
+  const within = (steps: StepNode[]): boolean =>
+    steps.some(
+      (step) =>
+        (step.kind === "loop" && step.exitCondition === name) ||
+        ((step.kind === "loop" || step.kind === "fan_out") && within(step.children)),
+    );
+  return within(stepsOf(content));
+}

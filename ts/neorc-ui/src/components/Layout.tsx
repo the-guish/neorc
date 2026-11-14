@@ -1,8 +1,8 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type ReactNode } from "react";
 
-import { ApiError, type Session } from "../api";
-import { useFlows, useRecentRuns } from "../queries";
+import { ApiError, QUEUE_KINDS, type QueueKind, type Session } from "../api";
+import { useFlows, useQueues, useRecentRuns } from "../queries";
 import { SESSION_KEY, signOut } from "../session";
 import { href, type Route } from "../router";
 import { shortId } from "../format";
@@ -10,6 +10,7 @@ import { shortId } from "../format";
 const NAV: { label: string; route: Route; icon: ReactNode }[] = [
   { label: "Runs", route: { name: "runs" }, icon: <ListIcon /> },
   { label: "Flows", route: { name: "flows" }, icon: <FlowIcon /> },
+  { label: "Queues", route: { name: "queues" }, icon: <QueueIcon /> },
 ];
 
 /** How many of the latest runs the sidebar lists. */
@@ -17,6 +18,9 @@ export const RECENT_RUNS = 6;
 
 /** Where the sidebar's open or collapsed state is kept. */
 export const SIDEBAR_KEY = "neorc-ui.sidebar";
+
+/** Where the kind of queue the sidebar lists is kept. */
+export const QUEUE_KIND_KEY = "neorc-ui.queue-kind";
 
 /**
  * The shell: a sidebar with the brand, a way to a new run, the navigation,
@@ -105,6 +109,7 @@ function WithSidebar({
           ))}
         </nav>
         <PinnedFlows route={route} />
+        <Queues route={route} />
         <RecentRuns route={route} />
         <Profile session={session} />
       </aside>
@@ -126,7 +131,7 @@ function Content({
       {!session.authentication && (
         <p className="banner" role="note">
           No authentication: anyone who reaches this manager can start and
-          cancel runs. For development and testing only.
+          cancel runs, and complete tasks. For development and testing only.
         </p>
       )}
       <main>{children}</main>
@@ -224,7 +229,71 @@ function current(route: Route, item: Route): boolean {
     return route.name === "runs" || route.name === "run";
   if (item.name === "flows")
     return route.name === "flows" || route.name === "flow";
+  if (item.name === "queues")
+    return route.name === "queues" || route.name === "queue";
   return false;
+}
+
+type KindFilter = QueueKind | "all";
+
+const KIND_FILTERS: readonly KindFilter[] = [...QUEUE_KINDS, "all"];
+
+function useQueueKind(): [KindFilter, (kind: KindFilter) => void] {
+  const [kind, setKind] = useState<KindFilter>(() => {
+    try {
+      const kept = localStorage.getItem(QUEUE_KIND_KEY);
+      return KIND_FILTERS.find((each) => each === kept) ?? "all";
+    } catch {
+      return "all";
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(QUEUE_KIND_KEY, kind);
+    } catch {
+      // Storage may be off; the sidebar lists every queue again next time.
+    }
+  }, [kind]);
+  return [kind, setKind];
+}
+
+/** The declared queues, of the kind chosen: worker, external, or all. */
+function Queues({ route }: { route: Route }) {
+  const queues = useQueues();
+  const [kind, setKind] = useQueueKind();
+  if (!queues.isSuccess || queues.data.length === 0) return null;
+  const listed = queues.data.filter((queue) => kind === "all" || queue.kind === kind);
+  return (
+    <nav className="sidebar-section" aria-label="Queues">
+      <h3 className="label">Queues</h3>
+      <div className="segmented label" role="group" aria-label="Kind of queue">
+        {KIND_FILTERS.map((each) => (
+          <button
+            key={each}
+            type="button"
+            aria-pressed={kind === each}
+            onClick={() => setKind(each)}
+          >
+            {each}
+          </button>
+        ))}
+      </div>
+      {listed.map((queue) => (
+        <a
+          key={queue.name}
+          href={href({ name: "queue", queue: queue.name })}
+          aria-current={
+            route.name === "queue" && route.queue === queue.name ? "page" : undefined
+          }
+          title={`${queue.name}, ${queue.kind}`}
+        >
+          <span className={`dot dot-queue-${queue.kind}`} aria-hidden="true" />
+          <span className="label">{queue.name}</span>
+        </a>
+      ))}
+      {listed.length === 0 && <p className="label muted sidebar-note">No {kind} queue.</p>}
+    </nav>
+  );
 }
 
 /** The flows the manager holds, latest version each, as the pinned workflows. */
@@ -341,6 +410,16 @@ function ListIcon() {
       <circle cx="2.5" cy="4" r="0.75" fill="currentColor" />
       <circle cx="2.5" cy="8" r="0.75" fill="currentColor" />
       <circle cx="2.5" cy="12" r="0.75" fill="currentColor" />
+    </Icon>
+  );
+}
+
+function QueueIcon() {
+  return (
+    <Icon>
+      <rect x="2.5" y="2.5" width="11" height="3" rx="1" />
+      <rect x="2.5" y="6.5" width="11" height="3" rx="1" />
+      <rect x="2.5" y="10.5" width="11" height="3" rx="1" />
     </Icon>
   );
 }
