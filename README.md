@@ -236,7 +236,9 @@ entry matches is refused. For Google, an address counts only in a Workspace
 or at Gmail, since Google verifies personal accounts made with any address,
 so `email_domain` is refused for it: use `hosted_domain`. Everyone signed in
 holds `neorc/user`. A `[[grant]]` entry, with the same matchers and `roles =
-["oneberth/admin"]`, lets a person create service tokens in the UI.
+["oneberth/admin"]`, lets a person create and revoke service tokens in the UI.
+Creating one needs a sign-in within the last ten minutes. That person's own
+token lists the service tokens, and creates and revokes none.
 
 `neorc sessions clear` signs everyone out. The allow list is checked again as
 a person's credentials are used, at most once a minute. The manager is served

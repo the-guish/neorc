@@ -31,6 +31,10 @@ one version, cut from a single tag on `main`.
   `--database-file` too. On a SQLite file, oneberth's store is `oneberth.db`
   beside it. The clients reach the API under `/neorc/` at a backend's
   address, and the UI reads the session from oneberth's `/auth/session`.
+- `neorc`: a token bound to one queue is refused on a route that serves every
+  queue. The routes that claim, heartbeat, finish and complete a task declare
+  `permit(..., bound=True)`, and act on the queue of the token's grant. An
+  admin creates and revokes service tokens from a browser session alone.
 - `neorc-ui`: the interface is `@neorc/ui`, a node package with one root
   component, `NeorcApp`, for oneberth's shell (`@oneberth/ui`). A host gives
   it the address of neorc's API and what the shell gives every application;

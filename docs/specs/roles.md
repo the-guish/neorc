@@ -20,6 +20,8 @@ Every service token has exactly one role. A signed-in person holds `neorc/user`,
 
 Every route of the manager declares the one permission it needs, with oneberth's `permit`. oneberth refuses a route without one.
 
+A route whose path names a queue serves that queue alone. A route that names no queue serves every queue, and a token bound to one queue is refused there. The routes that claim, heartbeat, finish and complete a task name no queue either. Each of them acts on the queue of the token's own grant, and declares it with `permit(permission, bound=True)`.
+
 
 ### Workers
 
@@ -92,7 +94,7 @@ A task's handler receives the starter when the task asks for `neorc.started_by`.
 
 ## Token creation
 
-Service tokens are oneberth's. The operator creates, lists and revokes them with `neorc tokens`, oneberth's admin scripts shown with neorc's roles, connecting to the database. An admin creates them in the UI too.
+Service tokens are oneberth's. The operator creates, lists and revokes them with `neorc tokens`, oneberth's admin scripts shown with neorc's roles, connecting to the database. An admin creates and revokes them in the UI too, from a browser session. Creating one needs a sign-in within the last ten minutes. An admin's personal token lists the service tokens, and creates and revokes none.
 
 A token's role is required. A queue is required for the worker and responder roles, as `--resource`, and refused for any other.
 
