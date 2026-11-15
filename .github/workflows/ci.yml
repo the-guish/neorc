@@ -71,6 +71,7 @@ jobs:
       - if: matrix.browser
         name: Build the UI and fetch a browser, for the browser test
         run: |
+          scripts/oneberth-ui-from-source.sh
           (cd ts/neorc-ui && npm ci && npm run build)
           uv run playwright install --with-deps chromium
       - run: uv run pytest
@@ -93,6 +94,8 @@ jobs:
           node-version-file: ts/neorc-ui/.nvmrc
           cache: npm
           cache-dependency-path: ts/neorc-ui/package-lock.json
+      # @oneberth/ui, packed from the oneberth commit pyproject.toml pins.
+      - run: ../../scripts/oneberth-ui-from-source.sh
       - run: npm ci
       # Advisories for everything installed; signatures and provenance for
       # what ships in the bundle. The registry does not serve attestations for
@@ -125,7 +128,8 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: astral-sh/setup-uv@v4
-      # Building neorc-ui builds the web UI, which needs Node.js.
+      # Building neorc-ui builds the web UI, which needs Node.js. The build
+      # packs @oneberth/ui from the pinned oneberth commit first.
       - uses: actions/setup-node@v7
         with:
           node-version-file: ts/neorc-ui/.nvmrc

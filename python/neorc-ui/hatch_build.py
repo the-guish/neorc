@@ -4,8 +4,9 @@
 """Build the UI into ``src/neorc_ui/static`` when it is not there.
 
 Runs before hatchling collects files, for a wheel or an sdist. From a checkout
-that means ``npm ci && npm run build`` in ``ts/neorc-ui``, with Node.js at the
-version in its ``.nvmrc``; from an sdist the assets are already inside, so
+that means ``scripts/oneberth-ui-from-source.sh`` when ``@oneberth/ui`` is not
+packed yet, then ``npm ci && npm run build`` in ``ts/neorc-ui``, with Node.js
+at the version in its ``.nvmrc``; from an sdist the assets are already inside, so
 nothing runs and Node.js is not needed. An editable install never builds:
 Python contributors need no Node.js, and ``neorc_ui.static_dir()`` says what
 to do when the assets are missing.
@@ -44,8 +45,16 @@ class UiBuildHook(BuildHookInterface):  # type: ignore[type-arg]
         build(source, static)
 
 
+#: Where ``scripts/oneberth-ui-from-source.sh`` packs ``@oneberth/ui``.
+ONEBERTH_UI = Path("vendor", "oneberth-ui-0.0.0.tgz")
+
+
 def build(source: Path, static: Path) -> None:
-    """``npm ci && npm run build`` in ``source``; its ``dist`` becomes ``static``."""
+    """``npm ci && npm run build`` in ``source``; its ``dist`` becomes ``static``.
+
+    ``@oneberth/ui`` comes from the oneberth commit the root ``pyproject.toml``
+    pins: the script packs it first when it is not there.
+    """
     wanted = (source / ".nvmrc").read_text().strip()
     npm = shutil.which("npm")
     if npm is None:
@@ -62,6 +71,9 @@ def build(source: Path, static: Path) -> None:
             f"says, and {running} is on PATH"
         )
     env = {**os.environ, "CI": "true"}
+    if not (source / ONEBERTH_UI).is_file():
+        script = source.parents[1] / "scripts" / "oneberth-ui-from-source.sh"
+        subprocess.run(["sh", str(script)], check=True, env=env)
     subprocess.run([npm, "ci"], cwd=source, check=True, env=env)
     subprocess.run([npm, "run", "build"], cwd=source, check=True, env=env)
     if static.exists():

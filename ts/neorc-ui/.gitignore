@@ -2,3 +2,5 @@ node_modules/
 dist/
 # Generated from openapi.json by `npm run generate`.
 src/api/schema.d.ts
+# Packed by scripts/oneberth-ui-from-source.sh from the pinned oneberth commit.
+vendor/
