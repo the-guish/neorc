@@ -30,3 +30,16 @@ def test_depends_on_neorc_core() -> None:
     import neorc_core
 
     assert neorc_core.__version__
+
+
+def test_the_role_table_is_read_without_a_manager() -> None:
+    from neorc.manager import new_manager_webapp
+    from neorc_core import Manager
+    from neorc_core.local import MemoryStore, MemoryTaskNotifier
+
+    manager = Manager(
+        MemoryStore(), tasks=MemoryTaskNotifier(), events=MemoryTaskNotifier()
+    )
+
+    assert new_manager_webapp(manager=manager).roles == neorc.NEORC_ROLES
+    assert neorc.registry().apps == ("oneberth", "neorc")

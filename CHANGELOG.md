@@ -64,6 +64,8 @@ one version, cut from a single tag on `main`.
   parent's. Every store keeps it, and the SQLite file is at version 2. A run's
   answer has `started_by`, and the run's page shows it. A task asks for it as
   `neorc.started_by`.
+- `neorc`: `neorc.NEORC_ROLES` and `neorc.registry()` give neorc's role table,
+  and oneberth's with it, to a host that builds no manager.
 - `neorc`: `neorc.sqlite.SqliteStore`, the `Store` in one SQLite file, on the
   standard library's `sqlite3`. It passes the store contract. One thread and
   one connection serve it, one transaction at a time, and the event loop

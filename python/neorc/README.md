@@ -55,7 +55,9 @@ thread, and they need not import neorc.
 
 ## What is in it
 
-- `neorc` — `Scheduler`, `Worker` and friends, re-exported from `neorc-core`
+- `neorc` — `Scheduler`, `Worker` and friends, re-exported from `neorc-core`;
+  `NEORC_ROLES`, neorc's role table for oneberth, and `registry()`, which a
+  host reads without building a manager
 - `neorc.http` — `HttpManagerClient` and `HttpQueueClient`, the
   long-polling clients the scheduler and workers use
 - `neorc.manager` — the manager as a oneberth component, `new_manager_webapp`,

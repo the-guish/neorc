@@ -7,12 +7,15 @@ Importing this package pulls in no optional dependency. The adapters live in
 subpackages that match the extras that install them: ``neorc.http``,
 ``neorc.manager`` and ``neorc.postgres``. ``neorc.sqlite`` needs no extra.
 ``new_manager_webapp``, the manager as a oneberth component, is imported from
-``neorc.manager`` when it is first asked for.
+``neorc.manager`` when it is first asked for. ``NEORC_ROLES`` is neorc's role
+table as oneberth registers it, and ``registry()`` holds oneberth's roles and
+neorc's: a host reads both without building a manager.
 """
 
 from importlib.metadata import PackageNotFoundError, version
 from typing import TYPE_CHECKING, Any
 
+from neorc._roles import NEORC_ROLES, registry
 from neorc_core import Scheduler, TaskId, TaskStatus, Worker
 
 try:
@@ -33,10 +36,12 @@ def __getattr__(name: str) -> Any:
 
 
 __all__ = [
+    "NEORC_ROLES",
     "Scheduler",
     "TaskId",
     "TaskStatus",
     "Worker",
     "__version__",
     "new_manager_webapp",
+    "registry",
 ]
