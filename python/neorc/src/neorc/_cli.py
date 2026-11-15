@@ -87,10 +87,17 @@ def build_parser() -> argparse.ArgumentParser:
     manager_start = manager_commands.add_parser("start", help="serve the manager")
     manager_start.add_argument("--host", default=DEFAULT_HOST)
     manager_start.add_argument("--port", type=int, default=DEFAULT_PORT)
-    manager_start.add_argument(
+    database = manager_start.add_mutually_exclusive_group()
+    database.add_argument(
         "--database-url",
         default=None,
-        help="defaults to $NEORC_DATABASE_URL",
+        help="a PostgreSQL database; defaults to $NEORC_DATABASE_URL",
+    )
+    database.add_argument(
+        "--database-file",
+        type=Path,
+        default=None,
+        help="a SQLite file instead, created if it is not there; needs --no-auth",
     )
     manager_start.add_argument(
         "--create-schema",
@@ -176,10 +183,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="worker: workers receive its tasks; external: its tasks wait for a "
         "responder to complete them",
     )
-    _database_url_option(queues_declare)
+    _database_options(queues_declare)
     queues_declare.set_defaults(handler=queues_declare_command)
     queues_list = queues_commands.add_parser("list", help="list the declared queues")
-    _database_url_option(queues_list)
+    _database_options(queues_list)
     queues_list.set_defaults(handler=queues_list_command)
 
     sessions = commands.add_parser(
@@ -262,6 +269,22 @@ def _database_url_option(parser: argparse.ArgumentParser) -> None:
         "--database-url",
         default=None,
         help=f"the manager's database; defaults to ${DATABASE_URL_ENV}",
+    )
+
+
+def _database_options(parser: argparse.ArgumentParser) -> None:
+    """The manager's database: PostgreSQL by URL, or a SQLite file."""
+    database = parser.add_mutually_exclusive_group()
+    database.add_argument(
+        "--database-url",
+        default=None,
+        help=f"the manager's PostgreSQL database; defaults to ${DATABASE_URL_ENV}",
+    )
+    database.add_argument(
+        "--database-file",
+        type=Path,
+        default=None,
+        help="the manager's SQLite file instead",
     )
 
 
@@ -394,9 +417,18 @@ def _exit_now(exit_code: int) -> None:
 
 def manager_start_command(args: argparse.Namespace) -> int:
     """Run the manager service. Needs the ``manager`` extra."""
-    with _needs("manager", "postgres"):
-        from neorc.manager import run
-        from neorc.postgres._driver import CONNECTION_ERRORS
+    database_errors: tuple[type[BaseException], ...]
+    if args.database_file is not None:
+        import sqlite3
+
+        with _needs("manager"):
+            from neorc.manager import run
+        database_errors = (sqlite3.Error,)
+    else:
+        with _needs("manager", "postgres"):
+            from neorc.manager import run
+            from neorc.postgres._driver import CONNECTION_ERRORS
+        database_errors = CONNECTION_ERRORS
 
     if (args.ssl_certfile is None) != (args.ssl_keyfile is None):
         raise SystemExit(
@@ -432,15 +464,16 @@ def manager_start_command(args: argparse.Namespace) -> int:
             auth_config=auth_config,
             database_url=args.database_url,
             create_schema=args.create_schema,
+            database_file=args.database_file,
             ui=not args.no_ui,
             ssl_certfile=args.ssl_certfile,
             ssl_keyfile=args.ssl_keyfile,
         )
     except FileNotFoundError as exc:  # no built UI to serve: say how to get one
         raise SystemExit(f"neorc manager start: {exc}, or pass --no-ui") from None
-    except RuntimeError as exc:  # no database, or no credential tables in it
+    except RuntimeError as exc:  # no database, no credential tables, a wrong file
         raise SystemExit(f"neorc manager start: {exc}") from None
-    except CONNECTION_ERRORS as exc:  # checked before serving
+    except database_errors as exc:  # checked before serving
         raise SystemExit(
             f"neorc manager start: cannot reach the database: {exc}"
         ) from None
@@ -565,7 +598,7 @@ def queues_declare_command(args: argparse.Namespace) -> int:
         print(f"declared queue {args.name!r} as {args.kind}")
         return 0
 
-    return _on_credentials(args, declare)
+    return _on_queues(args, declare)
 
 
 def queues_list_command(args: argparse.Namespace) -> int:
@@ -577,7 +610,7 @@ def queues_list_command(args: argparse.Namespace) -> int:
             print(f"{queue.name}\t{queue.kind.value}")
         return 0
 
-    return _on_credentials(args, listing)
+    return _on_queues(args, listing)
 
 
 def sessions_clear_command(args: argparse.Namespace) -> int:
@@ -590,6 +623,36 @@ def sessions_clear_command(args: argparse.Namespace) -> int:
         return 0
 
     return _on_credentials(args, clear)
+
+
+def _on_queues(args: argparse.Namespace, act: Callable[..., Awaitable[int]]) -> int:
+    """Run ``act`` on an ``Access`` over the manager's database, a URL or a file.
+
+    The SQLite file keeps no credentials, so no token is bound to its queues:
+    the ``Access`` there checks against an empty credential store.
+    """
+    if args.database_file is None:
+        return _on_credentials(args, act)
+
+    import sqlite3
+
+    from neorc.sqlite import SchemaVersionError, SqliteStore
+    from neorc_core import Access
+    from neorc_core.local import MemoryCredentialStore
+
+    path: Path = args.database_file
+    if not path.is_file():
+        # These commands create no database, so a mistyped path is not given one.
+        raise SystemExit(f"no database file at {path}: start the manager on it first")
+
+    async def main() -> int:
+        async with SqliteStore(path) as store:
+            return await act(Access(MemoryCredentialStore(), queues=store))
+
+    try:
+        return asyncio.run(main())
+    except (SchemaVersionError, sqlite3.Error) as exc:
+        raise SystemExit(f"cannot use the database file {path}: {exc}") from None
 
 
 def _on_credentials(

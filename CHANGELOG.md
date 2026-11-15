@@ -12,6 +12,19 @@ one version, cut from a single tag on `main`.
 
 ### Added
 
+- `neorc`: `neorc.sqlite.SqliteStore`, the `Store` in one SQLite file, on the
+  standard library's `sqlite3`. It passes the store contract. One thread and
+  one connection serve it, one transaction at a time, and the event loop
+  awaits each. The file uses the write-ahead log, syncs every commit, and
+  holds neorc's `application_id` and the schema version, `SCHEMA_VERSION`; a
+  file of another version or application is refused with
+  `SchemaVersionError`. `build_app` and `run` take `database_file`, and
+  `neorc manager start --database-file` serves a manager on that file, its
+  notifiers in memory. The SQLite store keeps no credentials, so a manager on
+  it needs `--no-auth`, and is refused without it. `neorc queues declare` and
+  `neorc queues list` take `--database-file` too.
+  [sqlite-implementation.md](docs/specs/sqlite-implementation.md) has the
+  choices.
 - `neorc-core`, `neorc-ui`: a task's form can read the task's inputs and end
   with buttons, so a person triages a list on a queue's page. The inputs seed
   the form's data under `/inputs`, read only. A `Text` may show a value there,

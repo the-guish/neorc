@@ -6,6 +6,9 @@ neorc-core will host all the mechanism and interactions between components, but 
 neorc will provide a base reference implementation with postgres, when installed as neorc[postgres]
 it may allow more extras in the future for other implementations.
 
+neorc also keeps a manager's data in one SQLite file, for one machine, with no
+extra. See [sqlite-implementation.md](sqlite-implementation.md).
+
 
 ## Installing
 

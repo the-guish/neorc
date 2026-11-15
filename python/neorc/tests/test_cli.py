@@ -61,6 +61,7 @@ def test_manager_start_takes_its_settings_from_the_command_line(
                 "auth_config": None,
                 "database_url": "postgresql:///neorc",
                 "create_schema": True,
+                "database_file": None,
                 "ui": True,
                 "ssl_certfile": None,
                 "ssl_keyfile": None,
@@ -95,6 +96,64 @@ def test_manager_start_names_the_fix_when_there_is_no_built_ui(
 
     with pytest.raises(SystemExit, match=r"no built UI.*--no-ui"):
         _cli.main(["manager", "start"])
+
+
+def test_manager_start_on_a_sqlite_file_needs_no_auth(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[dict[str, Any]] = []
+
+    def fake_run(host: str, port: int, **kwargs: Any) -> None:
+        calls.append(kwargs)
+
+    path = tmp_path / "neorc.db"
+    asked = ["manager", "start", "--no-ui", "--database-file", str(path)]
+
+    with pytest.raises(SystemExit, match=r"no credentials.*--no-auth"):
+        _cli.main(asked)
+    with pytest.raises(SystemExit):  # one database: a file or a URL
+        _cli.main([*asked, "--database-url", "postgresql:///neorc"])
+    monkeypatch.setattr("neorc.manager.run", fake_run)
+    assert _cli.main([*asked, "--no-auth"]) == 0
+
+    assert not path.exists()
+    assert calls[0]["database_file"] == path
+    assert (calls[0]["database_url"], calls[0]["auth"]) == (None, False)
+
+
+def test_manager_start_refuses_a_file_of_another_application(tmp_path: Path) -> None:
+    import sqlite3
+
+    path = tmp_path / "notes.db"
+    with sqlite3.connect(path) as conn:
+        conn.execute("CREATE TABLE notes (body TEXT)")
+    conn.close()
+
+    with pytest.raises(SystemExit, match="not a neorc database"):
+        _cli.main(
+            ["manager", "start", "--no-ui", "--no-auth", "--database-file", str(path)]
+        )
+
+
+def test_queues_are_declared_and_listed_on_a_sqlite_file(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from neorc.sqlite import check_database
+
+    path = tmp_path / "neorc.db"
+    on_file = ["--database-file", str(path)]
+    with pytest.raises(SystemExit, match="no database file"):
+        _cli.main(["queues", "list", *on_file])
+    check_database(path)  # as the manager's first start leaves it
+
+    declared = _cli.main(["queues", "declare", "default", "--kind", "worker", *on_file])
+    with pytest.raises(SystemExit, match="not a queue name"):
+        _cli.main(["queues", "declare", "no way", "--kind", "worker", *on_file])
+    capsys.readouterr()
+    listed = _cli.main(["queues", "list", *on_file])
+
+    assert (declared, listed) == (0, 0)
+    assert capsys.readouterr().out == "default\tworker\n"
 
 
 def test_an_unknown_command_exits_with_usage(

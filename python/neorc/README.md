@@ -3,7 +3,8 @@
 A next generation orchestration system: flows of tasks, defined in YAML files,
 run by workers wherever the work is. This is the reference implementation on
 top of [`neorc-core`](https://pypi.org/project/neorc-core/) — a manager
-service, the scheduler and worker commands, and adapters for HTTP and Postgres.
+service, the scheduler and worker commands, and adapters for HTTP, Postgres
+and SQLite.
 
 Every dependency is optional, so a host installs only what its role needs:
 
@@ -39,6 +40,9 @@ loopback address, and its role must allow the request: `ci`, `scheduler`,
 start --no-auth` asks for none, for trying it on a machine nobody else
 reaches.
 
+A manager on one machine keeps its data in a SQLite file with `neorc manager
+start --database-file neorc.db --no-auth`. The file is created at the first start.
+
 Each task in a flow file names its handler by import path, `module:function`,
 resolved from the worker's code location first. Handlers are plain or `async`
 functions taking the task's inputs as keyword arguments; plain ones run in a
@@ -51,6 +55,7 @@ thread, and they need not import neorc.
   long-polling clients the scheduler and workers use
 - `neorc.manager` — the FastAPI application and the service that runs it
 - `neorc.postgres` — the store, the LISTEN/NOTIFY notifier, and the schema
+- `neorc.sqlite` — the store in one SQLite file, on the standard library
 
 See the [repository](https://github.com/open-shipyard/neorc) for the full
 picture, and

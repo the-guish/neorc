@@ -7,7 +7,7 @@ This repository is a monorepo. The packages it publishes:
 
 | Package                           | Description                             |
 | --------------------------------- | --------------------------------------- |
-| [`neorc`](python/neorc)           | Manager service, scheduler and worker commands, Postgres and HTTP adapters |
+| [`neorc`](python/neorc)           | Manager service, scheduler and worker commands, Postgres, SQLite and HTTP adapters |
 | [`neorc-core`](python/neorc-core) | The mechanism: flow definitions, the planner, ports, and the manager, scheduler and worker logic |
 
 ## How it works
@@ -69,6 +69,14 @@ with a certificate as above, or behind a proxy that terminates TLS. `neorc
 tokens list` and `neorc tokens revoke <name>` manage them. To try it on one
 machine nobody else reaches, `neorc manager start --no-auth` asks for none,
 and allows everything.
+
+A manager on one machine can keep its data in a SQLite file instead of
+Postgres. The file is created at the first start. It keeps no tokens yet, so
+the manager serves it with `--no-auth`
+([sqlite-implementation.md](docs/specs/sqlite-implementation.md)):
+
+    neorc manager start --database-file neorc.db --no-auth
+    neorc queues declare default --kind worker --database-file neorc.db
 
 Write the work, as plain functions that need not import neorc:
 
@@ -227,6 +235,7 @@ origin; behind a proxy, `public_url` is the address people type.
 - [docs/specs/task-completion.md](docs/specs/task-completion.md) — tasks a
   person or another system completes: queue kinds, pending tasks, responders
 - [docs/specs/postgres-implementation.md](docs/specs/postgres-implementation.md)
+- [docs/specs/sqlite-implementation.md](docs/specs/sqlite-implementation.md)
   — how the reference persistence layer receives, leases and recovers
 - [docs/working-notes/sso-plan.md](docs/working-notes/sso-plan.md) — API
   tokens and signing in: what is checked, where, and why
