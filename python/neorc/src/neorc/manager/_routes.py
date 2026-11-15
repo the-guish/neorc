@@ -37,7 +37,6 @@ from typing import Annotated, Any, TypeVar
 
 from fastapi import APIRouter, Depends, Query, Request, Response, status
 from fastapi.responses import JSONResponse
-from fastapi.routing import APIRoute
 from oneberth.identity import Principal
 from oneberth.web import permit
 from pydantic import BaseModel, ValidationError
@@ -110,31 +109,15 @@ def _state(request: Request) -> ManagerState:
 def routes_for(state: ManagerState) -> APIRouter:
     """The routes, served for one component: each gives its handler ``state``.
 
-    The routes are copied, each with a dependency that leaves ``state`` in the
-    request before its handler's own dependencies run.
+    The router includes the shared routes with a dependency that leaves
+    ``state`` in the request before each handler's own dependencies run.
     """
 
     def serving(request: Request) -> None:
         setattr(request.state, STATE_KEY, state)
 
     served = APIRouter()
-    for route in router.routes:
-        assert isinstance(route, APIRoute)
-        served.add_api_route(
-            route.path,
-            route.endpoint,
-            methods=sorted(route.methods or ()),
-            dependencies=[Depends(serving), *route.dependencies],
-            response_model=route.response_model,
-            status_code=route.status_code,
-            responses=route.responses,
-            summary=route.summary,
-            description=route.description,
-            name=route.name,
-            operation_id=route.operation_id,
-            response_class=route.response_class,
-            include_in_schema=route.include_in_schema,
-        )
+    served.include_router(router, dependencies=[Depends(serving)])
     return served
 
 
