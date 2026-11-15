@@ -1,5 +1,9 @@
 # Plan: roles, with workers bound to their queue
 
+> Superseded by oneberth's identity spec, `docs/specs/identity.md` in
+> [oneberth](https://github.com/the-guish/oneberth): oneberth signs people in,
+> keeps the tokens and checks the roles. This plan is kept as a record.
+
 Goal: every request a manager takes is allowed by the role of whoever sends
 it, as [roles.md](../specs/roles.md) lists, and nothing else is. A token has
 one of five fixed roles; a worker's token is bound to one queue, and a task's

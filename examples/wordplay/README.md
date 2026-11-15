@@ -28,23 +28,23 @@ are the same as in [hello](../hello/README.md#deployed).
 
        uv run python examples/hello/postgres.py
 
-2. The manager, and an API token for each process, as in
-   [hello](../hello/README.md#deployed): `export NEORC_API_TOKEN=<secret>`
-   in each terminal below, with the token the step names; or start the
-   manager with `--no-auth` to use the UI without configuring an identity
-   provider to sign in with, and no token anywhere:
+2. The manager, in oneberth's local mode, and a token for each process, as
+   in [hello](../hello/README.md#deployed): `export NEORC_API_TOKEN=<secret>`
+   in each terminal below, with the token the step names. The manager prints
+   `open <address>`, which signs you in to the UI:
 
        export NEORC_DATABASE_URL=...   # from step 1
-       uv run neorc manager start --host 127.0.0.1 --create-schema --no-ui
+       uv run neorc manager start --local --create-schema --no-ui
 
        export NEORC_DATABASE_URL=...   # in another terminal
        uv run neorc queues declare default --kind worker
        uv run neorc queues declare scoring --kind worker
-       uv run neorc tokens create ci --role ci
-       uv run neorc tokens create scheduler --role scheduler
-       uv run neorc tokens create worker --role worker --queue default
-       uv run neorc tokens create scoring-worker --role worker --queue scoring
-       uv run neorc tokens create me --role user
+       uv run neorc tokens create ci --role neorc/ci
+       uv run neorc tokens create scheduler --role neorc/scheduler
+       uv run neorc tokens create worker --role neorc/worker --resource default
+       uv run neorc tokens create scoring-worker --role neorc/worker \
+           --resource scoring
+       uv run neorc tokens create starter --role neorc/external-trigger
 
 3. Upload the flows, with the `ci` token:
 
@@ -65,17 +65,17 @@ are the same as in [hello](../hello/README.md#deployed).
        uv run neorc worker start --manager-address 127.0.0.1:8420 \
            --code-location examples/wordplay --queue scoring
 
-6. Start a run, with the `me` token:
+6. Start a run, with the `starter` token:
 
-       curl -X POST 127.0.0.1:8420/flows/word_picker/runs \
+       curl -X POST 127.0.0.1:8420/neorc/flows/word_picker/runs \
            -H "authorization: Bearer $NEORC_API_TOKEN" \
            -H 'content-type: application/json' \
            -d '{"inputs": {"sentence": "potato tomate berry watermelon", "preferred_letter": "t"}}'
 
    The response carries the run's `id`; once it has succeeded,
-   `curl -H "authorization: Bearer $NEORC_API_TOKEN" 127.0.0.1:8420/runs/<id>`
-   shows `"output": ["potato", "tomate"]`, and `/runs/<id>/state` every step's
-   result.
+   `curl -H "authorization: Bearer <scheduler>" 127.0.0.1:8420/neorc/runs/<id>`
+   shows `"output": ["potato", "tomate"]`, and `/neorc/runs/<id>/state` every
+   step's result.
 
 [`flow_example.py`](../../docs/specs/flow_example.py) written the neorc way: the
 `while` and `for` loops move into flow files, and `tasks.py` keeps only plain

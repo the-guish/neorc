@@ -26,7 +26,9 @@ for `sudo`):
     uv run playwright install --with-deps chromium
 
 Without it, the browser tests skip. Repeat after `uv sync` bumps `playwright`:
-each release wants its own browser build.
+each release wants its own browser build. `NEORC_TEST_CHROMIUM` names a
+Chromium the tests launch instead, such as a headless shell already on the
+machine.
 
 ## Node.js, only to work on `ts/`
 

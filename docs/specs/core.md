@@ -13,12 +13,13 @@ extra. See [sqlite-implementation.md](sqlite-implementation.md).
 ## Installing
 
 neorc-core has one runtime dependency, a YAML parser, because flow definitions
-are YAML files. Every other dependency is optional. `pip install neorc` brings
-no runtime dependency beyond neorc-core: it is up to the user to install the
-extras their hosts need.
+are YAML files. It imports nothing of oneberth. `neorc` depends on neorc-core
+and on [oneberth](https://github.com/the-guish/oneberth), whose base install
+brings no third-party code. Every other dependency is optional: it is up to
+the user to install the extras their hosts need.
 
     pip install neorc                       # nothing extra
-    pip install neorc[manager]              # FastAPI, to run the manager service
+    pip install neorc[manager]              # FastAPI, through oneberth[web]
     pip install neorc[postgres]             # the Postgres driver, asyncpg
     pip install neorc[manager,postgres]     # the reference deployment
 
@@ -30,29 +31,34 @@ backends and persistence layers arrive as further extras.
 
 It will be implemented as three services: a "manager", a "scheduler" and one or more "workers".
 
+The manager is a oneberth component named `neorc`, and its API is under
+`/neorc/` wherever it is served. oneberth composes it alone in standalone
+neorc, or beside another application's component, and signs people in.
+
 After installing neorc users should be able to start the manager, and create a
-token for each process that will reach it. Tokens are created on the database,
-and each one has a role; a worker's token is bound to the queue it serves. See
-[roles.md](roles.md).
+token for each process that will reach it. Tokens are oneberth's service
+tokens, created on the database, and each one has a role; a worker's token is
+bound to the queue it serves. See [roles.md](roles.md).
 
 ```
 export NEORC_DATABASE_URL=postgresql://localhost/neorc
-neorc manager start --create-schema --ssl-certfile manager.pem --ssl-keyfile manager-key.pem
+export ONEBERTH_CONFIG=oneberth.toml    # the manager's public URL, who signs in
+neorc manager start --create-schema
 
 neorc queues declare default --kind worker
 neorc queues declare python-gpu --kind worker
 
-neorc tokens create --role ci github-actions
-neorc tokens create --role scheduler scheduler
-neorc tokens create --role worker --queue default worker-1
-neorc tokens create --role worker --queue python-gpu gpu-worker-1
-neorc tokens create --role external-trigger bookings-webhook
+neorc tokens create --role neorc/ci github-actions
+neorc tokens create --role neorc/scheduler scheduler
+neorc tokens create --role neorc/worker --resource default worker-1
+neorc tokens create --role neorc/worker --resource python-gpu gpu-worker-1
+neorc tokens create --role neorc/external-trigger bookings-webhook
 ```
 
 And, in different hosts, each with its token
 
 ```
-export NEORC_MANAGER_ADDRESS="https://xx.xx.xx.xx:8420"
+export NEORC_MANAGER_ADDRESS="https://xx.xx.xx.xx"
 NEORC_API_TOKEN="<github-actions>" neorc flows upload flows/
 NEORC_API_TOKEN="<scheduler>"      neorc scheduler start
 NEORC_API_TOKEN="<worker-1>"       neorc worker start --code-location .
@@ -62,7 +68,7 @@ NEORC_API_TOKEN="<gpu-worker-1>"   neorc worker start --code-location . --queue 
 An external system starts runs over HTTP with its token:
 
 ```
-curl -X POST https://xx.xx.xx.xx:8420/flows/booking/runs \
+curl -X POST https://xx.xx.xx.xx/neorc/flows/booking/runs \
      -H "Authorization: Bearer <bookings-webhook>" \
      -H "Content-Type: application/json" \
      -d '{"inputs": {"booking_id": 42}}'

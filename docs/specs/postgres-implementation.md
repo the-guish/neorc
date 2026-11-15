@@ -112,12 +112,16 @@ Two consequences the rest of the system inherits:
   released version to migrate from yet, and adding one before there is would be
   guessing at the changes.
 - **The tables can live in a schema of their own.** `create_schema`, the
-  stores and `ensure_credential_tables` take an optional `schema`, which sets
+  stores and `ensure_tables` take an optional `schema`, which sets
   the connections' `search_path` to it alone; `create_schema` creates it if it
   does not exist. Without one, the tables go wherever the connection's
   `search_path` puts them, `public` by default. Notification channels are
   per database, not per schema, so two deployments sharing a database wake
   each other's waiters needlessly, which costs a re-read and nothing else.
+- **Credentials are oneberth's.** oneberth's store of people and tokens is
+  the schema `oneberth` of the same database. `neorc manager start
+  --create-schema` sets it up beside neorc's tables, and `neorc store init`
+  sets it up alone.
 - **The driver is asyncpg**, Apache-2.0, as the rest of the project is. It
   reads connection URLs; libpq's `key=value` strings are translated for it.
 

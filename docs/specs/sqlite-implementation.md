@@ -11,8 +11,8 @@ It needs no extra.
   with `MemoryTaskNotifier`. SQLite has no notifications across processes.
 - The store passes the store contract, `StoreContract`, as the memory and
   Postgres stores do.
-- The store keeps no credentials. A manager on a SQLite file serves without
-  authentication, `--no-auth`. Sign-in on SQLite comes with oneberth's store.
+- The store keeps no credentials. oneberth's store keeps them, in the file
+  `oneberth.db` beside neorc's. The manager's process opens both files.
 
 ## The event loop
 
@@ -50,9 +50,16 @@ It needs no extra.
 ## Commands
 
 ```
-neorc manager start --database-file neorc.db --no-auth
+neorc manager start --database-file neorc.db --local
 neorc queues declare default --kind worker --database-file neorc.db
 neorc queues list --database-file neorc.db
+neorc tokens create worker-1 --role neorc/worker --resource default \
+    --database-file neorc.db
 ```
 
-`neorc tokens` and `neorc sessions` work on Postgres alone.
+`--local` is oneberth's local mode, for one person at the machine. It needs
+no sign-in configuration and prints the address that signs that person in.
+`--config` names a sign-in configuration instead.
+
+`neorc tokens`, `neorc sessions` and `neorc devices` open `oneberth.db` beside
+the file, and `neorc queues` reads the tokens there too.

@@ -36,7 +36,10 @@ python/neorc-core/src/neorc_core/
 python/neorc/src/neorc/
   postgres/         the store and notifier ports, on Postgres
   sqlite/           the store port, on one SQLite file
-  manager/          FastAPI routes, translating HTTP to Manager calls
+  manager/          FastAPI routes, translating HTTP to Manager calls, as a
+                    oneberth component
+  _roles.py         neorc's role table, given to oneberth
+  _admin.py         oneberth's admin scripts, with neorc's roles and queues
   http/             the client ports, over HTTP
   _cli.py           commands, including `neorc run` on LocalCluster
 ```
@@ -51,6 +54,15 @@ something? Deciding belongs in core. Storing and moving belong in an adapter.
 `Manager`, `Scheduler`, `Worker` and the planner depend on ports only. No
 module in `neorc_core` imports a database driver, a web framework or an HTTP
 client. `neorc-core`'s only runtime dependency is its YAML parser.
+
+`neorc_core` imports nothing of oneberth either. It names neorc's permissions
+and roles as plain data, and gets what it needs of who is asking as a plain
+value, such as the queue a worker's token is bound to.
+
+oneberth composes the web application. It signs people in, finds who is
+asking and checks a route's permission before the route runs. A route of
+`neorc.manager` declares its permission and translates; it decides nothing
+about credentials.
 
 ### 2. Adapters translate; they do not decide
 

@@ -54,7 +54,7 @@ stated reason. Build tooling is not distributed and is not checked.
 
 ## In the browser
 
-- The manager serves `/ui/` with a Content-Security-Policy that allows
+- The backend serves `/ui/` with oneberth's Content-Security-Policy, which allows
   scripts and connections from its own origin only, and styles from it or
   inline, which React needs for `style` attributes. Do not loosen it for a
   library; choose another library.
@@ -75,5 +75,6 @@ never released.
 - `.github/dependabot.yml`: the updates and their cooldown.
 - `.github/workflows/ci.yml`, the `ui` job: audits, signatures, the build
   and the committed list; a red step there names this file.
-- `python/neorc/src/neorc/manager/_ui.py`: the Content-Security-Policy.
+- oneberth's web part, `oneberth.web.CONTENT_SECURITY_POLICY`: the
+  Content-Security-Policy.
 - `ts/neorc-ui/AGENTS.md`: the same rules, as do-nots for coding agents.

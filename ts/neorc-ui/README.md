@@ -20,8 +20,14 @@ Then:
     npm ci
     npm run dev
 
-`npm run dev` serves the app at the URL it prints and proxies the API to a
-`neorc manager start --no-ui` on `127.0.0.1:8420`: this dev server is the UI.
+`npm run dev` serves the app at the URL it prints and proxies the API and
+`/auth` to a `neorc manager start --local --no-ui` on `127.0.0.1:8420`: this
+dev server is the UI. The manager prints an address that signs you in; open
+it with the dev server's host and port in place of `127.0.0.1:8420`, then
+open the dev server's page.
+
+The page reads the manager's API under `/neorc/`, and who is signed in from
+oneberth's `/auth/session`.
 
 The API types in `src/api/schema.d.ts` are generated from `openapi.json`,
 the manager's committed schema, by `npm run generate`; every script runs it

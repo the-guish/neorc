@@ -13,7 +13,7 @@ Do not:
   change is its own pull request, vetted as the rules say, with the cooldown
   kept: no version published fewer than 10 days ago.
 - loosen the license allowlist in `vite.config.ts`, the size budget, or the
-  Content-Security-Policy in `python/neorc/src/neorc/manager/_ui.py` to make
+  Content-Security-Policy, oneberth's `oneberth.web.CONTENT_SECURITY_POLICY`, to make
   a library fit. Choose another library, or write the code.
 - run `npm install`. Installs are `npm ci`; `save-exact` and `ignore-scripts`
   stay on in `.npmrc`.

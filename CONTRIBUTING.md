@@ -91,9 +91,11 @@ in `ts/neorc-ui`:
     npm ci
     npm run dev
 
-`npm run dev` serves the app and proxies the API to a `neorc manager start
---no-ui` on `127.0.0.1:8420`: a checkout holds no built UI, and the dev server
-is the UI here. To have the manager serve it instead, as it does from the
+`npm run dev` serves the app and proxies the API and `/auth` to a `neorc
+manager start --local --no-ui` on `127.0.0.1:8420`: a checkout holds no built
+UI, and the dev server is the UI here. The manager prints an address that
+signs you in; open it with the dev server's host and port in place of
+`127.0.0.1:8420`, then open the dev server's page. To have the manager serve it instead, as it does from the
 wheel, `npm run build` and copy `dist/` to `python/neorc-ui/src/neorc_ui/static/`,
 which is gitignored. The checks CI runs are `npm run lint`, `npm run
 typecheck`, `npm test` and `npm run build`; the build also writes `bundled-packages.txt`,

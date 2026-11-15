@@ -16,8 +16,9 @@ The two tasks for a person are on `editors`, an external queue:
 ## On one machine
 
 Run each step from the repository root in its own terminal, after `uv sync`.
-The manager runs with `--no-auth`, which needs no token and no sign-in. Use it
-on your own machine only.
+The manager runs in oneberth's local mode, `--local`, for one person at this
+machine. It needs no sign-in configuration, and it prints the address that
+signs you in. The scheduler and the worker send a token each.
 
 1. Build the web UI, once. A checkout holds no built UI:
 
@@ -31,28 +32,33 @@ on your own machine only.
    It prints an `export NEORC_DATABASE_URL=...` line. Run that line in every
    terminal below.
 
-3. The manager:
+3. The manager. It prints `open <address>`; keep that address for step 7:
 
-       uv run neorc manager start --host 127.0.0.1 --create-schema --no-auth
+       uv run neorc manager start --local --create-schema
 
-4. The two queues, then the flow:
+4. The two queues, a token for each process, then the flow. Each token
+   command prints its secret, once:
 
        uv run neorc queues declare default --kind worker
        uv run neorc queues declare editors --kind external
-       uv run neorc flows upload --manager-address 127.0.0.1:8420 \
-           examples/approval/flows
+       uv run neorc tokens create ci --role neorc/ci
+       uv run neorc tokens create scheduler --role neorc/scheduler
+       uv run neorc tokens create worker --role neorc/worker --resource default
+       NEORC_API_TOKEN=<ci> uv run neorc flows upload \
+           --manager-address 127.0.0.1:8420 examples/approval/flows
 
 5. The scheduler:
 
-       uv run neorc scheduler start --manager-address 127.0.0.1:8420
+       NEORC_API_TOKEN=<scheduler> uv run neorc scheduler start \
+           --manager-address 127.0.0.1:8420
 
 6. The worker of the `default` queue, with the code in this directory:
 
-       uv run neorc worker start --manager-address 127.0.0.1:8420 \
-           --code-location examples/approval
+       NEORC_API_TOKEN=<worker> uv run neorc worker start \
+           --manager-address 127.0.0.1:8420 --code-location examples/approval
 
-7. Open <http://127.0.0.1:8420/ui/>. Start a run of `approval` from its
-   flow's page, with a topic.
+7. Open the address the manager printed: it signs you in, and opens the UI.
+   Start a run of `approval` from its flow's page, with a topic.
 
 8. Open "Queues", then `editors`. The page lists the two pending tasks. Open
    each one, read the draft, and complete it. The run then publishes, and its
@@ -64,9 +70,11 @@ leaves the list. Choose "all" to see it again.
 ## What the manager refuses
 
 The form is not only how the page looks. The manager holds every completion of
-`review_draft` to it, whoever sends it:
+`review_draft` to it, whoever sends it, such as a responder of `editors`:
 
-    curl -X POST 127.0.0.1:8420/tasks/<task id>/complete \
+    uv run neorc tokens create inbox --role neorc/responder --resource editors
+    curl -X POST 127.0.0.1:8420/neorc/tasks/<task id>/complete \
+        -H "authorization: Bearer <inbox>" \
         -H 'content-type: application/json' \
         -d '{"result": {"decision": "later", "comment": ""}}'
 

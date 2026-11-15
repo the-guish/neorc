@@ -48,9 +48,11 @@ shows the output:
 
 The form is not only how the page looks. The manager holds every completion
 of `triage` to it, whoever sends it: one decision per issue, each one of the
-options, and a verdict one of the buttons' values.
+options, and a verdict one of the buttons' values. A responder of `editors`
+sends it so, with a token from `neorc tokens create`:
 
-    curl -X POST 127.0.0.1:8420/tasks/<task id>/complete \
+    curl -X POST 127.0.0.1:8420/neorc/tasks/<task id>/complete \
+        -H "authorization: Bearer <inbox>" \
         -H 'content-type: application/json' \
         -d '{"result": {"decision": ["fix"], "verdict": "ready"}}'
 

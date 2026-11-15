@@ -10,6 +10,33 @@ one version, cut from a single tag on `main`.
 
 ## [Unreleased]
 
+### Changed
+
+- `neorc`, `neorc-core`, `neorc-ui`: neorc is built on oneberth, pinned by
+  commit, and gets FastAPI, Starlette and uvicorn through `oneberth[web]`.
+  oneberth signs people in, keeps sessions and tokens, checks each route's
+  permission, applies the checks on a request and the security headers.
+  `new_manager_webapp` gives the manager as a oneberth component named
+  `neorc`, and its API is under `/neorc/`. Standalone neorc composes it alone
+  with `compose_app`. The roles are oneberth roles, `neorc/user`,
+  `neorc/worker`, `neorc/responder`, `neorc/scheduler`, `neorc/ci` and
+  `neorc/external-trigger`, with permissions named `neorc/...`. `neorc-core`
+  keeps them as plain data and imports nothing of oneberth; the rules between
+  a queue's kind and its tokens are `QueueDeclarations`. `neorc manager start`
+  reads oneberth's TOML file, `--config` or `ONEBERTH_CONFIG`, or runs in
+  oneberth's local mode with `--local`. `neorc tokens`, `sessions`, `devices`
+  and `store` are oneberth's admin scripts, with neorc's roles and
+  `--database-file` too. On a SQLite file, oneberth's store is `oneberth.db`
+  beside it. The clients reach the API under `/neorc/` at a backend's
+  address, and the UI reads the session from oneberth's `/auth/session`.
+
+### Removed
+
+- `neorc`, `neorc-core`: neorc's own identity core, sign-in configuration,
+  OpenID Connect client, cookies, `/auth` routes, credential stores and
+  credential tables; `--no-auth`, `--auth-config` and `--ssl-certfile`;
+  `create_app`. TLS ends in front of the backend.
+
 ### Added
 
 - `neorc`: `neorc.sqlite.SqliteStore`, the `Store` in one SQLite file, on the
