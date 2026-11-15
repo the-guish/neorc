@@ -34,11 +34,13 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from neorc_core import (
+    InvalidValueError,
     Manager,
     ManagerClient,
     QueueKind,
     Role,
     TaskNotFoundError,
+    check_token_queue,
 )
 from neorc_core.local import MemoryStore, MemoryTaskNotifier
 
@@ -255,6 +257,37 @@ async def service_token(
     return await made(composition, role.value, queue, name=name)
 
 
+async def kept_service_token(composition: Composition, role: Role, queue: str) -> str:
+    """A service token of ``role``, bound to ``queue``, kept from before the queue
+    changed.
+
+    oneberth refuses a new token for a queue nobody declared, and a new worker
+    token for an external queue. A token made earlier is still in its store:
+    neorc's records were reset beside oneberth's, or a declaration changed
+    while the token was made. Such a token meets the manager's own refusal.
+    """
+    from oneberth.identity import (
+        CredentialKind,
+        Grant,
+        ServiceToken,
+        new_secret,
+        secret_hash,
+    )
+
+    secret = new_secret(CredentialKind.SERVICE_TOKEN)
+    access = composition.access
+    await access.store.add_service_token(
+        ServiceToken(
+            id=uuid.uuid4(),
+            name=f"kept-{role.value.removeprefix('neorc/')}-{uuid.uuid4().hex[:6]}",
+            grant=Grant(role.value, queue),
+            secret_hash=secret_hash(secret),
+            created_at=access.now(),
+        )
+    )
+    return secret
+
+
 @dataclass(frozen=True)
 class Tokens:
     """A token for each process of a deployment, of its role, as roles.md has it."""
@@ -298,7 +331,10 @@ def role_tokens_transport(
     role that may make it; see ``RoleTokens``.
 
     ``manager`` says which queue a task named by id is on; without it, a
-    worker's request about a task is sent with a token of ``default``.
+    worker's request about a task is sent with a token of ``default``. With
+    it, a request on a queue that oneberth would refuse a new token for is sent
+    with a token kept from before (``kept_service_token``), so that the request
+    meets the manager's own refusal.
     """
     import httpx
 
@@ -320,11 +356,24 @@ def role_tokens_transport(
             if (role, queue) not in self._tokens:
                 if role is Role.USER:
                     self._tokens[role, queue] = await person_token(composition)
+                elif queue is not None and await self._refused(role, queue):
+                    self._tokens[role, queue] = await kept_service_token(
+                        composition, role, queue
+                    )
                 else:
                     self._tokens[role, queue] = await service_token(
                         composition, role, queue
                     )
             return self._tokens[role, queue]
+
+        async def _refused(self, role: Role, queue: str) -> bool:
+            if manager is None:
+                return False
+            try:
+                await check_token_queue(role, queue, manager.queue_kind)
+            except InvalidValueError:
+                return True
+            return False
 
         async def _role_token(self, request: httpx.Request) -> str:
             path, method = request.url.path.removeprefix("/neorc"), request.method

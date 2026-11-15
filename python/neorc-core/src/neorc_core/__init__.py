@@ -5,7 +5,7 @@
 
 from importlib.metadata import PackageNotFoundError, version
 
-from neorc_core._declarations import QueueDeclarations
+from neorc_core._declarations import QueueDeclarations, check_token_queue
 from neorc_core._errors import (
     AccessError,
     AuthenticationError,
@@ -127,6 +127,7 @@ __all__ = [
     "UnsupportedMediaTypeError",
     "Worker",
     "__version__",
+    "check_token_queue",
     "ensure_completable",
     "ensure_transition",
 ]

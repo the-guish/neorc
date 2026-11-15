@@ -19,14 +19,20 @@ from typing import Any
 
 import httpx
 import pytest
-from conftest import PUBLIC_URL, composed, person_token, service_token
+from conftest import (
+    PUBLIC_URL,
+    composed,
+    identity_store,
+    person_token,
+    service_token,
+)
 from fastapi.routing import APIRoute
 from oneberth.identity import OPERATOR
 from oneberth.web import Composition, Permit
 from oneberth.web._component import PERMIT_MARK
 from starlette.routing import Route
 
-from neorc_core import Manager, Role
+from neorc_core import Manager, QueueKind, Role
 
 FLOW = {"name": "f", "version": "1.0.0", "steps": {"work": {"handler": "m:work"}}}
 JSON = {"content-type": "application/json"}
@@ -135,6 +141,58 @@ async def test_a_revoked_token_is_refused(
 
     response = await guarded.get("/runs", headers=bearer(revoked))
     assert (response.status_code, _error(response)) == (401, "Unauthorized")
+
+
+async def test_a_token_for_a_queue_it_cannot_serve_is_not_created(
+    manager: Manager,
+) -> None:
+    """An admin in the interface meets the check ``neorc tokens create`` meets."""
+    from oneberth.web import compose_app
+    from oneberth.web.testing import config_for, running, signed_in
+
+    from neorc.manager import new_manager_webapp
+
+    await manager.declare_queue("editors", QueueKind.EXTERNAL)
+    composition = compose_app(
+        [new_manager_webapp(manager=manager)],
+        config=config_for("neorc", public_url=PUBLIC_URL, admins=["ada"]),
+        store=await identity_store(),
+    )
+    async with running(composition) as client:
+        await signed_in(composition, client)
+
+        async def create(name: str, role: Role, queue: str) -> httpx.Response:
+            return await client.post(
+                "/auth/services",
+                json={"name": name, "role": role.value, "resource": queue},
+            )
+
+        undeclared = await create("w1", Role.WORKER, "typo")
+        unanswered = await create("r1", Role.RESPONDER, "typo")
+        external = await create("w2", Role.WORKER, "editors")
+        responder = await create("r2", Role.RESPONDER, "editors")
+        worker = await create("w3", Role.WORKER, "default")
+        listed = (await client.get("/auth/services")).json()["items"]
+
+    for refused in (undeclared, unanswered):
+        assert (refused.status_code, refused.json()) == (
+            422,
+            {
+                "error": "InvalidValue",
+                "detail": "queue 'typo' is not declared: declare it before a "
+                "token is bound to it",
+            },
+        )
+    assert (external.status_code, external.json()) == (
+        422,
+        {
+            "error": "InvalidValue",
+            "detail": "queue 'editors' is external: a worker token is bound to a "
+            "worker queue",
+        },
+    )
+    assert (responder.status_code, worker.status_code) == (201, 201)
+    assert sorted(item["name"] for item in listed) == ["r2", "w3"]
 
 
 async def test_the_token_is_checked_before_the_request_is_read(

@@ -15,6 +15,8 @@ guard: the manager refusing workers an external queue is what holds.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+
 from neorc_core._errors import InvalidValueError
 from neorc_core._queues import Queue, QueueKind
 from neorc_core._roles import QUEUE_ROLES, Role
@@ -61,20 +63,31 @@ class QueueDeclarations:
     async def check_token(self, role: str, queue: str | None) -> None:
         """Raise ``InvalidValueError`` unless ``role`` may be bound to ``queue``.
 
-        A worker or responder token is bound to a declared queue, and a worker
-        token to a worker queue. Any other role is bound to none, which
-        oneberth checks.
+        ``check_token_queue`` says the rule.
         """
-        if queue is None or role not in QUEUE_ROLES:
-            return
-        kind = await self._store.queue_kind(queue)
-        if kind is None:
-            raise InvalidValueError(
-                f"queue {queue!r} is not declared: declare it before a token is "
-                "bound to it"
-            )
-        if role == Role.WORKER and kind is QueueKind.EXTERNAL:
-            raise InvalidValueError(
-                f"queue {queue!r} is external: a worker token is bound to a worker "
-                "queue"
-            )
+        await check_token_queue(role, queue, self._store.queue_kind)
+
+
+async def check_token_queue(
+    role: str,
+    queue: str | None,
+    queue_kind: Callable[[str], Awaitable[QueueKind | None]],
+) -> None:
+    """Raise ``InvalidValueError`` unless ``role`` may be bound to ``queue``.
+
+    A worker or responder token is bound to a declared queue, and a worker
+    token to a worker queue. ``queue_kind`` gives a queue's kind, or ``None``
+    for a queue not declared. Any other role is bound to none, which oneberth
+    checks.
+    """
+    if queue is None or role not in QUEUE_ROLES:
+        return
+    kind = await queue_kind(queue)
+    if kind is None:
+        raise InvalidValueError(
+            f"queue {queue!r} is not declared: declare it before a token is bound to it"
+        )
+    if role == Role.WORKER and kind is QueueKind.EXTERNAL:
+        raise InvalidValueError(
+            f"queue {queue!r} is external: a worker token is bound to a worker queue"
+        )

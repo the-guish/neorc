@@ -22,7 +22,9 @@ one version, cut from a single tag on `main`.
   `neorc/worker`, `neorc/responder`, `neorc/scheduler`, `neorc/ci` and
   `neorc/external-trigger`, with permissions named `neorc/...`. `neorc-core`
   keeps them as plain data and imports nothing of oneberth; the rules between
-  a queue's kind and its tokens are `QueueDeclarations`. `neorc manager start`
+  a queue's kind and its tokens are `QueueDeclarations`, and oneberth runs
+  neorc's check of a token's queue for every service token it creates.
+  `neorc manager start`
   reads oneberth's TOML file, `--config` or `ONEBERTH_CONFIG`, or runs in
   oneberth's local mode with `--local`. `neorc tokens`, `sessions`, `devices`
   and `store` are oneberth's admin scripts, with neorc's roles and

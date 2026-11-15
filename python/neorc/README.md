@@ -38,9 +38,10 @@ work is:
 The manager is a component of [oneberth](https://github.com/the-guish/oneberth),
 which signs people in and keeps the tokens. A request needs a signed-in person
 or a token behind it. A token is sent only over HTTPS or to a loopback address.
-Its role must allow the request: `neorc/ci`, `neorc/scheduler`,
-`neorc/worker` or `neorc/responder` (bound to one queue), `neorc/user` or
-`neorc/external-trigger`. The manager's API is under `/neorc/` at its address.
+Its role must allow the request. A service token holds `neorc/ci`,
+`neorc/scheduler`, `neorc/worker` or `neorc/responder` (bound to one queue),
+or `neorc/external-trigger`. A person's own token holds `neorc/user`. The
+manager's API is under `/neorc/` at its address.
 
 A manager on one machine keeps its data in a SQLite file with `neorc manager
 start --database-file neorc.db`. The file is created at the first start, with

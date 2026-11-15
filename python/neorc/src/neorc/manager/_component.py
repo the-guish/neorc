@@ -5,9 +5,10 @@
 
 oneberth composes a backend from components (oneberth's
 ``docs/specs/composition.md``). This one holds the manager's routes, neorc's
-roles and what the manager starts and stops: its stores, its notifiers and, if
-asked, a scheduler. A backend serves it under ``/neorc/``, alone in standalone
-neorc or beside another application's component, as Robinauts composes it.
+roles, the check of a new service token's queue, and what the manager starts
+and stops: its stores, its notifiers and, if asked, a scheduler. A backend
+serves it under ``/neorc/``, alone in standalone neorc or beside another
+application's component, as Robinauts composes it.
 """
 
 from __future__ import annotations
@@ -23,9 +24,9 @@ from typing import Any
 from oneberth.web import Component, Context, Refusal
 
 from neorc._errors import STATUS_OF, error_body
-from neorc._roles import NEORC_ROLES
+from neorc._roles import NEORC_ROLES, service_token_check
 from neorc.manager import _routes
-from neorc_core import Manager, NeorcError, Scheduler
+from neorc_core import Manager, NeorcError, QueueKind, Scheduler
 from neorc_core.local import DirectManagerClient, MemoryTaskNotifier
 
 NAME = "neorc"
@@ -120,6 +121,9 @@ def manager_component(
     async def health() -> bool:
         return bool(running)
 
+    async def queue_kind(name: str) -> QueueKind | None:
+        return await current().queue_kind(name)
+
     return Component(
         name=NAME,
         roles=NEORC_ROLES,
@@ -129,6 +133,7 @@ def manager_component(
         errors=dict[type[Exception], int](STATUS_OF.items()),
         error_body=_error_body,
         title="neorc manager",
+        check_service_token=service_token_check(queue_kind),
     )
 
 

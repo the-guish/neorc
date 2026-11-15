@@ -83,7 +83,7 @@ Service tokens are oneberth's. The operator creates, lists and revokes them with
 
 A token's role is required. A queue is required for the worker and responder roles, as `--resource`, and refused for any other.
 
-The queue is declared before a token is bound to it, and a worker token is bound to a worker queue. `neorc tokens create` checks both. A token an admin creates in the UI skips that check, and the manager still serves no worker from an external queue.
+The queue is declared before a token is bound to it, and a worker token is bound to a worker queue. neorc gives oneberth this check, and oneberth runs it for every service token: from `neorc tokens create`, from an admin in the UI and from a launcher. The manager still serves no worker from an external queue.
 
 
 ## Not in scope

@@ -13,34 +13,23 @@ given ``neorc/worker``. ``NeorcConnector`` finds the deployment as the manager
 does: a PostgreSQL database, whose schema ``oneberth`` is oneberth's store, or
 a SQLite file, beside which ``oneberth.db`` is.
 
-A token bound to a queue is checked against the queue's declaration, as
-``QueueDeclarations`` says, before oneberth creates it.
+oneberth runs neorc's check of a new service token, ``service_token_check``,
+so a token bound to a queue names a declared queue of the right kind.
 """
 
 from __future__ import annotations
 
 import argparse
 import os
-import uuid
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
-from datetime import datetime, timedelta
 from pathlib import Path
 
 from oneberth.admin import Admin, ConnectError, StoreAdmin
-from oneberth.identity import (
-    DeviceSession,
-    Grant,
-    IdentityStore,
-    SchemaVersionError,
-    ServiceToken,
-    User,
-    check_schema,
-)
-from oneberth.identity import InvalidValueError as OneberthInvalidValueError
+from oneberth.identity import IdentityStore, SchemaVersionError, check_schema
 
-from neorc._roles import registry
-from neorc_core import InvalidValueError, QueueDeclarations, Store
+from neorc._roles import NEORC_ROLES, registry, service_token_check
+from neorc_core import Store
 from neorc_core.ports import TokenGrant, TokenGrants
 
 DATABASE_URL_ENV = "NEORC_DATABASE_URL"
@@ -57,61 +46,6 @@ class AdminTokenGrants(TokenGrants):
             TokenGrant(token.name, token.grant.role, token.grant.resource)
             for token in await self._admin.tokens()
         ]
-
-
-class NeorcAdmin:
-    """oneberth's ``Admin`` on the store, with neorc's check of a token's queue."""
-
-    def __init__(self, admin: Admin, declarations: QueueDeclarations) -> None:
-        self._admin = admin
-        self._declarations = declarations
-
-    def now(self) -> datetime:
-        return self._admin.now()
-
-    async def init_store(self) -> int:
-        return await self._admin.init_store()
-
-    async def create_token(
-        self,
-        name: str,
-        role: str,
-        *,
-        resource: str | None = None,
-        expires_in: timedelta | None = None,
-    ) -> tuple[str, ServiceToken]:
-        # oneberth's own check first, so a malformed grant is said to be that.
-        registry().check_grant(Grant(role, resource))
-        try:
-            await self._declarations.check_token(role, resource)
-        except InvalidValueError as exc:
-            raise OneberthInvalidValueError(str(exc)) from None
-        return await self._admin.create_token(
-            name, role, resource=resource, expires_in=expires_in
-        )
-
-    async def tokens(self) -> list[ServiceToken]:
-        return await self._admin.tokens()
-
-    async def revoke_token(self, name: str) -> ServiceToken:
-        return await self._admin.revoke_token(name)
-
-    async def clear_sessions(self) -> int:
-        return await self._admin.clear_sessions()
-
-    async def devices(self) -> list[tuple[User, DeviceSession]]:
-        return await self._admin.devices()
-
-    async def end_devices(
-        self,
-        *,
-        email: str | None = None,
-        device_id: uuid.UUID | None = None,
-        every: bool = False,
-    ) -> list[tuple[User | None, DeviceSession]]:
-        return await self._admin.end_devices(
-            email=email, device_id=device_id, every=every
-        )
 
 
 def add_database_options(parser: argparse.ArgumentParser) -> None:
@@ -209,5 +143,10 @@ class NeorcConnector:
     @asynccontextmanager
     async def open(self, args: argparse.Namespace) -> AsyncIterator[Admin]:
         async with opened_stores(args) as (identity, store):
-            admin = StoreAdmin(identity, registry())
-            yield NeorcAdmin(admin, QueueDeclarations(store, AdminTokenGrants(admin)))
+            yield StoreAdmin(
+                identity,
+                registry(),
+                service_token_checks={
+                    NEORC_ROLES.app: service_token_check(store.queue_kind)
+                },
+            )
