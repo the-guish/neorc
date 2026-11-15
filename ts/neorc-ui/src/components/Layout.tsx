@@ -29,8 +29,8 @@ export const QUEUE_KIND_KEY = "neorc-ui.queue-kind";
 
 /**
  * The shell: a sidebar with the brand, a way to a new run, the navigation
- * and who is signed in, collapsible to a rail of icons; the page beside it,
- * under a strip when authentication is off. Each entry of the navigation has
+ * and who is signed in, collapsible to a rail of icons; the page beside it.
+ * Each entry of the navigation has
  * its list below it, the latest runs, the flows and the queues, which its
  * arrow folds away.
  *
@@ -51,7 +51,7 @@ export function Layout({
   if (embedded) {
     return (
       <div className="shell shell-embedded">
-        <Content session={session}>{children}</Content>
+        <Content>{children}</Content>
       </div>
     );
   }
@@ -136,33 +136,21 @@ function WithSidebar({
         </nav>
         <Profile session={session} />
       </aside>
-      <Content session={session}>{children}</Content>
+      <Content>{children}</Content>
     </div>
   );
 }
 
-/** The page, under a strip when authentication is off. */
-function Content({
-  session,
-  children,
-}: {
-  session: Session;
-  children: ReactNode;
-}) {
+/** The page. */
+function Content({ children }: { children: ReactNode }) {
   return (
     <div className="content">
-      {!session.authentication && (
-        <p className="banner" role="note">
-          No authentication: anyone who reaches this manager can start and
-          cancel runs, and complete tasks. For development and testing only.
-        </p>
-      )}
       <main>{children}</main>
     </div>
   );
 }
 
-/** Who is signed in, and signing out; or that nobody need be. */
+/** Who is signed in, and signing out. */
 function Profile({ session }: { session: Session }) {
   const client = useQueryClient();
   const [leaving, setLeaving] = useState(false);
@@ -174,9 +162,7 @@ function Profile({ session }: { session: Session }) {
         <span className="avatar" aria-hidden="true" />
         <span className="label">
           <span>No account</span>
-          <span className="muted">
-            {session.authentication ? "Not signed in" : "No authentication"}
-          </span>
+          <span className="muted">Not signed in</span>
         </span>
       </div>
     );

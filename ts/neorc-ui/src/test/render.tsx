@@ -29,8 +29,11 @@ export function mockApi(routes: Record<string, Reply>) {
     async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       const url = new URL(input instanceof Request ? input.url : String(input));
       calls.push({ url, init });
-      const key = url.pathname + url.search;
-      const reply = key in routes ? routes[key] : routes[url.pathname];
+      // The manager's API is under /neorc/; a stand-in names its routes
+      // without it, as the manager's own router does.
+      const path = url.pathname.replace(/^\/neorc(?=\/)/, "");
+      const key = path + url.search;
+      const reply = key in routes ? routes[key] : routes[path];
       if (reply === undefined) {
         return Response.json(
           { error: "RouteNotFoundError", detail: `no stand-in for ${key}` },

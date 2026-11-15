@@ -3,22 +3,25 @@
 
 """The built UI in a real browser, against the whole deployment.
 
-A manager on uvicorn and Postgres serves the assets ``ts/neorc-ui`` built, with
-authentication on: a scheduler and workers run ``examples/wordplay`` over HTTP
-with a token, and Chromium, driven by Playwright, signs in through a stand-in
-OpenID provider, sees a flow's steps as a graph, starts a run from the form,
-watches it succeed, looks at it as a graph, cancels another, and signs out.
+Standalone neorc, composed by oneberth, on uvicorn and Postgres, serves the
+assets ``ts/neorc-ui`` built: a scheduler and workers run ``examples/wordplay``
+over HTTP with service tokens, and Chromium, driven by Playwright, signs in
+through oneberth's stand-in OpenID provider, sees a flow's steps as a graph,
+starts a run from the form, watches it succeed, looks at it as a graph,
+cancels another, and signs out.
 A second journey is a person's on ``examples/approval``: the queues, a queue's
 tasks, and the two answers its run waits for. A third is a person's on
 ``examples/review_loop``: a list of issues triaged on a queue's page, two
 rounds of it, and the run ending with the result.
 Skipped without a built UI or a browser: CI builds and installs both for one
 Python, and contributing/dev-environment.md says how to locally.
+``NEORC_TEST_CHROMIUM`` names a Chromium to launch instead of Playwright's own.
 """
 
 from __future__ import annotations
 
 import contextlib
+import os
 import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -28,7 +31,6 @@ from typing import TYPE_CHECKING
 import pytest
 from conftest import (
     EXAMPLES,
-    StandInProvider,
     Tokens,
     declare_queues,
     deployed_example,
@@ -36,6 +38,8 @@ from conftest import (
     role_tokens,
     serve_app,
 )
+from oneberth.web import Composition
+from oneberth.web.testing import StandInProvider, config_for
 
 from neorc.manager import build_app
 from neorc_core.flows import read_flows
@@ -67,6 +71,7 @@ class Deployed:
     address: str
     tokens: Tokens
     """What the scheduler, workers and uploads send; people sign in instead."""
+    app: Composition
 
 
 @contextlib.asynccontextmanager
@@ -81,52 +86,34 @@ async def _deployment(
 ) -> AsyncIterator[tuple[Deployed, ManagerClient]]:
     """The manager serving the built UI, an example uploaded, some queues served.
 
-    Authentication is on, as a deployment has it: people sign in with a
-    stand-in OpenID provider on a port of its own, and the scheduler and
-    workers send a token. ``queues`` are declared worker queues, with a worker
-    token each, and ``external`` external ones; ``served`` get a worker.
+    People sign in with oneberth's stand-in OpenID provider on a port of its
+    own, and the scheduler and workers send a service token. ``queues`` are
+    declared worker queues, with a worker token each, and ``external``
+    external ones; ``served`` get a worker.
     """
-    from neorc.auth import parse_auth_config
-    from neorc.postgres import PostgresCredentialStore, create_schema
-    from neorc_core import Access, QueueKind
+    from neorc.postgres import create_schema
+    from neorc_core import QueueKind
 
     monkeypatch.setattr("neorc_ui.STATIC", _built_ui())
     manager_port, provider_port = free_port(), free_port()
     stand_in = StandInProvider(f"http://127.0.0.1:{provider_port}")
-    config = parse_auth_config(
-        {
-            "public_url": f"http://127.0.0.1:{manager_port}",
-            "providers": {
-                "stand-in": {
-                    "title": "Stand-in",
-                    "issuer": stand_in.issuer,
-                    "client_id": stand_in.client_id,
-                    "client_secret_env": "STAND_IN_SECRET",
-                }
-            },
-            "allow": [{"provider": "stand-in", "email": "ada@example.com"}],
-        },
-        {"STAND_IN_SECRET": stand_in.client_secret},
+    config = config_for(
+        "neorc",
+        public_url=f"http://127.0.0.1:{manager_port}",
+        providers={stand_in.provider_id: stand_in.config},
     )
     await create_schema(pg_schema)
     await declare_queues(pg_schema, *queues)
     await declare_queues(pg_schema, *(external or []), kind=QueueKind.EXTERNAL)
-    async with PostgresCredentialStore(pg_schema) as credentials:
-        tokens = await role_tokens(Access(credentials), queues)
-    app = build_app(
-        pg_schema,
-        auth=True,
-        auth_config=config,
-        create_schema=True,
-        long_poll_timeout=2,
-    )
+    app = build_app(pg_schema, config=config, create_schema=True, long_poll_timeout=2)
     async with (
         serve_app(stand_in.app, port=provider_port),
         serve_app(app, port=manager_port) as address,
-        deployed_example(address, example, served, tokens=tokens) as client,
     ):
-        await client.upload_flows(read_flows(EXAMPLES / example / "flows"))
-        yield Deployed(address, tokens), client
+        tokens = await role_tokens(app, queues)
+        async with deployed_example(address, example, served, tokens=tokens) as client:
+            await client.upload_flows(read_flows(EXAMPLES / example / "flows"))
+            yield Deployed(address, tokens, app), client
 
 
 @pytest.fixture
@@ -195,7 +182,9 @@ async def browsing() -> AsyncIterator[tuple[Page, list[str]]]:
     playwright = pytest.importorskip("playwright.async_api")
     async with playwright.async_playwright() as driver:
         try:
-            browser = await driver.chromium.launch()
+            browser = await driver.chromium.launch(
+                executable_path=os.environ.get("NEORC_TEST_CHROMIUM") or None
+            )
         except playwright.Error as exc:  # no browser downloaded
             pytest.skip(f"no Chromium for Playwright: {str(exc).splitlines()[0]}")
         page = await browser.new_page()
@@ -323,13 +312,12 @@ async def test_a_run_is_started_watched_and_another_cancelled_in_the_browser(
     # Signing out ends the session: the pages give way to the sign-in again,
     # and the API refuses the cookie even sent again by hand, as a copy kept
     # elsewhere would be.
-    (session,) = [
-        c for c in await page.context.cookies() if c["name"] == "neorc_session"
-    ]
+    cookie = deployed.app.cookies.session
+    (session,) = [c for c in await page.context.cookies() if c["name"] == cookie]
     await page.get_by_role("button", name="Sign out").click()
     await expect(page.get_by_role("link", name="Sign in with Stand-in")).to_be_visible()
     refused = await page.request.get(
-        f"{ui_address}/runs", headers={"cookie": f"neorc_session={session['value']}"}
+        f"{ui_address}/neorc/runs", headers={"cookie": f"{cookie}={session['value']}"}
     )
     assert refused.status == 401
 

@@ -48,7 +48,7 @@ describe("RunsPage", () => {
     expect(screen.getByLabelText(/Flow/)).toHaveValue("hello");
     expect(screen.getByLabelText(/Status/)).toHaveValue("cancelled");
     expect(api.calls.map((call) => call.url.pathname + call.url.search)).toContain(
-      "/runs?flow=hello&status=cancelled&root_only=true&limit=50",
+      "/neorc/runs?flow=hello&status=cancelled&root_only=true&limit=50",
     );
 
     fireEvent.change(screen.getByLabelText(/Status/), { target: { value: "" } });

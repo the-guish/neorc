@@ -4,9 +4,9 @@ import { describe, expect, it } from "vitest";
 import {
   ACTIVE,
   HELLO,
-  OPEN,
   QUEUES,
   SIGNED_IN,
+  SIGNED_OUT,
   SUCCEEDED,
   WORD_PICKER,
 } from "../test/fixtures";
@@ -25,7 +25,7 @@ describe("Layout", () => {
     mockApi(routes());
 
     renderWithClient(
-      <Layout route={{ name: "run", id: ACTIVE.id }} session={OPEN}>
+      <Layout route={{ name: "run", id: ACTIVE.id }} session={SIGNED_OUT}>
         <p>the page</p>
       </Layout>,
     );
@@ -42,7 +42,7 @@ describe("Layout", () => {
       "href",
       "#/flows",
     );
-    expect(screen.getByRole("note")).toHaveTextContent("No authentication");
+    expect(screen.queryByRole("note")).not.toBeInTheDocument();
     expect(screen.getByText("the page")).toBeInTheDocument();
 
     const flows = await screen.findByRole("navigation", { name: "Flows" });
@@ -67,20 +67,20 @@ describe("Layout", () => {
 
     const profile = screen.getByLabelText("Profile");
     expect(profile).toHaveTextContent("No account");
+    expect(profile).toHaveTextContent("Not signed in");
     expect(within(profile).queryByRole("link")).not.toBeInTheDocument();
   });
 
-  it("embedded, draws the page and the strip with no sidebar of its own", () => {
+  it("embedded, draws the page with no sidebar of its own", () => {
     mockApi(routes());
 
     renderWithClient(
-      <Layout route={{ name: "runs" }} session={OPEN} embedded>
+      <Layout route={{ name: "runs" }} session={SIGNED_OUT} embedded>
         <p>the page</p>
       </Layout>,
     );
 
     expect(screen.getByText("the page")).toBeInTheDocument();
-    expect(screen.getByRole("note")).toHaveTextContent("No authentication");
     expect(
       screen.queryByRole("complementary", { name: "Sidebar" }),
     ).not.toBeInTheDocument();
@@ -98,7 +98,7 @@ describe("Layout", () => {
     mockApi(routes());
 
     const first = renderWithClient(
-      <Layout route={{ name: "flows" }} session={OPEN}>
+      <Layout route={{ name: "flows" }} session={SIGNED_OUT}>
         <p>the page</p>
       </Layout>,
     );
@@ -118,7 +118,7 @@ describe("Layout", () => {
     first.unmount();
 
     renderWithClient(
-      <Layout route={{ name: "flows" }} session={OPEN}>
+      <Layout route={{ name: "flows" }} session={SIGNED_OUT}>
         <p>the page</p>
       </Layout>,
     );
@@ -131,7 +131,7 @@ describe("Layout", () => {
     mockApi({});
 
     renderWithClient(
-      <Layout route={{ name: "runs" }} session={OPEN}>
+      <Layout route={{ name: "runs" }} session={SIGNED_OUT}>
         <p>the page</p>
       </Layout>,
     );
@@ -248,7 +248,7 @@ describe("Layout", () => {
     mockApi({ ...routes(), "/queues": { queues: QUEUES } });
 
     const view = renderWithClient(
-      <Layout route={{ name: "queue", queue: "editors" }} session={OPEN}>
+      <Layout route={{ name: "queue", queue: "editors" }} session={SIGNED_OUT}>
         <p>the page</p>
       </Layout>,
     );
@@ -283,7 +283,7 @@ describe("Layout", () => {
     // Kept for the next page load.
     view.unmount();
     renderWithClient(
-      <Layout route={{ name: "queues" }} session={OPEN}>
+      <Layout route={{ name: "queues" }} session={SIGNED_OUT}>
         <p>the page</p>
       </Layout>,
     );
@@ -298,7 +298,7 @@ describe("Layout", () => {
     mockApi({ ...routes(), "/queues": { queues: QUEUES } });
 
     const view = renderWithClient(
-      <Layout route={{ name: "runs" }} session={OPEN}>
+      <Layout route={{ name: "runs" }} session={SIGNED_OUT}>
         <p>the page</p>
       </Layout>,
     );
@@ -339,7 +339,7 @@ describe("Layout", () => {
     // Kept for the next page load, and unfolded again by the same arrow.
     view.unmount();
     renderWithClient(
-      <Layout route={{ name: "runs" }} session={OPEN}>
+      <Layout route={{ name: "runs" }} session={SIGNED_OUT}>
         <p>the page</p>
       </Layout>,
     );

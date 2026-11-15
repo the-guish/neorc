@@ -11,7 +11,6 @@ export type TaskStatus = Schemas["TaskStatus"];
 export type Address = Schemas["AddressResponse"];
 export type ApiEvent = Schemas["EventResponse"];
 export type ErrorBody = Schemas["ErrorResponse"];
-export type Session = Schemas["SessionResponse"];
 export type Queue = Schemas["QueueResponse"];
 export type QueueKind = Schemas["QueueKind"];
 export type QueueTask = Schemas["QueueTaskResponse"];
@@ -34,6 +33,30 @@ export const TASK_STATUSES: readonly TaskStatus[] = [
 
 export const QUEUE_KINDS: readonly QueueKind[] = ["worker", "external"];
 
+/** Who is signed in, and how one signs in, as the page shows it. */
+export interface Session {
+  /** Where a sign-in starts: this page's own origin. */
+  public_url: string | null;
+  providers: { id: string; title: string }[];
+  principal: {
+    kind: string;
+    name: string;
+    email: string | null;
+    provider: string | null;
+  } | null;
+}
+
+/** oneberth's answer to `GET /auth/session`. */
+export interface OneberthSession {
+  mode: string;
+  providers: { id: string; title: string }[];
+  principal:
+    | { kind: "user"; id: string; name: string; email: string | null; provider: string }
+    | { kind: "service"; id: string; name: string }
+    | null;
+  roles: string[];
+}
+
 /** A refusal: `error` names the manager's exception, `detail` says why. */
 export class ApiError extends Error {
   constructor(
@@ -46,15 +69,17 @@ export class ApiError extends Error {
 }
 
 /**
- * The API lives one level above the page: the manager serves the UI at /ui/
- * and its routes at /, and `npm run dev` serves the page at / and proxies
- * the routes. Hash routing keeps the page's path fixed either way.
+ * The backend serves the page at /ui/, the manager's API at /neorc/ and
+ * oneberth's sign-in at /auth/; `npm run dev` serves the page at / and
+ * proxies both. Hash routing keeps the page's path fixed either way. A path
+ * under /auth/ is oneberth's; any other is the manager's.
  */
 export function apiUrl(
   path: string,
   params: Record<string, string | number | boolean | undefined> = {},
 ): URL {
-  const url = new URL(path.replace(/^\//, ""), new URL("../", location.href));
+  const base = path.startsWith("/auth/") ? "../" : "../neorc/";
+  const url = new URL(path.replace(/^\//, ""), new URL(base, location.href));
   for (const [name, value] of Object.entries(params)) {
     if (value !== undefined) url.searchParams.set(name, String(value));
   }

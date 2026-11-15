@@ -3,15 +3,22 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { App } from "./App";
 import type { Session } from "./api";
-import { ACTIVE, HELLO, OPEN, SIGNED_IN, SIGNED_OUT } from "./test/fixtures";
+import { ACTIVE, answered, HELLO, SIGNED_IN, SIGNED_OUT } from "./test/fixtures";
 import { mockApi, neverAnswers, refusal, renderWithClient } from "./test/render";
 import { RETURN_KEY } from "./session";
 
 const OTHER = { ...ACTIVE, id: "0ddddddd-0000-4000-8000-000000000002", root_id: "0ddddddd-0000-4000-8000-000000000002" };
 
-function routes(session: Session | (() => unknown) = OPEN) {
+/** oneberth's answer for a session the page shows, or a refusal as it is. */
+function answer(value: unknown): unknown {
+  return typeof value === "object" && value !== null && "providers" in value
+    ? answered(value as Session)
+    : value;
+}
+
+function routes(session: Session | (() => unknown) = SIGNED_IN) {
   const shared: Record<string, unknown> = {
-    "/auth/session": session,
+    "/auth/session": typeof session === "function" ? () => answer(session()) : answer(session),
     "/events/latest": { sequence: 0 },
     "/events": () => neverAnswers(),
     "/flows": { flows: [HELLO] },
@@ -46,13 +53,12 @@ describe("App", () => {
     expect(screen.queryByRole("button", { name: "Cancel it" })).not.toBeInTheDocument();
   });
 
-  it("shows the banner with authentication off, and says where an unknown address leads", async () => {
+  it("says where an unknown address leads", async () => {
     mockApi(routes());
     location.hash = "#/nowhere";
 
     renderWithClient(<App />);
 
-    expect(await screen.findByRole("note")).toHaveTextContent("No authentication");
     expect(await screen.findByRole("alert")).toHaveTextContent("Nothing at #/nowhere");
   });
 
@@ -63,10 +69,10 @@ describe("App", () => {
     renderWithClient(<App />);
 
     const google = await screen.findByRole("link", { name: "Sign in with Google" });
-    expect(google).toHaveAttribute("href", "https://neorc.example.com/auth/login/google");
+    expect(google).toHaveAttribute("href", `${location.origin}/auth/login/google`);
     expect(screen.getByRole("link", { name: "Sign in with Okta" })).toHaveAttribute(
       "href",
-      "https://neorc.example.com/auth/login/okta",
+      `${location.origin}/auth/login/okta`,
     );
     expect(screen.queryByRole("navigation", { name: "Main" })).not.toBeInTheDocument();
     expect(screen.queryByRole("note")).not.toBeInTheDocument();
@@ -98,13 +104,15 @@ describe("App", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Signing in failed");
   });
 
-  it("names the fix when authentication is on and nobody can sign in", async () => {
-    mockApi(routes({ ...SIGNED_OUT, public_url: null, providers: [] }));
+  it("names the fix when nobody can sign in", async () => {
+    mockApi(routes({ ...SIGNED_OUT, providers: [] }));
     location.hash = "#/runs";
 
     renderWithClient(<App />);
 
-    expect(await screen.findByText(/not configured/)).toHaveTextContent("--auth-config");
+    expect(await screen.findByText(/not configured/)).toHaveTextContent(
+      "sign-in configuration",
+    );
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
   });
 
@@ -187,7 +195,7 @@ describe("App", () => {
     let failing = true;
     mockApi(
       routes(() =>
-        failing ? refusal(503, "ManagerUnavailableError", "the manager is restarting") : OPEN,
+        failing ? refusal(503, "ManagerUnavailableError", "the manager is restarting") : SIGNED_IN,
       ),
     );
     location.hash = "#/runs";
@@ -199,7 +207,7 @@ describe("App", () => {
     failing = false;
     fireEvent.click(again);
 
-    expect(await screen.findByRole("note")).toHaveTextContent("No authentication");
+    expect(await screen.findByLabelText("Profile")).toHaveTextContent("Ada Lovelace");
   });
 
   it("asks for the session once however many calls are refused, and not again for its own refusal", async () => {

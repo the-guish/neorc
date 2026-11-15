@@ -4,8 +4,9 @@
 """The committed OpenAPI snapshot is the application's schema.
 
 The UI generates its types from ``ts/neorc-ui/openapi.json`` without running
-Python, so the file must be what ``create_app`` would produce today. When this
-fails, run ``uv run python scripts/export_openapi.py`` and commit the result.
+Python, so the file must be the document oneberth writes for the ``neorc``
+component today. When this fails, run ``uv run python scripts/export_openapi.py``
+and commit the result.
 """
 
 from __future__ import annotations
@@ -39,7 +40,10 @@ def test_the_openapi_snapshot_matches_the_application() -> None:
 
 
 def test_every_route_the_ui_reads_is_in_the_schema() -> None:
-    """The listings this plan adds, by path and method, so a rename shows here."""
+    """The listings the UI reads, by path and method, so a rename shows here.
+
+    The manager's API is under ``/neorc/``, in standalone neorc and composed.
+    """
     import json
 
     paths = json.loads(_script().openapi_text())["paths"]
@@ -60,7 +64,7 @@ def test_every_route_the_ui_reads_is_in_the_schema() -> None:
         ("/tasks/{task_id}/inputs", "get"),
         ("/tasks/{task_id}/complete", "post"),
     ]:
-        assert method in paths[path], f"{method.upper()} {path}"
+        assert method in paths[f"/neorc{path}"], f"{method.upper()} /neorc{path}"
 
 
 def test_every_refusal_is_documented_with_the_body_the_manager_sends() -> None:
@@ -73,8 +77,7 @@ def test_every_refusal_is_documented_with_the_body_the_manager_sends() -> None:
     error = schema["components"]["schemas"]["ErrorResponse"]["properties"]
     assert set(error) == {"error", "detail", "problems"}
     for path, methods in schema["paths"].items():
-        if path == "/health" or path.startswith("/auth/"):
-            continue  # no body, no parameter, nothing there to refuse
+        assert path.startswith("/neorc/"), path
         for operation in methods.values():
             for code in ("404", "409", "413", "422"):
                 body = operation["responses"][code]["content"]["application/json"]

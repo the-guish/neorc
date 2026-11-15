@@ -30,9 +30,8 @@ export function SignIn({ session, error }: { session: Session; error?: string })
       {message !== undefined && <p role="alert">{message}</p>}
       {publicUrl === null || providers.length === 0 ? (
         <p>
-          Signing in to this manager is not configured: whoever runs it starts it with{" "}
-          <code>--auth-config</code> naming an identity provider. Until then it takes API
-          tokens alone.
+          Signing in to this manager is not configured: whoever runs it names an identity
+          provider in its sign-in configuration. Until then it takes tokens alone.
         </p>
       ) : (
         <ul className="providers">

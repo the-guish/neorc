@@ -4,6 +4,7 @@ import type {
   ApiEvent,
   Delivery,
   Flow,
+  OneberthSession,
   Queue,
   QueueTask,
   Run,
@@ -13,18 +14,9 @@ import type {
 import reviewForm from "../forms/review_draft.form.json";
 import triageForm from "../forms/triage.form.json";
 
-/** A manager started with --no-auth. */
-export const OPEN: Session = {
-  authentication: false,
-  public_url: null,
-  providers: [],
-  principal: null,
-};
-
-/** A manager with sign-in, and nobody signed in. */
+/** A backend with sign-in, and nobody signed in, as the page shows it. */
 export const SIGNED_OUT: Session = {
-  authentication: true,
-  public_url: "https://neorc.example.com",
+  public_url: location.origin,
   providers: [
     { id: "google", title: "Google" },
     { id: "okta", title: "Okta" },
@@ -35,12 +27,32 @@ export const SIGNED_OUT: Session = {
 export const SIGNED_IN: Session = {
   ...SIGNED_OUT,
   principal: {
-    kind: "session",
+    kind: "user",
     name: "Ada Lovelace",
     email: "ada@example.com",
     provider: "google",
   },
 };
+
+/** What oneberth's `GET /auth/session` answers for a session the page shows. */
+export function answered(session: Session): OneberthSession {
+  const principal = session.principal;
+  return {
+    mode: "providers",
+    providers: session.providers,
+    principal:
+      principal === null
+        ? null
+        : {
+            kind: "user",
+            id: "0ddddddd-0000-4000-8000-00000000000a",
+            name: principal.name,
+            email: principal.email,
+            provider: principal.provider ?? "google",
+          },
+    roles: principal === null ? [] : ["neorc/user"],
+  };
+}
 
 export const WORD_PICKER: Flow = {
   name: "word_picker",

@@ -77,12 +77,10 @@ export default defineConfig({
     testTimeout: 20_000,
   },
   server: {
-    // `npm run dev` against a local `neorc manager start`. The pattern is
-    // matched against the URL with its query string, so `/runs?flow=a` and
-    // `/runs/<id>` both reach the manager.
+    // `npm run dev` against a local `neorc manager start`: the manager's API
+    // under /neorc/, and oneberth's sign-in under /auth/.
     proxy: {
-      "^/(flows|runs|tasks|events|queues|health|auth)([/?].*)?$":
-        "http://127.0.0.1:8420",
+      "^/(neorc|auth|health)([/?].*)?$": "http://127.0.0.1:8420",
     },
   },
   build: {

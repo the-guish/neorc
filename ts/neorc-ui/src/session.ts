@@ -2,28 +2,54 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 
-import { getJson, onUnauthorized, postJson, type Session } from "./api";
+import {
+  getJson,
+  onUnauthorized,
+  postJson,
+  type OneberthSession,
+  type Session,
+} from "./api";
 
 export const SESSION_KEY = ["session"] as const;
 
 /** Where the hash the reader was on is kept while they sign in. */
 export const RETURN_KEY = "neorc-ui.return-to";
 
+/** oneberth's session, as the page shows it: sign-in starts on this origin. */
+export function sessionOf(answer: OneberthSession): Session {
+  const principal = answer.principal;
+  return {
+    public_url: location.origin,
+    providers: answer.providers,
+    principal:
+      principal === null
+        ? null
+        : principal.kind === "user"
+          ? {
+              kind: "user",
+              name: principal.name,
+              email: principal.email,
+              provider: principal.provider,
+            }
+          : { kind: "service", name: principal.name, email: null, provider: null },
+  };
+}
+
 export function useSession() {
   return useQuery({
     queryKey: SESSION_KEY,
-    queryFn: () => getJson<Session>("/auth/session"),
+    queryFn: async () => sessionOf(await getJson<OneberthSession>("/auth/session")),
     // Asked again when a call answers 401, not on a timer.
     staleTime: Infinity,
   });
 }
 
 /**
- * Whether the pages may be shown: authentication is off, or someone is
- * signed in. A session that has ended shows the sign-in page instead.
+ * Whether the pages may be shown: someone is signed in. A session that has
+ * ended shows the sign-in page instead.
  */
 export function mayBrowse(session: Session): boolean {
-  return !session.authentication || session.principal !== null;
+  return session.principal !== null;
 }
 
 /**

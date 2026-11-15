@@ -18,7 +18,7 @@ function routes(tasks = [listed(TITLE), listed(REVIEW)]) {
 
 function asked(api: ReturnType<typeof mockApi>): URLSearchParams[] {
   return api.calls
-    .filter((call) => call.url.pathname === RECENT)
+    .filter((call) => call.url.pathname === `/neorc${RECENT}`)
     .map((call) => call.url.searchParams);
 }
 

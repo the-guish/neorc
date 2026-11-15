@@ -14,7 +14,7 @@ import {
   useRunTasks,
   useSubRuns,
 } from "./queries";
-import { ACTIVE, SUCCEEDED, event } from "./test/fixtures";
+import { ACTIVE, SIGNED_IN, SUCCEEDED, event } from "./test/fixtures";
 import { mockApi, neverAnswers, refusal } from "./test/render";
 
 function pages(...pages: ApiEvent[][]) {
@@ -26,9 +26,10 @@ function pages(...pages: ApiEvent[][]) {
   };
 }
 
+/** The calls made, by their path below /neorc/, where the manager's API is. */
 function asked(api: ReturnType<typeof mockApi>) {
   return api.calls.map((call) => ({
-    path: call.url.pathname,
+    path: call.url.pathname.replace(/^\/neorc/, ""),
     ...Object.fromEntries(call.url.searchParams),
   }));
 }
@@ -167,9 +168,9 @@ describe("useLiveEvents, after a refusal", () => {
   it("leaves the session out of what it refetches when it starts", async () => {
     mockApi({ "/events/latest": { sequence: 1 }, "/events": () => neverAnswers() });
     const client = new QueryClient();
-    const session = vi.fn(async () => ({ authentication: false }));
+    const session = vi.fn(async () => SIGNED_IN);
     const runs = vi.fn(async () => ({ runs: [] }));
-    client.setQueryData(["session"], { authentication: false });
+    client.setQueryData(["session"], SIGNED_IN);
     client.setQueryData(["runs", {}], { runs: [] });
     new QueryObserver(client, {
       queryKey: ["session"],
@@ -296,7 +297,7 @@ describe("an active run's page", () => {
     await vi.waitFor(() => expect(api.calls.length).toBeGreaterThanOrEqual(6));
     const paths = new Set(api.calls.map((call) => call.url.pathname));
     expect(paths).toEqual(
-      new Set([`/runs/${ACTIVE.id}/tasks`, `/runs/${ACTIVE.id}/sub-runs`]),
+      new Set([`/neorc/runs/${ACTIVE.id}/tasks`, `/neorc/runs/${ACTIVE.id}/sub-runs`]),
     );
   });
 

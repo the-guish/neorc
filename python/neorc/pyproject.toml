@@ -27,16 +27,19 @@ classifiers = [
 ]
 dependencies = [
     "neorc-core",
+    "oneberth",
 ]
 
 # Nothing is installed by default: a host installs the extras for the role it
 # plays. See docs/specs/core.md.
 [project.optional-dependencies]
 http = ["httpx>=0.28"]
-# The manager serves the UI, so its extra brings the built assets too; and it
-# signs people in with OpenID Connect providers, which it reaches with httpx.
-manager = ["fastapi>=0.120", "uvicorn>=0.38", "neorc-ui", "httpx>=0.28"]
-postgres = ["asyncpg>=0.32.0"]
+# The manager is a oneberth component: FastAPI, Starlette and uvicorn come
+# through oneberth's web extra, with sign-in, sessions and tokens. It serves
+# the UI, so its extra brings the built assets too.
+manager = ["oneberth[web]", "neorc-ui"]
+# oneberth's store sits beside neorc's tables in the same database.
+postgres = ["asyncpg>=0.32.0", "oneberth[postgres]"]
 
 [project.scripts]
 neorc = "neorc._cli:main"

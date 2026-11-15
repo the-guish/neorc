@@ -4,8 +4,9 @@
 """The manager service on a SQLite file: one process, notified in memory.
 
 A flow runs from start to finish on uvicorn, the HTTP clients and the file,
-with a scheduler and a worker per queue, as it does on Postgres. The manager
-started again on the same file finds what the first one left.
+with a scheduler and a worker per queue, as it does on Postgres. oneberth's
+store is ``oneberth.db`` beside the file, opened by the same process: the
+manager started again finds what the first one left, the tokens included.
 """
 
 from __future__ import annotations
@@ -17,7 +18,16 @@ from pathlib import Path
 
 import httpx
 import pytest
-from conftest import EXAMPLES, deployed_example, serve_app
+from conftest import (
+    EXAMPLES,
+    PUBLIC_URL,
+    deployed_example,
+    free_port,
+    role_tokens,
+    role_tokens_transport,
+    serve_app,
+)
+from oneberth.web.testing import config_for
 
 from neorc.http import HttpManagerClient, HttpQueueClient
 from neorc.manager import build_app
@@ -54,25 +64,33 @@ def stand_in_ui(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 async def test_a_flow_runs_to_its_end_on_a_sqlite_file(tmp_path: Path) -> None:
     path = tmp_path / "neorc.db"
     await _declare(path, "default", "scoring")
-    app = build_app(database_file=path, auth=False, long_poll_timeout=2)
+    port = free_port()
+    config = config_for("neorc", public_url=f"http://127.0.0.1:{port}")
+    app = build_app(database_file=path, config=config, long_poll_timeout=2)
 
-    async with serve_app(app) as address:
+    async with serve_app(app, port=port) as address:
+        tokens = await role_tokens(app, ["default", "scoring"])
         async with deployed_example(
-            address, "wordplay", ["default", "scoring"]
+            address, "wordplay", ["default", "scoring"], tokens=tokens
         ) as client:
             await examples.word_picker_rounds(client, EXAMPLES)
-        async with httpx.AsyncClient(base_url=address) as http:
+        async with httpx.AsyncClient(
+            base_url=address, headers={"authorization": f"Bearer {tokens.user}"}
+        ) as http:
             page = await http.get("/ui/")
-            (finished,) = (await http.get("/runs")).json()["runs"]
+            (finished,) = (await http.get("/neorc/runs")).json()["runs"]
 
     assert page.status_code == 200 and "stand-in" in page.text
     assert finished["status"] == "succeeded"
+    assert (tmp_path / "oneberth.db").is_file()
 
-    again = build_app(database_file=path, auth=False, ui=False)
-    async with again.router.lifespan_context(again):
+    again = build_app(database_file=path, config=config, ui=False)
+    async with again.lifespan():
         transport = httpx.ASGITransport(app=again)
         async with httpx.AsyncClient(
-            transport=transport, base_url="http://manager.test"
+            transport=transport,
+            base_url=f"{PUBLIC_URL}/neorc",
+            headers={"authorization": f"Bearer {tokens.scheduler}"},
         ) as http:
             runs = (await http.get("/runs")).json()["runs"]
             flows = (await http.get("/flows")).json()["flows"]
@@ -90,15 +108,17 @@ async def clients(
 ) -> AsyncIterator[tuple[HttpManagerClient, HttpQueueClient]]:
     path = tmp_path / "neorc.db"
     await _declare(path, "default")
-    app = build_app(database_file=path, auth=False, long_poll_timeout=5, ui=False)
+    app = build_app(
+        database_file=path, config=config_for("neorc"), long_poll_timeout=5, ui=False
+    )
     async with AsyncExitStack() as stack:
-        await stack.enter_async_context(app.router.lifespan_context(app))
-        transport = httpx.ASGITransport(app=app)
+        await stack.enter_async_context(app.lifespan())
+        transport = role_tokens_transport(app)
         manager = await stack.enter_async_context(
-            HttpManagerClient("manager.test", transport=transport)
+            HttpManagerClient(PUBLIC_URL, transport=transport)
         )
         queue = await stack.enter_async_context(
-            HttpQueueClient("manager.test", transport=transport)
+            HttpQueueClient(PUBLIC_URL, transport=transport)
         )
         yield manager, queue
 
@@ -125,11 +145,14 @@ async def test_a_published_task_wakes_a_waiting_worker_in_memory(
     assert loop.time() - begun < 3
 
 
-async def test_a_manager_on_a_sqlite_file_asks_for_no_token(tmp_path: Path) -> None:
+async def test_a_manager_keeps_its_data_in_one_database(tmp_path: Path) -> None:
     path = tmp_path / "neorc.db"
 
-    with pytest.raises(RuntimeError, match=r"keeps no credentials.*--no-auth"):
-        build_app(database_file=path, auth=True, ui=False)
     with pytest.raises(ValueError, match="a file or a URL"):
-        build_app("postgresql:///neorc", database_file=path, auth=False, ui=False)
+        build_app(
+            "postgresql:///neorc",
+            database_file=path,
+            config=config_for("neorc"),
+            ui=False,
+        )
     assert not path.exists()

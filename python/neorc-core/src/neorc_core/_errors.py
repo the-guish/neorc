@@ -65,15 +65,11 @@ class AccessError(NeorcError):
 
 
 class AuthenticationError(AccessError):
-    """A request carries no identity, or one that is not accepted."""
+    """A request carries no credential, or one that is not accepted."""
 
 
 class PermissionDeniedError(AccessError):
-    """Whoever sent a request is known, and their role may not do what it asks."""
-
-
-class SignInRefusedError(NeorcError):
-    """An identity provider vouched for a person whom no allow entry lets in."""
+    """Whoever sent a request is known, and their roles may not do what it asks."""
 
 
 class CrossSiteRequestError(NeorcError):

@@ -169,29 +169,6 @@ class HeartbeatResponse(_Exact):
     lease_expires_at: str
 
 
-class ProviderResponse(_Exact):
-    id: str
-    title: str
-
-
-class PrincipalResponse(_Exact):
-    kind: str
-    name: str
-    email: str | None
-    """A verified address, if the provider gave one."""
-    provider: str | None
-
-
-class SessionResponse(_Exact):
-    authentication: bool
-    """Whether the manager asks who is calling; with ``False``, anyone may."""
-    public_url: str | None
-    """Where to sign in, when sign-in is configured."""
-    providers: list[ProviderResponse]
-    principal: PrincipalResponse | None
-    """Who the session cookie sent with the request belongs to, if anyone."""
-
-
 def documented(
     model: type[BaseModel], status_code: int = 200
 ) -> dict[int | str, dict[str, Any]]:

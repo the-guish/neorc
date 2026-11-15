@@ -4,15 +4,16 @@
 """The ports neorc-core defines. Adapters live in the packages that depend on it."""
 
 from neorc_core.ports._clients import ManagerClient, QueueClient
-from neorc_core.ports._credentials import CredentialStore
 from neorc_core.ports._store import Store
 from neorc_core.ports._task_notifier import Subscription, TaskNotifier
+from neorc_core.ports._token_grants import TokenGrant, TokenGrants
 
 __all__ = [
-    "CredentialStore",
     "ManagerClient",
     "QueueClient",
     "Store",
     "Subscription",
     "TaskNotifier",
+    "TokenGrant",
+    "TokenGrants",
 ]

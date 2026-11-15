@@ -6,9 +6,12 @@
 Importing this package pulls in no optional dependency. The adapters live in
 subpackages that match the extras that install them: ``neorc.http``,
 ``neorc.manager`` and ``neorc.postgres``. ``neorc.sqlite`` needs no extra.
+``new_manager_webapp``, the manager as a oneberth component, is imported from
+``neorc.manager`` when it is first asked for.
 """
 
 from importlib.metadata import PackageNotFoundError, version
+from typing import TYPE_CHECKING, Any
 
 from neorc_core import Scheduler, TaskId, TaskStatus, Worker
 
@@ -17,10 +20,23 @@ try:
 except PackageNotFoundError:  # a source checkout on sys.path, not installed
     __version__ = "0+unknown"
 
+if TYPE_CHECKING:
+    from neorc.manager import new_manager_webapp
+
+
+def __getattr__(name: str) -> Any:
+    if name == "new_manager_webapp":
+        from neorc.manager import new_manager_webapp
+
+        return new_manager_webapp
+    raise AttributeError(f"module 'neorc' has no attribute {name!r}")
+
+
 __all__ = [
     "Scheduler",
     "TaskId",
     "TaskStatus",
     "Worker",
     "__version__",
+    "new_manager_webapp",
 ]

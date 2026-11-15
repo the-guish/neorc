@@ -13,7 +13,7 @@ from urllib.parse import unquote, urlsplit
 
 import pytest
 
-from neorc.postgres import PostgresCredentialStore, PostgresTaskNotifier
+from neorc.postgres import PostgresStore, PostgresTaskNotifier
 from neorc.postgres._driver import _parse_conninfo, connect_arguments
 
 
@@ -108,7 +108,7 @@ async def test_the_stores_open_on_a_key_value_string(pg_schema: str) -> None:
         pytest.skip("needs a plain postgresql:// URL to rewrite")
     conninfo = _as_key_value(pg_schema)
 
-    async with PostgresCredentialStore(conninfo) as credentials:
-        assert await credentials.tokens() == []
+    async with PostgresStore(conninfo) as store:
+        assert await store.latest_flows() == []
     async with PostgresTaskNotifier(conninfo) as notifier:
         await notifier.notify()

@@ -15,24 +15,33 @@ The models check the shape of the envelope alone; values inside it are checked
 by core, so a request the in-memory manager accepts is not refused by HTTP
 first, and one it refuses is refused the same way.
 
-Every route declares the one permission it needs, with ``permit``; a test
-walks the routes to hold that. No route declares a body parameter: FastAPI
-would read that body before the router's guard in ``_access.py`` runs, and a
-request with no token, or a cross-site write, must be refused before its body
-is read.
+Every route declares the one permission it needs, with oneberth's ``permit``,
+and ``compose_app`` refuses a route without one. A queue permission names the
+``{queue}`` in its path as its resource. oneberth's gate finds who is asking
+and checks the permission before the route reads its body. A worker's request
+about a task names no queue: the route reads the queue the worker is bound to
+from its grant, and the manager answers as if a task on another queue did not
+exist.
+
+The router is shared; each component includes it with a dependency that gives
+the routes that component's manager (``_component.py``).
 """
 
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Any, TypeVar
 
 from fastapi import APIRouter, Depends, Query, Request, Response, status
 from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
+from oneberth.identity import Principal
+from oneberth.web import permit
 from pydantic import BaseModel, ValidationError
 
-from neorc.manager._access import bound_queue, permit
 from neorc.manager._schemas import (
     DeliveryResponse,
     EventListResponse,
@@ -58,7 +67,6 @@ from neorc_core import (
     Manager,
     PayloadTooLargeError,
     Permission,
-    Principal,
     RunId,
     RunStatus,
     TaskId,
@@ -81,10 +89,58 @@ MAX_PAGE = 500
 """The most runs, or tasks of a queue, one page of a listing may ask for."""
 
 
+STATE_KEY = "neorc"
+"""Where a component's dependency leaves its ``ManagerState`` in a request."""
+
+
+@dataclass(frozen=True)
+class ManagerState:
+    """What the routes read of the component that serves them."""
+
+    manager: Callable[[], Manager]
+    """The running manager; a 503 before it starts."""
+    long_poll_timeout: float
+
+
+def _state(request: Request) -> ManagerState:
+    state: ManagerState = getattr(request.state, STATE_KEY)
+    return state
+
+
+def routes_for(state: ManagerState) -> APIRouter:
+    """The routes, served for one component: each gives its handler ``state``.
+
+    The routes are copied, each with a dependency that leaves ``state`` in the
+    request before its handler's own dependencies run.
+    """
+
+    def serving(request: Request) -> None:
+        setattr(request.state, STATE_KEY, state)
+
+    served = APIRouter()
+    for route in router.routes:
+        assert isinstance(route, APIRoute)
+        served.add_api_route(
+            route.path,
+            route.endpoint,
+            methods=sorted(route.methods or ()),
+            dependencies=[Depends(serving), *route.dependencies],
+            response_model=route.response_model,
+            status_code=route.status_code,
+            responses=route.responses,
+            summary=route.summary,
+            description=route.description,
+            name=route.name,
+            operation_id=route.operation_id,
+            response_class=route.response_class,
+            include_in_schema=route.include_in_schema,
+        )
+    return served
+
+
 def _get_manager(request: Request) -> Manager:
-    """The manager this application was built around."""
-    manager: Manager = request.app.state.manager
-    return manager
+    """The manager of the component this route is served for."""
+    return _state(request).manager()
 
 
 Managed = Annotated[Manager, Depends(_get_manager)]
@@ -185,6 +241,19 @@ router = APIRouter(
         status.HTTP_422_UNPROCESSABLE_CONTENT: _ERROR,
     }
 )
+
+
+def _bound(
+    request: Request, principal: Principal, permission: Permission
+) -> str | None:
+    """The queue a worker's or responder's request is confined to: its grant's.
+
+    ``None`` for a principal that holds ``permission`` on every queue, such as
+    a person completing a task.
+    """
+    access = request.app.state.oneberth.access
+    queue: str | None = access.bound_resource(principal, permission)
+    return queue
 
 
 def _flow_response(flow: Any) -> dict[str, Any]:
@@ -381,7 +450,7 @@ def _waited(request: Request, timeout: float | None) -> float:
     The deadline stays under the idle timeout of any proxy in front of the
     service; a caller that hits it simply asks again.
     """
-    limit: float = request.app.state.long_poll_timeout
+    limit = _state(request).long_poll_timeout
     return limit if timeout is None else min(timeout, limit)
 
 
@@ -492,7 +561,7 @@ class FinishedRequest(BaseModel):
 
 @router.get(
     "/queues/{queue}/tasks",
-    dependencies=[permit(Permission.QUEUE_DEFINITIONS)],
+    dependencies=[permit(Permission.QUEUE_DEFINITIONS, "queue")],
     response_model=None,
     responses=documented(TaskDefinitionsResponse),
 )
@@ -506,7 +575,7 @@ async def task_definitions(
 
 @router.post(
     "/queues/{queue}/tasks/receive",
-    dependencies=[permit(Permission.QUEUE_RECEIVE)],
+    dependencies=[permit(Permission.QUEUE_RECEIVE, "queue")],
     responses={
         **documented(DeliveryResponse),
         status.HTTP_204_NO_CONTENT: {"description": "The wait ended with no task"},
@@ -546,12 +615,15 @@ async def get_task(manager: Managed, task_id: TaskId) -> dict[str, Any]:
 
 @router.post("/tasks/{task_id}/claim", status_code=status.HTTP_204_NO_CONTENT)
 async def claim_task(
+    request: Request,
     manager: Managed,
     task_id: TaskId,
-    principal: Annotated[Principal | None, permit(Permission.TASKS_CLAIM)],
+    principal: Annotated[Principal, permit(Permission.TASKS_CLAIM)],
 ) -> Response:
     """A worker claims a task it received; 409 if its run is no longer active."""
-    await manager.claim_task(task_id, queue=bound_queue(principal))
+    await manager.claim_task(
+        task_id, queue=_bound(request, principal, Permission.TASKS_CLAIM)
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -564,12 +636,14 @@ async def extend_lease(
     request: Request,
     manager: Managed,
     task_id: TaskId,
-    principal: Annotated[Principal | None, permit(Permission.TASKS_HEARTBEAT)],
+    principal: Annotated[Principal, permit(Permission.TASKS_HEARTBEAT)],
 ) -> dict[str, str]:
     """A worker keeping the task it holds; when its lease now lapses."""
     body = await read_body(request, HeartbeatRequest)
     expires_at = await manager.extend_lease(
-        task_id, lease_seconds=body.lease_seconds, queue=bound_queue(principal)
+        task_id,
+        lease_seconds=body.lease_seconds,
+        queue=_bound(request, principal, Permission.TASKS_HEARTBEAT),
     )
     return {"lease_expires_at": expires_at.isoformat()}
 
@@ -579,12 +653,15 @@ async def report_finished(
     request: Request,
     manager: Managed,
     task_id: TaskId,
-    principal: Annotated[Principal | None, permit(Permission.TASKS_FINISH)],
+    principal: Annotated[Principal, permit(Permission.TASKS_FINISH)],
 ) -> Response:
     """A worker's result in its JSON form, or its failure."""
     body = await read_body(request, FinishedRequest)
     await manager.report_finished(
-        task_id, result=body.result, error=body.error, queue=bound_queue(principal)
+        task_id,
+        result=body.result,
+        error=body.error,
+        queue=_bound(request, principal, Permission.TASKS_FINISH),
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -600,7 +677,7 @@ class CompleteRequest(BaseModel):
 
 @router.get(
     "/queues/{queue}/tasks/pending",
-    dependencies=[permit(Permission.QUEUE_PENDING)],
+    dependencies=[permit(Permission.QUEUE_PENDING, "queue")],
     response_model=None,
     responses=documented(PendingTasksResponse),
 )
@@ -619,12 +696,15 @@ async def complete_task(
     request: Request,
     manager: Managed,
     task_id: TaskId,
-    principal: Annotated[Principal | None, permit(Permission.TASKS_COMPLETE)],
+    principal: Annotated[Principal, permit(Permission.TASKS_COMPLETE)],
 ) -> Response:
     """End a pending task with a result, or an error; 409 unless it is pending."""
     body = await read_body(request, CompleteRequest)
     await manager.complete_task(
-        task_id, result=body.result, error=body.error, queue=bound_queue(principal)
+        task_id,
+        result=body.result,
+        error=body.error,
+        queue=_bound(request, principal, Permission.TASKS_COMPLETE),
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

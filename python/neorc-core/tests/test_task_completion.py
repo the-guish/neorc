@@ -16,13 +16,13 @@ from textwrap import dedent
 import pytest
 
 from neorc_core import (
-    Access,
     EventKind,
     InvalidValueError,
     Manager,
     PayloadTooLargeError,
     PermissionDeniedError,
     Queue,
+    QueueDeclarations,
     QueueKind,
     Role,
     RunStateError,
@@ -30,6 +30,7 @@ from neorc_core import (
     TaskNotFoundError,
     TaskStateError,
     TaskStatus,
+    TokenGrant,
     Worker,
 )
 from neorc_core._values import MAX_PAYLOAD_BYTES, JsonValue
@@ -37,9 +38,9 @@ from neorc_core.flows import Address, Reference
 from neorc_core.local import (
     DirectQueueClient,
     LocalCluster,
-    MemoryCredentialStore,
     MemoryStore,
     MemoryTaskNotifier,
+    MemoryTokenGrants,
 )
 
 TIMEOUT = 10
@@ -372,80 +373,85 @@ def store() -> MemoryStore:
 
 
 @pytest.fixture
-def access(store: MemoryStore) -> Access:
-    return Access(MemoryCredentialStore(), queues=store)
+def tokens() -> MemoryTokenGrants:
+    return MemoryTokenGrants()
 
 
-async def test_a_token_is_bound_to_a_declared_queue(access: Access) -> None:
+@pytest.fixture
+def declarations(store: MemoryStore, tokens: MemoryTokenGrants) -> QueueDeclarations:
+    return QueueDeclarations(store, tokens)
+
+
+async def test_a_token_is_bound_to_a_declared_queue(
+    declarations: QueueDeclarations,
+) -> None:
     for role in (Role.WORKER, Role.RESPONDER):
         with pytest.raises(InvalidValueError, match="queue 'typo' is not declared"):
-            await access.create_token("t", role, queue="typo")
-    assert await access.tokens() == []
+            await declarations.check_token(role, "typo")
 
-    await access.declare_queue("typo", QueueKind.WORKER)
-    await access.create_token("t", Role.WORKER, queue="typo")
+    await declarations.declare("typo", QueueKind.WORKER)
+    await declarations.check_token(Role.WORKER, "typo")
 
 
-async def test_a_worker_token_is_bound_to_a_worker_queue(access: Access) -> None:
+async def test_a_worker_token_is_bound_to_a_worker_queue(
+    declarations: QueueDeclarations,
+) -> None:
     with pytest.raises(InvalidValueError, match="queue 'editors' is external"):
-        await access.create_token("w", Role.WORKER, queue="editors")
-    await access.create_token("w", Role.WORKER, queue="default")
-
-    assert [(t.name, t.queue) for t in await access.tokens()] == [("w", "default")]
+        await declarations.check_token(Role.WORKER, "editors")
+    await declarations.check_token(Role.WORKER, "default")
 
 
 async def test_a_responder_token_is_bound_to_a_queue_of_either_kind(
-    access: Access,
+    declarations: QueueDeclarations,
 ) -> None:
-    _, external = await access.create_token("r1", Role.RESPONDER, queue="editors")
-    _, worker = await access.create_token("r2", Role.RESPONDER, queue="default")
+    await declarations.check_token(Role.RESPONDER, "editors")
+    await declarations.check_token(Role.RESPONDER, "default")
 
-    assert (external.role, external.queue) == (Role.RESPONDER, "editors")
-    assert (worker.role, worker.queue) == (Role.RESPONDER, "default")
+
+async def test_a_token_of_another_role_is_checked_against_no_queue(
+    declarations: QueueDeclarations,
+) -> None:
+    await declarations.check_token(Role.SCHEDULER, None)
+    await declarations.check_token("robinauts/worker", "typo")
 
 
 async def test_a_queue_with_worker_tokens_cannot_be_declared_external(
-    access: Access, store: MemoryStore
+    declarations: QueueDeclarations, store: MemoryStore, tokens: MemoryTokenGrants
 ) -> None:
-    await access.declare_queue("reviews", QueueKind.WORKER)
-    await access.create_token("w1", Role.WORKER, queue="reviews")
-    await access.create_token("w2", Role.WORKER, queue="reviews")
-    await access.create_token("r", Role.RESPONDER, queue="reviews")
-    await access.create_token("elsewhere", Role.WORKER, queue="default")
+    await declarations.declare("reviews", QueueKind.WORKER)
+    tokens.items += [
+        TokenGrant("w2", Role.WORKER, "reviews"),
+        TokenGrant("w1", Role.WORKER, "reviews"),
+        TokenGrant("r", Role.RESPONDER, "reviews"),
+        TokenGrant("elsewhere", Role.WORKER, "default"),
+    ]
 
     with pytest.raises(InvalidValueError, match="revoke w1, w2 first"):
-        await access.declare_queue("reviews", QueueKind.EXTERNAL)
+        await declarations.declare("reviews", QueueKind.EXTERNAL)
     assert await store.queue_kind("reviews") is QueueKind.WORKER
 
-    await access.revoke_token("w1")
-    await access.revoke_token("w2")
-    await access.declare_queue("reviews", QueueKind.EXTERNAL)
+    tokens.items = [t for t in tokens.items if t.name not in {"w1", "w2"}]
+    await declarations.declare("reviews", QueueKind.EXTERNAL)
 
     assert await store.queue_kind("reviews") is QueueKind.EXTERNAL
 
 
 async def test_a_queue_is_declared_a_worker_queue_whatever_its_tokens(
-    access: Access,
+    declarations: QueueDeclarations, tokens: MemoryTokenGrants
 ) -> None:
-    await access.create_token("r", Role.RESPONDER, queue="editors")
+    tokens.items.append(TokenGrant("r", Role.RESPONDER, "editors"))
 
-    await access.declare_queue("editors", QueueKind.WORKER)
-    await access.create_token("w", Role.WORKER, queue="editors")
+    await declarations.declare("editors", QueueKind.WORKER)
+    await declarations.check_token(Role.WORKER, "editors")
 
-    assert Queue("editors", QueueKind.WORKER) in await access.queues()
+    assert Queue("editors", QueueKind.WORKER) in await declarations.queues()
 
 
-async def test_a_queue_name_is_checked_where_it_is_declared(access: Access) -> None:
+async def test_a_queue_name_is_checked_where_it_is_declared(
+    declarations: QueueDeclarations,
+) -> None:
     with pytest.raises(InvalidValueError, match="not a queue name"):
-        await access.declare_queue("a/b", QueueKind.EXTERNAL)
-
-
-async def test_an_access_without_declarations_checks_no_queue() -> None:
-    access = Access(MemoryCredentialStore())
-
-    await access.create_token("w", Role.WORKER, queue="anything")
-    with pytest.raises(RuntimeError, match="no store of queue declarations"):
-        await access.declare_queue("editors", QueueKind.EXTERNAL)
+        await declarations.declare("a/b", QueueKind.EXTERNAL)
 
 
 # A run that waits on a responder, from start to end.
