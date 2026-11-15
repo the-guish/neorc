@@ -38,7 +38,8 @@ version is pinned in that package's `.nvmrc`; use it, not the distribution's
 
 Install [nvm](https://github.com/nvm-sh/nvm) from a tagged GitHub release,
 not a piped install script. It downloads the official build from nodejs.org.
-Then, in the package directory:
+Then, in the package directory, after `scripts/oneberth-ui-from-source.sh`
+for `ts/neorc-ui`:
 
     nvm install
     npm ci

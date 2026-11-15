@@ -26,7 +26,7 @@ is released from a single tag, so all packages share one version.
     python/neorc-core/    core primitives
     python/neorc/         top-level package, builds on neorc-core
     python/neorc-ui/      the built web UI as a distribution: assets, no code
-    ts/neorc-ui/          the web UI's source: React, TypeScript, Vite
+    ts/neorc-ui/          the web UI's source, and @neorc/ui: React, TypeScript, Vite
 
 The Python packages form a [uv workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/)
 whose root is the `pyproject.toml` at the top of the repository: it holds the
@@ -84,9 +84,12 @@ Run the same checks as CI before opening a pull request:
 ## Working on the web UI
 
 Node.js at the version in `ts/neorc-ui/.nvmrc`, installed as
-[contributing/dev-environment.md](contributing/dev-environment.md) says. Then,
-in `ts/neorc-ui`:
+[contributing/dev-environment.md](contributing/dev-environment.md) says.
+The interface is built on oneberth's shell, `@oneberth/ui`, which
+`scripts/oneberth-ui-from-source.sh` packs from the oneberth commit the root
+`pyproject.toml` pins. Then, in `ts/neorc-ui`:
 
+    ../../scripts/oneberth-ui-from-source.sh
     nvm install
     npm ci
     npm run dev
