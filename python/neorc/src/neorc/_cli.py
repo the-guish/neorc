@@ -4,7 +4,8 @@
 """The ``neorc`` command.
 
     neorc run examples/hello --flow a
-    neorc manager start --config neorc.toml
+    neorc manager start --config oneberth.toml
+    neorc manager start --local --database-file neorc.db
     neorc tokens create worker-1 --role neorc/worker --resource default
     neorc flows upload examples/hello/flows --manager-address 127.0.0.1:8420
     neorc scheduler start --manager-address 127.0.0.1:8420
@@ -87,7 +88,12 @@ def build_parser() -> argparse.ArgumentParser:
     manager = commands.add_parser("manager", help="run the manager service")
     manager_commands = manager.add_subparsers(dest="subcommand", required=True)
     manager_start = manager_commands.add_parser("start", help="serve the manager")
-    manager_start.add_argument("--host", default=DEFAULT_HOST)
+    manager_start.add_argument(
+        "--host",
+        default=None,
+        help=f"{DEFAULT_HOST} by default; 127.0.0.1 with --local, which takes a "
+        "loopback address alone",
+    )
     manager_start.add_argument("--port", type=int, default=DEFAULT_PORT)
     database = manager_start.add_mutually_exclusive_group()
     database.add_argument(
@@ -113,12 +119,19 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="serve the API alone, without the web UI at /ui/",
     )
-    manager_start.add_argument(
+    signing_in = manager_start.add_mutually_exclusive_group()
+    signing_in.add_argument(
         "--config",
         type=Path,
         default=None,
         help="the deployment's sign-in configuration, oneberth's TOML file, with "
         f"the manager's public URL under [apps.neorc]; defaults to ${CONFIG_ENV}",
+    )
+    signing_in.add_argument(
+        "--local",
+        action="store_true",
+        help="oneberth's local mode, for one person at this machine: no sign-in "
+        "configuration; it prints the address that signs that person in",
     )
     manager_start.set_defaults(handler=manager_start_command)
 
@@ -359,7 +372,9 @@ def manager_start_command(args: argparse.Namespace) -> int:
             from neorc.postgres._driver import CONNECTION_ERRORS
         database_errors = CONNECTION_ERRORS
 
-    config = _config(args)
+    local = args.local
+    host = args.host or (LOCAL_HOST if local else DEFAULT_HOST)
+    config = _local_config(host, args.port) if local else _config(args)
     try:
         if args.database_file is not None:
             # Checked again when the backend starts; here, so the command can
@@ -373,6 +388,7 @@ def manager_start_command(args: argparse.Namespace) -> int:
             create_schema=args.create_schema,
             database_file=args.database_file,
             ui=not args.no_ui,
+            local=local,
         )
     except FileNotFoundError as exc:  # no built UI to serve: say how to get one
         raise SystemExit(f"neorc manager start: {exc}, or pass --no-ui") from None
@@ -382,8 +398,25 @@ def manager_start_command(args: argparse.Namespace) -> int:
         raise SystemExit(
             f"neorc manager start: cannot reach the database: {exc}"
         ) from None
-    run(app, args.host, args.port)
+    run(app, host, args.port)
     return 0
+
+
+LOCAL_HOST = "127.0.0.1"
+"""Where the local mode listens by default: its one person is at this machine."""
+
+
+def _local_config(host: str, port: int) -> Config:
+    """The configuration of oneberth's local mode: the manager on a loopback address."""
+    with _needs("manager"):
+        from oneberth.config import ConfigError, local_config
+    try:
+        return local_config("neorc", port=port, host=host)
+    except ConfigError as exc:
+        raise SystemExit(
+            "neorc manager start: --local listens on a loopback address alone: "
+            + "; ".join(exc.problems)
+        ) from None
 
 
 def _config(args: argparse.Namespace) -> Config:
@@ -395,7 +428,8 @@ def _config(args: argparse.Namespace) -> Config:
         raise SystemExit(
             "neorc manager start: no sign-in configuration: pass --config or set "
             f"${CONFIG_ENV} to oneberth's TOML file, which names the manager's "
-            "public URL under [apps.neorc]"
+            "public URL under [apps.neorc]; or pass --local, for one person at "
+            "this machine"
         )
     try:
         config = load_config(path)

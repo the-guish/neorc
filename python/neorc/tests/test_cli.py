@@ -84,6 +84,7 @@ def test_manager_start_takes_its_settings_from_the_command_line(
         "create_schema": True,
         "database_file": None,
         "ui": True,
+        "local": False,
         "app": "the app",
         "host": "127.0.0.1",
         "port": 9000,
@@ -118,6 +119,33 @@ def test_manager_start_needs_a_sign_in_configuration(
         SystemExit, match=r"cannot be used:\n.*unknown key\n.*public_url"
     ):
         _cli.main(["manager", "start", "--config", str(broken)])
+    assert started == []
+
+
+def test_manager_start_in_the_local_mode_needs_no_configuration(
+    started: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("ONEBERTH_CONFIG", raising=False)
+
+    assert _cli.main(["manager", "start", "--local", "--port", "8433"]) == 0
+    assert _cli.main(["manager", "start", "--local", "--host", "::1"]) == 0
+
+    first, second = started
+    assert (first["local"], first["host"], first["port"]) == (True, "127.0.0.1", 8433)
+    assert first["config"].apps["neorc"].public_url == "http://127.0.0.1:8433"
+    assert not first["config"].providers
+    assert second["config"].apps["neorc"].public_url == "http://[::1]:8420"
+
+
+def test_the_local_mode_listens_on_a_loopback_address_alone(
+    started: list[dict[str, Any]], config: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit, match="--local listens on a loopback address"):
+        _cli.main(["manager", "start", "--local", "--host", "0.0.0.0"])
+    with pytest.raises(SystemExit):
+        _cli.main(["manager", "start", "--local", "--config", str(config)])
+
+    assert "not allowed with argument" in capsys.readouterr().err
     assert started == []
 
 

@@ -39,11 +39,15 @@ def build_app(
     database_file: str | os.PathLike[str] | None = None,
     long_poll_timeout: float = DEFAULT_LONG_POLL_TIMEOUT,
     ui: bool | Path = True,
+    local: bool = False,
 ) -> Composition:
     """Compose standalone neorc: the manager's component, alone.
 
     ``config`` is the deployment's sign-in configuration, oneberth's TOML file
-    read; it names the manager's public URL under ``[apps.neorc]``.
+    read; it names the manager's public URL under ``[apps.neorc]``. With
+    ``local``, the backend is in oneberth's local mode: one person, the one at
+    the machine, signs in with a ticket, and ``config`` is
+    ``oneberth.config.local_config("neorc", port=...)``.
 
     The manager's records are in PostgreSQL, ``database_url`` or
     ``NEORC_DATABASE_URL``, and oneberth's store is the schema ``oneberth`` of
@@ -87,7 +91,9 @@ def build_app(
         import neorc_ui
 
         interface = neorc_ui.static_dir()
-    return compose_app([component], config=config, store=store, interface=interface)
+    return compose_app(
+        [component], config=config, store=store, interface=interface, local=local
+    )
 
 
 def _postgres_store(
@@ -105,6 +111,9 @@ def run(app: Composition, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) ->
     """Serve ``app`` until interrupted, on oneberth's server. Blocks.
 
     Prints ``ready`` once it serves. Exits 1 when the backend does not start,
-    as when a store is of another version or not set up.
+    as when a store is of another version or not set up. In the local mode, a
+    launcher writes the launch secret on standard input; a start by hand has
+    none there, and prints ``open <url>``, the address that signs the person
+    in.
     """
     serve_composition(app, Listen(host, port))

@@ -77,10 +77,16 @@ export default defineConfig({
     testTimeout: 20_000,
   },
   server: {
-    // `npm run dev` against a local `neorc manager start`: the manager's API
-    // under /neorc/, and oneberth's sign-in under /auth/.
+    // `npm run dev` against a local `neorc manager start --local`: the
+    // manager's API under /neorc/, and oneberth's sign-in under /auth/.
+    // oneberth takes a write with the session cookie from its own origin, and
+    // the local mode a request to a loopback host: both are the manager's.
     proxy: {
-      "^/(neorc|auth|health)([/?].*)?$": "http://127.0.0.1:8420",
+      "^/(neorc|auth|health)([/?].*)?$": {
+        target: "http://127.0.0.1:8420",
+        changeOrigin: true,
+        headers: { origin: "http://127.0.0.1:8420" },
+      },
     },
   },
   build: {
