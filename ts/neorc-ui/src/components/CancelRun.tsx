@@ -1,7 +1,9 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { detailOf } from "@oneberth/ui";
 import { useState } from "react";
 
-import { cancelRun, type Run } from "../api";
+import type { Run } from "../api";
+import { useApi } from "../context";
 import { keys, refresh } from "../queries";
 
 /**
@@ -12,9 +14,10 @@ import { keys, refresh } from "../queries";
  */
 export function CancelRun({ run, subRuns }: { run: Run; subRuns: Run[] }) {
   const client = useQueryClient();
+  const api = useApi();
   const [confirming, setConfirming] = useState(false);
   const cancel = useMutation({
-    mutationFn: () => cancelRun(run.id),
+    mutationFn: () => api.cancelRun(run.id),
     onSettled: () => {
       setConfirming(false);
       void refresh(client, { queryKey: keys.run(run.id) });
@@ -22,10 +25,10 @@ export function CancelRun({ run, subRuns }: { run: Run; subRuns: Run[] }) {
     },
   });
   const active = subRuns.filter((sub) => sub.status === "active").length;
-  const refused = cancel.error instanceof Error ? cancel.error.message : null;
+  const refused = cancel.error === null ? null : detailOf(cancel.error);
 
   return (
-    <div className="cancel-run">
+    <div className="neorc-cancel-run">
       {confirming ? (
         <p role="group" aria-label="Confirm cancelling">
           This cancels the run and every active run in its tree

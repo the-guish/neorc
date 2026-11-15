@@ -1,6 +1,7 @@
 # Packages in the built bundle, written by the build.
 # A change here is reviewed: see contributing/js-dependencies.md.
 @dagrejs/dagre 3.1.1 MIT
+@oneberth/ui 0.0.0 Apache-2.0
 @tanstack/query-core 5.102.8 MIT
 @tanstack/react-query 5.102.8 MIT
 @xyflow/react 12.11.6 MIT
@@ -15,8 +16,8 @@ d3-selection 3.0.0 ISC
 d3-timer 3.0.1 ISC
 d3-transition 3.0.1 ISC
 d3-zoom 3.0.0 ISC
-react 19.0.8 MIT
-react-dom 19.0.8 MIT
-scheduler 0.25.0 MIT
+react 19.3.1 MIT
+react-dom 19.3.1 MIT
+scheduler 0.28.0 MIT
 use-sync-external-store 1.7.0 MIT
 zustand 4.5.7 MIT

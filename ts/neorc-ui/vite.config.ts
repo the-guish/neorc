@@ -1,4 +1,9 @@
 // Dependencies and the checks below follow contributing/js-dependencies.md.
+//
+// The build is standalone neorc (src/standalone/): oneberth's shell with one
+// application, neorc, which the neorc-ui wheel ships. neorc's root component
+// loads as chunks of its own, the part a host's bundle gains by mounting
+// neorc; the build says how large they are.
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { gzipSync } from "node:zlib";
@@ -35,13 +40,13 @@ const here = import.meta.dirname;
  */
 const BUNDLED_PACKAGES = resolve(here, "bundled-packages.txt");
 
-function gzippedSize(dir: string): number {
+function gzippedSize(dir: string, only: (name: string) => boolean = () => true): number {
   let total = 0;
   for (const name of readdirSync(dir)) {
     const path = join(dir, name);
     if (statSync(path).isDirectory()) {
-      total += gzippedSize(path);
-    } else {
+      total += gzippedSize(path, only);
+    } else if (only(name)) {
       total += gzipSync(readFileSync(path)).length;
     }
   }
@@ -54,6 +59,11 @@ function sizeBudget(): Plugin {
     apply: "build",
     closeBundle() {
       const size = gzippedSize(resolve(here, "dist"));
+      const neorc = gzippedSize(resolve(here, "dist"), (name) => name.startsWith("NeorcApp-"));
+      console.log(
+        `standalone neorc is ${size} bytes gzipped (budget ${SIZE_BUDGET_BYTES}); ` +
+          `neorc's own chunks, what a host gains, are ${neorc}`,
+      );
       if (size > SIZE_BUDGET_BYTES) {
         throw new Error(
           `the built assets are ${size} bytes gzipped, over the budget of ` +
@@ -77,12 +87,16 @@ export default defineConfig({
     testTimeout: 20_000,
   },
   server: {
-    // `npm run dev` against a local `neorc manager start`. The pattern is
-    // matched against the URL with its query string, so `/runs?flow=a` and
-    // `/runs/<id>` both reach the manager.
+    // `npm run dev` against a local `neorc manager start --local`: the
+    // manager's API under /neorc/, and oneberth's sign-in under /auth/.
+    // oneberth takes a write with the session cookie from its own origin, and
+    // the local mode a request to a loopback host: both are the manager's.
     proxy: {
-      "^/(flows|runs|tasks|events|queues|health|auth)([/?].*)?$":
-        "http://127.0.0.1:8420",
+      "^/(neorc|auth|health)([/?].*)?$": {
+        target: "http://127.0.0.1:8420",
+        changeOrigin: true,
+        headers: { origin: "http://127.0.0.1:8420" },
+      },
     },
   },
   build: {
@@ -90,6 +104,8 @@ export default defineConfig({
       plugins: [
         license({
           thirdParty: {
+            // @oneberth/ui is a private package, installed from a checkout.
+            includePrivate: true,
             allow: {
               test: (dependency) =>
                 ALLOWED_LICENSES.includes(dependency.license ?? ""),

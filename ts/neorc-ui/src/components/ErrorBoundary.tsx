@@ -1,27 +1,31 @@
-import { Component, type ErrorInfo, type ReactNode } from "react";
+import { Component, type ContextType, type ErrorInfo, type ReactNode } from "react";
+
+import { NavContext } from "../router";
 
 /** The last line of defence: a render error shows here, not as a blank page. */
 export class ErrorBoundary extends Component<
   { children: ReactNode },
   { error: Error | null }
 > {
-  state = { error: null as Error | null };
+  static override readonly contextType = NavContext;
+  declare context: ContextType<typeof NavContext>;
+  override state = { error: null as Error | null };
 
   static getDerivedStateFromError(error: Error) {
     return { error };
   }
 
-  componentDidCatch(error: Error, info: ErrorInfo) {
+  override componentDidCatch(error: Error, info: ErrorInfo) {
     console.error("the page failed to render", error, info.componentStack);
   }
 
-  render() {
+  override render() {
     if (this.state.error !== null) {
       return (
         <main>
           <p role="alert">
             The page failed to render: {this.state.error.message}.{" "}
-            <a href="#/runs" onClick={() => this.setState({ error: null })}>
+            <a href={this.context.href({ name: "runs" })} onClick={() => this.setState({ error: null })}>
               Runs
             </a>
           </p>

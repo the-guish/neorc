@@ -6,13 +6,14 @@ import { StartRunForm } from "../components/StartRunForm";
 import { stepsOf } from "../definition";
 import { formatValue } from "../format";
 import { useFlow, useFlowVersions } from "../queries";
-import { href, navigate } from "../router";
+import { useNav } from "../router";
 
 /**
  * One flow: its versions, and of one of them the steps as a graph, the form
  * to start a run, and the definition as it was uploaded, read-only.
  */
-export function FlowPage({ flow, version }: { flow: string; version?: string }) {
+export function FlowPage({ flow, version }: { flow: string; version?: string | undefined }) {
+  const { href, navigate } = useNav();
   const versions = useFlowVersions(flow);
   const shown = useFlow(flow, version);
   const steps = useMemo(() => (shown.data ? stepsOf(shown.data.content) : []), [shown.data]);
@@ -24,7 +25,7 @@ export function FlowPage({ flow, version }: { flow: string; version?: string }) 
   return (
     <>
       <h1>
-        {flow} <small className="muted">{shown.data.version}</small>
+        {flow} <small className="neorc-muted">{shown.data.version}</small>
       </h1>
       <p>
         <a href={href({ name: "runs", flow })}>Runs of this flow</a>
@@ -54,13 +55,13 @@ export function FlowPage({ flow, version }: { flow: string; version?: string }) 
       {shown.data.version === versions.data[0]?.version ? (
         <StartRunForm key={`${flow}@${shown.data.version}`} flow={shown.data} />
       ) : (
-        <p className="muted">
+        <p className="neorc-muted">
           A run always uses the latest version, {versions.data[0]?.version}:{" "}
           <a href={href({ name: "flow", flow })}>start one from there</a>.
         </p>
       )}
       <h2>Definition</h2>
-      <pre className="definition" aria-label="Definition">
+      <pre className="neorc-definition" aria-label="Definition">
         {formatValue(shown.data.content)}
       </pre>
     </>

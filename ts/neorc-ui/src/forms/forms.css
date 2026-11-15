@@ -1,7 +1,7 @@
 /* A flow's form, inside "Start a run". The fields' own look is the page's
-   (index.css, .start-run): this is what the form adds to it. */
+   (neorc.css, .neorc-start-run): this is what the form adds to it. */
 
-.start-run .flow-form fieldset {
+.neorc-start-run .neorc-flow-form fieldset {
   display: grid;
   gap: 0.25rem;
   border: 0;
@@ -10,66 +10,66 @@
   min-width: 0;
 }
 
-.start-run .flow-form legend {
+.neorc-start-run .neorc-flow-form legend {
   padding: 0;
 }
 
-.start-run .flow-form label.flow-form-inline {
+.neorc-start-run .neorc-flow-form label.neorc-flow-form-inline {
   display: flex;
   align-items: center;
   gap: 0.5rem;
 }
 
-.start-run .flow-form textarea {
+.neorc-start-run .neorc-flow-form textarea {
   font-family: inherit;
   font-size: inherit;
   margin-bottom: 0;
 }
 
-.start-run .flow-form p,
-.start-run .flow-form h3,
-.start-run .flow-form h4,
-.start-run .flow-form h5,
-.start-run .flow-form h6 {
+.neorc-start-run .neorc-flow-form p,
+.neorc-start-run .neorc-flow-form h3,
+.neorc-start-run .neorc-flow-form h4,
+.neorc-start-run .neorc-flow-form h5,
+.neorc-start-run .neorc-flow-form h6 {
   margin: 0;
 }
 
 /* What a task's form adds: rows, cards repeated over a list, a bar of
    buttons for a choice, and the buttons that complete the task. */
 
-.start-run .flow-form .flow-form-row {
+.neorc-start-run .neorc-flow-form .neorc-flow-form-row {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   gap: 0.5rem;
 }
 
-.start-run .flow-form .flow-form-list {
+.neorc-start-run .neorc-flow-form .neorc-flow-form-list {
   display: grid;
   gap: 0.6rem;
 }
 
-.start-run .flow-form .flow-form-card {
+.neorc-start-run .neorc-flow-form .neorc-flow-form-card {
   background: var(--paper);
   border: 1px solid var(--line);
   border-radius: var(--radius-card);
   padding: 0.6rem 0.9rem;
 }
 
-.start-run .flow-form fieldset.flow-form-chips {
+.neorc-start-run .neorc-flow-form fieldset.neorc-flow-form-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 0;
 }
 
-.start-run .flow-form fieldset.flow-form-chips legend {
+.neorc-start-run .neorc-flow-form fieldset.neorc-flow-form-chips legend {
   width: 100%;
   margin-bottom: 0.25rem;
   color: var(--muted);
   font-size: 0.9em;
 }
 
-.start-run .flow-form .flow-form-chips button {
+.neorc-start-run .neorc-flow-form .neorc-flow-form-chips button {
   padding: 0.25rem 0.8rem;
   border: 1px solid var(--line);
   background: var(--paper);
@@ -78,19 +78,19 @@
   cursor: pointer;
 }
 
-.start-run .flow-form .flow-form-chips button + button {
+.neorc-start-run .neorc-flow-form .neorc-flow-form-chips button + button {
   border-left: 0;
 }
 
-.start-run .flow-form .flow-form-chips button:first-of-type {
+.neorc-start-run .neorc-flow-form .neorc-flow-form-chips button:first-of-type {
   border-radius: var(--radius) 0 0 var(--radius);
 }
 
-.start-run .flow-form .flow-form-chips button:last-of-type {
+.neorc-start-run .neorc-flow-form .neorc-flow-form-chips button:last-of-type {
   border-radius: 0 var(--radius) var(--radius) 0;
 }
 
-.start-run .flow-form .flow-form-chips button[aria-pressed="true"] {
+.neorc-start-run .neorc-flow-form .neorc-flow-form-chips button[aria-pressed="true"] {
   background: var(--accent);
   color: var(--on-accent);
 }

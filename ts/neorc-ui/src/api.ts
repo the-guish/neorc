@@ -1,4 +1,6 @@
 // The manager's API, typed from openapi.json (see `npm run generate`).
+import { getJson, postJson } from "@oneberth/ui";
+
 import type { components } from "./api/schema";
 
 type Schemas = components["schemas"];
@@ -11,7 +13,6 @@ export type TaskStatus = Schemas["TaskStatus"];
 export type Address = Schemas["AddressResponse"];
 export type ApiEvent = Schemas["EventResponse"];
 export type ErrorBody = Schemas["ErrorResponse"];
-export type Session = Schemas["SessionResponse"];
 export type Queue = Schemas["QueueResponse"];
 export type QueueKind = Schemas["QueueKind"];
 export type QueueTask = Schemas["QueueTaskResponse"];
@@ -34,160 +35,149 @@ export const TASK_STATUSES: readonly TaskStatus[] = [
 
 export const QUEUE_KINDS: readonly QueueKind[] = ["worker", "external"];
 
-/** A refusal: `error` names the manager's exception, `detail` says why. */
-export class ApiError extends Error {
-  constructor(
-    readonly status: number,
-    readonly body: ErrorBody,
-  ) {
-    super(body.detail);
-    this.name = body.error;
-  }
-}
+/** A refusal of the manager: `error` names its exception, `detail` says why. */
+export { ApiError } from "@oneberth/ui";
+
+type Query = Record<string, string | number | boolean | undefined>;
 
 /**
- * The API lives one level above the page: the manager serves the UI at /ui/
- * and its routes at /, and `npm run dev` serves the page at / and proxies
- * the routes. Hash routing keeps the page's path fixed either way.
+ * The manager's API at `base`, such as `/neorc/`: the address a host gives
+ * neorc's root component. Requests go through `@oneberth/ui`'s request
+ * helper, on this origin: a 401 signs the person out of the shell.
  */
-export function apiUrl(
-  path: string,
-  params: Record<string, string | number | boolean | undefined> = {},
-): URL {
-  const url = new URL(path.replace(/^\//, ""), new URL("../", location.href));
-  for (const [name, value] of Object.entries(params)) {
-    if (value !== undefined) url.searchParams.set(name, String(value));
+export function createApi(base: string) {
+  let end = base.length;
+  while (end > 0 && base[end - 1] === "/") end -= 1;
+  const root = base.slice(0, end);
+  if (!root.startsWith("/") || root.startsWith("//")) {
+    throw new TypeError(`neorc's API is a path on this origin, such as /neorc/: ${base}`);
   }
-  return url;
+  const get = <T>(path: string, query?: Query, signal?: AbortSignal) =>
+    getJson<T>(`${root}${path}`, query, signal);
+  const post = <T>(path: string, body: unknown) => postJson<T>(`${root}${path}`, body);
+
+  return {
+    // Flows.
+
+    async listFlows(): Promise<Flow[]> {
+      return (await get<{ flows: Flow[] }>("/flows")).flows;
+    },
+
+    getFlow(name: string, version?: string): Promise<Flow> {
+      const path = version
+        ? `/flows/${encodeURIComponent(name)}/versions/${encodeURIComponent(version)}`
+        : `/flows/${encodeURIComponent(name)}`;
+      return get<Flow>(path);
+    },
+
+    async flowVersions(name: string): Promise<Flow[]> {
+      const path = `/flows/${encodeURIComponent(name)}/versions`;
+      return (await get<{ versions: Flow[] }>(path)).versions;
+    },
+
+    // Runs.
+
+    async listRuns(
+      filters: RunFilters,
+      before?: string,
+      limit: number = PAGE_SIZE,
+    ): Promise<Run[]> {
+      const params = {
+        flow: filters.flow,
+        status: filters.status,
+        root_only: filters.rootOnly ?? true,
+        before,
+        limit,
+      };
+      return (await get<{ runs: Run[] }>("/runs", params)).runs;
+    },
+
+    getRun(id: string): Promise<Run> {
+      return get<Run>(`/runs/${encodeURIComponent(id)}`);
+    },
+
+    async runTasks(id: string): Promise<Task[]> {
+      const path = `/runs/${encodeURIComponent(id)}/tasks`;
+      return (await get<{ tasks: Task[] }>(path)).tasks;
+    },
+
+    async subRuns(id: string): Promise<Run[]> {
+      const path = `/runs/${encodeURIComponent(id)}/sub-runs`;
+      return (await get<{ runs: Run[] }>(path)).runs;
+    },
+
+    startRun(flow: string, inputs: Record<string, unknown>): Promise<Run> {
+      return post<Run>(`/flows/${encodeURIComponent(flow)}/runs`, { inputs });
+    },
+
+    cancelRun(id: string): Promise<void> {
+      return post<void>(`/runs/${encodeURIComponent(id)}/cancel`, {});
+    },
+
+    // Queues: the declared queues, a queue's tasks, and completing one.
+
+    async listQueues(): Promise<Queue[]> {
+      return (await get<{ queues: Queue[] }>("/queues")).queues;
+    },
+
+    async queueTasks(queue: string, filters: QueueTaskFilters): Promise<QueueTask[]> {
+      const path = `/queues/${encodeURIComponent(queue)}/tasks/recent`;
+      const params = {
+        since: new Date(Date.now() - filters.windowMs).toISOString(),
+        status: filters.status,
+        flow: filters.flow,
+        limit: QUEUE_PAGE,
+      };
+      return (await get<{ tasks: QueueTask[] }>(path, params)).tasks;
+    },
+
+    /** A task with its inputs filled in, as a worker would receive it. */
+    taskInputs(id: string): Promise<Delivery> {
+      return get<Delivery>(`/tasks/${encodeURIComponent(id)}/inputs`);
+    },
+
+    /** End a pending task: with `result`, or with its failure when `error` is set. */
+    completeTask(id: string, body: { result: unknown } | { error: string }): Promise<void> {
+      return post<void>(`/tasks/${encodeURIComponent(id)}/complete`, body);
+    },
+
+    // Events: the same long poll the scheduler uses, read, never consumed.
+
+    /** The latest event's sequence, or 0: where a reader wanting only news starts. */
+    async latestSequence(signal?: AbortSignal): Promise<number> {
+      const latest = await get<{ sequence: number }>("/events/latest", {}, signal);
+      return latest.sequence;
+    },
+
+    async waitForEvents(
+      after: number,
+      options: { timeout: number; limit?: number; signal?: AbortSignal },
+    ): Promise<ApiEvent[]> {
+      const params = {
+        after,
+        timeout: options.timeout,
+        limit: options.limit ?? EVENT_PAGE,
+      };
+      const page = await get<{ events: ApiEvent[] }>("/events", params, options.signal);
+      return page.events;
+    },
+  };
 }
 
-const unauthorizedListeners = new Set<() => void>();
-
-/**
- * Call `listener` whenever the manager answers 401: the session this page
- * signed in with has ended. Returns the function that stops it.
- */
-export function onUnauthorized(listener: () => void): () => void {
-  unauthorizedListeners.add(listener);
-  return () => unauthorizedListeners.delete(listener);
-}
-
-async function request<T>(url: URL, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(url, {
-    ...init,
-    headers: { accept: "application/json", ...init.headers },
-  });
-  // The session's own route is what the listeners ask again: its refusal
-  // telling them would only ask again, and again.
-  if (response.status === 401 && !url.pathname.endsWith("/auth/session")) {
-    for (const listener of unauthorizedListeners) listener();
-  }
-  if (!response.ok) {
-    let body: ErrorBody;
-    try {
-      body = (await response.json()) as ErrorBody;
-    } catch {
-      body = { error: "HTTPError", detail: `${response.status} from ${url}` };
-    }
-    throw new ApiError(response.status, body);
-  }
-  if (response.status === 204) return undefined as T;
-  return (await response.json()) as T;
-}
-
-export function getJson<T>(
-  path: string,
-  params?: Record<string, string | number | boolean | undefined>,
-  signal?: AbortSignal,
-): Promise<T> {
-  return request<T>(apiUrl(path, params), { signal });
-}
-
-export function postJson<T>(path: string, body: unknown): Promise<T> {
-  return request<T>(apiUrl(path), {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-}
-
-// Flows.
-
-export async function listFlows(): Promise<Flow[]> {
-  return (await getJson<{ flows: Flow[] }>("/flows")).flows;
-}
-
-export function getFlow(name: string, version?: string): Promise<Flow> {
-  const path = version
-    ? `/flows/${encodeURIComponent(name)}/versions/${encodeURIComponent(version)}`
-    : `/flows/${encodeURIComponent(name)}`;
-  return getJson<Flow>(path);
-}
-
-export async function flowVersions(name: string): Promise<Flow[]> {
-  const path = `/flows/${encodeURIComponent(name)}/versions`;
-  return (await getJson<{ versions: Flow[] }>(path)).versions;
-}
-
-// Runs.
+/** The manager's API, as `createApi` makes it. */
+export type Api = ReturnType<typeof createApi>;
 
 export interface RunFilters {
-  flow?: string;
-  status?: RunStatus;
+  flow?: string | undefined;
+  status?: RunStatus | undefined;
   rootOnly?: boolean;
 }
 
 export const PAGE_SIZE = 50;
 
-export async function listRuns(
-  filters: RunFilters,
-  before?: string,
-  limit: number = PAGE_SIZE,
-): Promise<Run[]> {
-  const params = {
-    flow: filters.flow,
-    status: filters.status,
-    root_only: filters.rootOnly ?? true,
-    before,
-    limit,
-  };
-  return (await getJson<{ runs: Run[] }>("/runs", params)).runs;
-}
-
-export function getRun(id: string): Promise<Run> {
-  return getJson<Run>(`/runs/${encodeURIComponent(id)}`);
-}
-
-export async function runTasks(id: string): Promise<Task[]> {
-  const path = `/runs/${encodeURIComponent(id)}/tasks`;
-  return (await getJson<{ tasks: Task[] }>(path)).tasks;
-}
-
-export async function subRuns(id: string): Promise<Run[]> {
-  const path = `/runs/${encodeURIComponent(id)}/sub-runs`;
-  return (await getJson<{ runs: Run[] }>(path)).runs;
-}
-
-export function startRun(
-  flow: string,
-  inputs: Record<string, unknown>,
-): Promise<Run> {
-  return postJson<Run>(`/flows/${encodeURIComponent(flow)}/runs`, { inputs });
-}
-
-export function cancelRun(id: string): Promise<void> {
-  return postJson<void>(`/runs/${encodeURIComponent(id)}/cancel`, {});
-}
-
-// Queues: the declared queues, a queue's tasks, and completing one.
-
-export async function listQueues(): Promise<Queue[]> {
-  return (await getJson<{ queues: Queue[] }>("/queues")).queues;
-}
-
 export interface QueueTaskFilters {
-  status?: TaskStatus;
-  flow?: string;
+  status?: TaskStatus | undefined;
+  flow?: string | undefined;
   /** How far back to list, in milliseconds before now. */
   windowMs: number;
 }
@@ -195,60 +185,4 @@ export interface QueueTaskFilters {
 /** The most tasks one listing of a queue asks for: the manager's own limit. */
 export const QUEUE_PAGE = 500;
 
-export async function queueTasks(
-  queue: string,
-  filters: QueueTaskFilters,
-): Promise<QueueTask[]> {
-  const path = `/queues/${encodeURIComponent(queue)}/tasks/recent`;
-  const params = {
-    since: new Date(Date.now() - filters.windowMs).toISOString(),
-    status: filters.status,
-    flow: filters.flow,
-    limit: QUEUE_PAGE,
-  };
-  return (await getJson<{ tasks: QueueTask[] }>(path, params)).tasks;
-}
-
-/** A task with its inputs filled in, as a worker would receive it. */
-export function taskInputs(id: string): Promise<Delivery> {
-  return getJson<Delivery>(`/tasks/${encodeURIComponent(id)}/inputs`);
-}
-
-/** End a pending task: with `result`, or with its failure when `error` is set. */
-export function completeTask(
-  id: string,
-  body: { result: unknown } | { error: string },
-): Promise<void> {
-  return postJson<void>(`/tasks/${encodeURIComponent(id)}/complete`, body);
-}
-
-// Events: the same long poll the scheduler uses, read, never consumed.
-
 export const EVENT_PAGE = 1000;
-
-/** The latest event's sequence, or 0: where a reader wanting only news starts. */
-export async function latestSequence(signal?: AbortSignal): Promise<number> {
-  const latest = await getJson<{ sequence: number }>(
-    "/events/latest",
-    {},
-    signal,
-  );
-  return latest.sequence;
-}
-
-export async function waitForEvents(
-  after: number,
-  options: { timeout: number; limit?: number; signal?: AbortSignal },
-): Promise<ApiEvent[]> {
-  const params = {
-    after,
-    timeout: options.timeout,
-    limit: options.limit ?? EVENT_PAGE,
-  };
-  const page = await getJson<{ events: ApiEvent[] }>(
-    "/events",
-    params,
-    options.signal,
-  );
-  return page.events;
-}

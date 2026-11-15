@@ -4,7 +4,7 @@ import { StatusBadge } from "../components/StatusBadge";
 import { TaskPanel } from "../components/TaskPanel";
 import { formatTime, shortId } from "../format";
 import { useFlows, useQueues, useQueueTasks } from "../queries";
-import { href, navigate, type Route } from "../router";
+import { useNav, type Route } from "../router";
 import { KIND_NOTES } from "./QueuesPage";
 
 type QueueRoute = Extract<Route, { name: "queue" }>;
@@ -42,6 +42,7 @@ export function lastChange(task: QueueTask["task"]): string | null {
  * for a pending task of an external queue the form that completes it.
  */
 export function QueuePage(route: QueueRoute) {
+  const { href, navigate } = useNav();
   const { queue, flow, task: opened } = route;
   const status = asStatus(route.status);
   const window = asWindow(route.window);
@@ -54,15 +55,15 @@ export function QueuePage(route: QueueRoute) {
   const go = (change: Partial<QueueRoute>) => navigate({ ...route, ...change });
   return (
     <>
-      <div className="page-head">
+      <div className="neorc-page-head">
         <div>
           <h1>
             {queue}{" "}
             {declared && (
-              <span className={`kind kind-${declared.kind}`}>{declared.kind}</span>
+              <span className={`neorc-kind neorc-kind-${declared.kind}`}>{declared.kind}</span>
             )}
           </h1>
-          <p className="muted subtitle">
+          <p className="neorc-muted neorc-subtitle">
             {declared ? `${KIND_NOTES[declared.kind]} ` : ""}
             {queues.isSuccess && !declared && "This queue is not declared. "}
             {tasks.isSuccess &&
@@ -71,7 +72,7 @@ export function QueuePage(route: QueueRoute) {
           </p>
         </div>
         <form
-          className="filters"
+          className="neorc-filters"
           onSubmit={(event) => event.preventDefault()}
           aria-label="Filters"
         >
@@ -123,18 +124,18 @@ export function QueuePage(route: QueueRoute) {
           </label>
         </form>
       </div>
-      <div className={`queue-body${opened ? " queue-body-open" : ""}`}>
+      <div className={`neorc-queue-body${opened ? " neorc-queue-body-open" : ""}`}>
         <div>
           {tasks.isPending && <Loading what="tasks" />}
           {tasks.isError && <Failed what="tasks" error={tasks.error} />}
           {tasks.isSuccess && listed.length === 0 && (
-            <p className="muted">
+            <p className="neorc-muted">
               No {status ? `${status} ` : ""}task{flow ? ` of ${flow}` : ""} changed in
               the last {window.label}.
             </p>
           )}
           {listed.length > 0 && (
-            <table className="queue-tasks">
+            <table className="neorc-queue-tasks">
               <thead>
                 <tr>
                   <th>State</th>
@@ -152,20 +153,20 @@ export function QueuePage(route: QueueRoute) {
                     </td>
                     <td>
                       <a
-                        className="run-name"
+                        className="neorc-run-name"
                         href={href({ ...route, task: task.id })}
                         title={task.handler}
                       >
                         <strong>{task.address.step}</strong>{" "}
-                        <span className="mono muted">{shortId(task.id)}</span>
+                        <span className="neorc-mono neorc-muted">{shortId(task.id)}</span>
                       </a>
                     </td>
                     <td>
-                      {of} <span className="muted">{version}</span>
+                      {of} <span className="neorc-muted">{version}</span>
                     </td>
                     <td>
                       <a
-                        className="mono"
+                        className="neorc-mono"
                         href={href({ name: "run", id: task.run_id })}
                         aria-label={`Run ${shortId(task.run_id)}`}
                       >
@@ -179,7 +180,7 @@ export function QueuePage(route: QueueRoute) {
             </table>
           )}
           {listed.length === QUEUE_PAGE && (
-            <p className="muted">
+            <p className="neorc-muted">
               These are the {QUEUE_PAGE} tasks published last. Narrow the filters to
               see the rest.
             </p>

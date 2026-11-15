@@ -1,45 +1,33 @@
 // Responses as the manager sends them, typed by the schema so a drift shows
 // here at compile time.
-import type {
-  ApiEvent,
-  Delivery,
-  Flow,
-  Queue,
-  QueueTask,
-  Run,
-  Session,
-  Task,
-} from "../api";
+import type { Session } from "@oneberth/ui";
+
+import type { ApiEvent, Delivery, Flow, Queue, QueueTask, Run, Task } from "../api";
 import reviewForm from "../forms/review_draft.form.json";
 import triageForm from "../forms/triage.form.json";
 
-/** A manager started with --no-auth. */
-export const OPEN: Session = {
-  authentication: false,
-  public_url: null,
-  providers: [],
-  principal: null,
-};
-
-/** A manager with sign-in, and nobody signed in. */
+/** oneberth's `GET /auth/session` with nobody signed in, through providers. */
 export const SIGNED_OUT: Session = {
-  authentication: true,
-  public_url: "https://neorc.example.com",
+  mode: "providers",
   providers: [
     { id: "google", title: "Google" },
     { id: "okta", title: "Okta" },
   ],
   principal: null,
+  roles: [],
 };
 
+/** oneberth's `GET /auth/session` with Ada signed in. */
 export const SIGNED_IN: Session = {
   ...SIGNED_OUT,
   principal: {
-    kind: "session",
+    kind: "user",
+    id: "0ddddddd-0000-4000-8000-00000000000a",
     name: "Ada Lovelace",
     email: "ada@example.com",
     provider: "google",
   },
+  roles: ["neorc/user"],
 };
 
 export const WORD_PICKER: Flow = {
@@ -95,6 +83,7 @@ export const SUCCEEDED: Run = {
   reason: null,
   created_at: "2026-09-13T10:00:00+00:00",
   finished_at: "2026-09-13T10:00:02.500000+00:00",
+  started_by: { kind: "user", id: "0d1e2f30-1111-4bbb-8ccc-0000000000ad", name: "Ada Lovelace" },
 };
 
 export const ACTIVE: Run = {
@@ -110,6 +99,7 @@ export const ACTIVE: Run = {
   reason: null,
   created_at: "2026-09-13T10:05:00+00:00",
   finished_at: null,
+  started_by: { kind: "service", id: "5e7f1ce0-1111-4bbb-8ccc-000000000007", name: "nightly" },
 };
 
 export const CANCELLED: Run = {

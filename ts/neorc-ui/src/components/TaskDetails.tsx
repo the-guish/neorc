@@ -4,9 +4,9 @@ import { formatDuration, formatTime, formatValue } from "../format";
 /** Everything the manager knows about one task instance, folded away unless `open`. */
 export function TaskDetails({ task, open = false }: { task: Task; open?: boolean }) {
   return (
-    <details className="task-details" open={open}>
+    <details className="neorc-task-details" open={open}>
       <summary>details</summary>
-      <dl className="facts">
+      <dl className="neorc-facts">
         <dt>Handler</dt>
         <dd>
           <code>{task.handler}</code> on <code>{task.queue}</code>
@@ -27,7 +27,7 @@ export function TaskDetails({ task, open = false }: { task: Task; open?: boolean
         <dd>
           {formatTime(task.finished_at)}
           {task.finished_at && (
-            <span className="muted">
+            <span className="neorc-muted">
               {" "}
               took {formatDuration(task.started_at ?? task.created_at, task.finished_at)}
             </span>
@@ -59,7 +59,7 @@ export function TaskDetails({ task, open = false }: { task: Task; open?: boolean
       {task.error && (
         <>
           <h4>Error</h4>
-          <pre className="error">{task.error}</pre>
+          <pre className="neorc-error">{task.error}</pre>
         </>
       )}
     </details>

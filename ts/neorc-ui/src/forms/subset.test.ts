@@ -49,6 +49,13 @@ describe("formOf", () => {
     });
   });
 
+  it("is what the package's entry gives a host to check its form", async () => {
+    const entry = await import("../index");
+
+    expect(entry.formOf({ form: example })).toEqual(read({ form: example }));
+    expect(entry.formOf({ form: [{ updateComponents: { components: [{}] } }] })).toBeNull();
+  });
+
   it("answers null for a flow with no form", () => {
     expect(formOf({ name: "a", version: "1.0.0" })).toBeNull();
     expect(formOf(null)).toBeNull();

@@ -87,7 +87,7 @@ describe("a flow's form", () => {
     fireEvent.click(screen.getByRole("button", { name: "Start run" }));
 
     await waitFor(() =>
-      expect(location.hash).toBe("#/runs/11111111-2222-4333-8444-555555555555"),
+      expect(location.hash).toBe("#/neorc/runs/11111111-2222-4333-8444-555555555555"),
     );
     expect(posted).toEqual([
       {

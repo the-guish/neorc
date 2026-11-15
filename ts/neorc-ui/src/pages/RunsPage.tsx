@@ -3,14 +3,21 @@ import { Failed, Loading } from "../components/Layout";
 import { StatusBadge } from "../components/StatusBadge";
 import { formatDuration, formatTime, shortId } from "../format";
 import { useFlows, useRuns } from "../queries";
-import { href, navigate } from "../router";
+import { useNav } from "../router";
 
 function asStatus(value: string | undefined): RunStatus | undefined {
   return RUN_STATUSES.find((status) => status === value);
 }
 
 /** Runs newest first, a page at a time, filtered by flow and status. */
-export function RunsPage({ flow, status }: { flow?: string; status?: string }) {
+export function RunsPage({
+  flow,
+  status,
+}: {
+  flow?: string | undefined;
+  status?: string | undefined;
+}) {
+  const { href, navigate } = useNav();
   const filters = { flow, status: asStatus(status) };
   const flows = useFlows();
   const runs = useRuns(filters);
@@ -18,17 +25,17 @@ export function RunsPage({ flow, status }: { flow?: string; status?: string }) {
   const listed = runs.data?.pages.flat() ?? [];
   return (
     <>
-      <div className="page-head">
+      <div className="neorc-page-head">
         <div>
           <h1>Latest runs</h1>
-          <p className="muted subtitle">
+          <p className="neorc-muted neorc-subtitle">
             {runs.isSuccess &&
               `${listed.length}${runs.hasNextPage ? "+" : ""} run${listed.length === 1 ? "" : "s"}` +
                 `${flow ? ` of ${flow}` : ""}${filters.status ? `, ${filters.status}` : ""}, newest first`}
           </p>
         </div>
         <form
-          className="filters"
+          className="neorc-filters"
           onSubmit={(event) => event.preventDefault()}
           aria-label="Filters"
         >
@@ -78,17 +85,17 @@ export function RunsPage({ flow, status }: { flow?: string; status?: string }) {
       {runs.isPending && <Loading what="runs" />}
       {runs.isError && <Failed what="runs" error={runs.error} />}
       {runs.isSuccess && listed.length === 0 && (
-        <p className="muted">No runs yet.</p>
+        <p className="neorc-muted">No runs yet.</p>
       )}
       {listed.length > 0 && (
-        <table className="runs">
+        <table className="neorc-runs">
           <thead>
             <tr>
               <th>Status</th>
               <th>Run</th>
               <th>Version</th>
               <th>Started</th>
-              <th className="num">Took</th>
+              <th className="neorc-num">Took</th>
             </tr>
           </thead>
           <tbody>
@@ -98,14 +105,14 @@ export function RunsPage({ flow, status }: { flow?: string; status?: string }) {
                   <StatusBadge status={run.status} />
                 </td>
                 <td>
-                  <a className="run-name" href={href({ name: "run", id: run.id })}>
+                  <a className="neorc-run-name" href={href({ name: "run", id: run.id })}>
                     <strong>{run.flow}</strong>{" "}
-                    <span className="mono muted">{shortId(run.id)}</span>
+                    <span className="neorc-mono neorc-muted">{shortId(run.id)}</span>
                   </a>
                 </td>
-                <td className="muted">{run.version}</td>
+                <td className="neorc-muted">{run.version}</td>
                 <td>{formatTime(run.created_at)}</td>
-                <td className="num mono">{formatDuration(run.created_at, run.finished_at)}</td>
+                <td className="neorc-num neorc-mono">{formatDuration(run.created_at, run.finished_at)}</td>
               </tr>
             ))}
           </tbody>
@@ -138,14 +145,14 @@ const TILES: { status: RunStatus; label: string }[] = [
  */
 function Tiles({ runs, partial }: { runs: Run[]; partial: boolean }) {
   return (
-    <div className="tiles" aria-label={partial ? "Of the runs loaded" : "Of these runs"}>
+    <div className="neorc-tiles" aria-label={partial ? "Of the runs loaded" : "Of these runs"}>
       {TILES.map((tile) => (
-        <div key={tile.status} className="tile">
-          <span className="tile-label">
+        <div key={tile.status} className="neorc-tile">
+          <span className="neorc-tile-label">
             {tile.label}
-            {partial && <span className="muted"> of loaded</span>}
+            {partial && <span className="neorc-muted"> of loaded</span>}
           </span>
-          <span className="tile-figure mono">
+          <span className="neorc-tile-figure neorc-mono">
             {runs.filter((run) => run.status === tile.status).length}
           </span>
         </div>

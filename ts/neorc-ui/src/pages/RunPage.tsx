@@ -8,10 +8,10 @@ import { StatusBadge } from "../components/StatusBadge";
 import { published, stepsOf } from "../definition";
 import { formatDuration, formatTime, formatValue, shortId } from "../format";
 import { useFlow, useRun, useRunTasks, useSubRuns } from "../queries";
-import { href, type RunView } from "../router";
+import { useNav, type RunView } from "../router";
 
 /** One run: what it is, where it stands, and each step of its flow, live. */
-export function RunPage({ id, view }: { id: string; view?: RunView }) {
+export function RunPage({ id, view }: { id: string; view?: RunView | undefined }) {
   const run = useRun(id);
   const chosen = useRunView(view);
   if (run.isPending) return <Loading what={`run ${shortId(id)}`} />;
@@ -51,6 +51,7 @@ function Loaded({
   run: ReturnType<typeof useRun>["data"] & object;
   view: RunView;
 }) {
+  const { href } = useNav();
   const flow = useFlow(run.flow, run.version);
   const live = { active: run.status === "active" };
   const tasks = useRunTasks(run.id, live);
@@ -65,31 +66,32 @@ function Loaded({
   );
   return (
     <>
-      <p className="crumbs">
+      <p className="neorc-crumbs">
         <a href={href({ name: "runs" })}>Runs</a> /{" "}
         <a href={href({ name: "flow", flow: run.flow, version: run.version })}>{run.flow}</a> /{" "}
-        <span className="mono">{shortId(run.id)}</span>
+        <span className="neorc-mono">{shortId(run.id)}</span>
       </p>
-      <div className="page-head">
+      <div className="neorc-page-head">
         <div>
-          <h1 className="title-with-pill">
-            {run.flow} <span className="mono muted">{shortId(run.id)}</span>{" "}
+          <h1 className="neorc-title-with-pill">
+            {run.flow} <span className="neorc-mono neorc-muted">{shortId(run.id)}</span>{" "}
             <StatusBadge status={run.status} />
           </h1>
-          <p className="mono-line subtitle">
+          <p className="neorc-mono-line neorc-subtitle">
             {run.id} · version {run.version} · started {formatTime(run.created_at)}
+            {run.started_by && ` by ${run.started_by.name ?? run.started_by.id}`}
             {run.finished_at &&
               ` · finished ${formatTime(run.finished_at)}, took ${formatDuration(run.created_at, run.finished_at)}`}
           </p>
         </div>
         {run.status === "active" && run.parent_id === null && (
-          <div className="actions">
+          <div className="neorc-actions">
             <CancelRun key={run.id} run={run} subRuns={subRuns.data ?? []} />
           </div>
         )}
       </div>
       {(run.parent_id || run.reason) && (
-        <dl className="facts">
+        <dl className="neorc-facts">
           {run.parent_id && (
             <>
               <dt>Parent</dt>
@@ -98,7 +100,7 @@ function Loaded({
                   run <code>{shortId(run.parent_id)}</code>
                 </a>
                 {run.parent_address && (
-                  <span className="muted">
+                  <span className="neorc-muted">
                     {" "}
                     at {run.parent_address.step}
                     {run.parent_address.scope.map(([name, n]) => ` ${name} ${n}`).join("")}
@@ -117,7 +119,7 @@ function Loaded({
       )}
 
       {run.status === "active" && run.parent_id !== null && (
-        <p className="muted">
+        <p className="neorc-muted">
           Part of run{" "}
           <a href={href({ name: "run", id: run.root_id })}>
             <code>{shortId(run.root_id)}</code>
@@ -164,7 +166,7 @@ function Loaded({
                     </a>
                   </td>
                   <td>
-                    {sub.flow} <span className="muted">{sub.version}</span>
+                    {sub.flow} <span className="neorc-muted">{sub.version}</span>
                   </td>
                   <td>
                     {sub.parent_address?.step}
@@ -200,8 +202,9 @@ const VIEWS: { view: RunView; label: string }[] = [
 
 /** Outline or graph: links, so the choice is in the address and can be shared. */
 function ViewSwitch({ id, view }: { id: string; view: RunView }) {
+  const { href } = useNav();
   return (
-    <nav className="segmented" aria-label="View">
+    <nav className="neorc-segmented" aria-label="View">
       {VIEWS.map((item) => (
         <a
           key={item.view}

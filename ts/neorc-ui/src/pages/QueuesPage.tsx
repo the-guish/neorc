@@ -1,7 +1,7 @@
 import { QUEUE_KINDS, type QueueKind } from "../api";
 import { Failed, Loading } from "../components/Layout";
 import { useQueues } from "../queries";
-import { href, navigate } from "../router";
+import { useNav } from "../router";
 
 export function asKind(value: string | undefined): QueueKind | undefined {
   return QUEUE_KINDS.find((kind) => kind === value);
@@ -14,7 +14,8 @@ export const KIND_NOTES: Record<QueueKind, string> = {
 };
 
 /** The declared queues, by name, filtered by kind. */
-export function QueuesPage({ kind }: { kind?: string }) {
+export function QueuesPage({ kind }: { kind?: string | undefined }) {
+  const { href, navigate } = useNav();
   const queues = useQueues();
   const chosen = asKind(kind);
   const listed = (queues.data ?? []).filter(
@@ -22,16 +23,16 @@ export function QueuesPage({ kind }: { kind?: string }) {
   );
   return (
     <>
-      <div className="page-head">
+      <div className="neorc-page-head">
         <div>
           <h1>Queues</h1>
-          <p className="muted subtitle">
+          <p className="neorc-muted neorc-subtitle">
             {queues.isSuccess &&
               `${listed.length} ${chosen ? `${chosen} ` : ""}queue${listed.length === 1 ? "" : "s"}`}
           </p>
         </div>
         <form
-          className="filters"
+          className="neorc-filters"
           onSubmit={(event) => event.preventDefault()}
           aria-label="Filters"
         >
@@ -56,14 +57,14 @@ export function QueuesPage({ kind }: { kind?: string }) {
       {queues.isPending && <Loading what="queues" />}
       {queues.isError && <Failed what="queues" error={queues.error} />}
       {queues.isSuccess && listed.length === 0 && (
-        <p className="muted">
+        <p className="neorc-muted">
           {queues.data.length === 0
             ? "No queue is declared yet."
             : `No ${chosen} queue is declared.`}
         </p>
       )}
       {listed.length > 0 && (
-        <table className="queues">
+        <table className="neorc-queues">
           <thead>
             <tr>
               <th>Queue</th>
@@ -80,9 +81,9 @@ export function QueuesPage({ kind }: { kind?: string }) {
                   </a>
                 </td>
                 <td>
-                  <span className={`kind kind-${queue.kind}`}>{queue.kind}</span>
+                  <span className={`neorc-kind neorc-kind-${queue.kind}`}>{queue.kind}</span>
                 </td>
-                <td className="muted">{KIND_NOTES[queue.kind]}</td>
+                <td className="neorc-muted">{KIND_NOTES[queue.kind]}</td>
               </tr>
             ))}
           </tbody>

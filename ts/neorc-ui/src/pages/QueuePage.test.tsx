@@ -18,7 +18,7 @@ function routes(tasks = [listed(TITLE), listed(REVIEW)]) {
 
 function asked(api: ReturnType<typeof mockApi>): URLSearchParams[] {
   return api.calls
-    .filter((call) => call.url.pathname === RECENT)
+    .filter((call) => call.url.pathname === `/neorc${RECENT}`)
     .map((call) => call.url.searchParams);
 }
 
@@ -74,11 +74,11 @@ describe("QueuePage", () => {
   });
 
   it.each([
-    [/State/, "all", "#/queues/editors?status=all"],
-    [/State/, "failed", "#/queues/editors?status=failed"],
-    [/^Flow/, "approval", "#/queues/editors?flow=approval"],
-    [/Changed in the last/, "7d", "#/queues/editors?window=7d"],
-    [/Changed in the last/, "30d", "#/queues/editors?window=30d"],
+    [/State/, "all", "#/neorc/queues/editors?status=all"],
+    [/State/, "failed", "#/neorc/queues/editors?status=failed"],
+    [/^Flow/, "approval", "#/neorc/queues/editors?flow=approval"],
+    [/Changed in the last/, "7d", "#/neorc/queues/editors?window=7d"],
+    [/Changed in the last/, "30d", "#/neorc/queues/editors?window=30d"],
   ])("filters through the address: %s to %s", async (label, value, hash) => {
     mockApi(routes());
     renderWithClient(<QueuePage name="queue" queue="editors" />);
@@ -101,12 +101,12 @@ describe("QueuePage", () => {
     await waitFor(() => expect(panel).toHaveTextContent("A first draft about tea."));
     expect(within(panel).getByRole("link", { name: "Close" })).toHaveAttribute(
       "href",
-      "#/queues/editors",
+      "#/neorc/queues/editors",
     );
     const row = (await screen.findAllByRole("row"))[1];
     expect(row).toHaveAttribute("aria-selected", "true");
     expect(
       screen.getByRole("link", { name: /review_draft/ }),
-    ).toHaveAttribute("href", `#/queues/editors?task=${REVIEW.id}`);
+    ).toHaveAttribute("href", `#/neorc/queues/editors?task=${REVIEW.id}`);
   });
 });

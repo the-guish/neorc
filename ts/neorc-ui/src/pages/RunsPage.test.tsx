@@ -28,7 +28,7 @@ describe("RunsPage", () => {
     expect(rows[2]).toHaveTextContent("2.5 s");
     expect(screen.getByRole("link", { name: "word_picker 5f3a1c2e" })).toHaveAttribute(
       "href",
-      `#/runs/${SUCCEEDED.id}`,
+      `#/neorc/runs/${SUCCEEDED.id}`,
     );
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
@@ -48,11 +48,11 @@ describe("RunsPage", () => {
     expect(screen.getByLabelText(/Flow/)).toHaveValue("hello");
     expect(screen.getByLabelText(/Status/)).toHaveValue("cancelled");
     expect(api.calls.map((call) => call.url.pathname + call.url.search)).toContain(
-      "/runs?flow=hello&status=cancelled&root_only=true&limit=50",
+      "/neorc/runs?flow=hello&status=cancelled&root_only=true&limit=50",
     );
 
     fireEvent.change(screen.getByLabelText(/Status/), { target: { value: "" } });
-    expect(location.hash).toBe("#/runs?flow=hello");
+    expect(location.hash).toBe("#/neorc/runs?flow=hello");
   });
 
   it("pages with the last run as the cursor", async () => {

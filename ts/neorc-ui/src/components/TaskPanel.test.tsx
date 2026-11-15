@@ -71,7 +71,7 @@ function resultOf(body: unknown): unknown {
 
 function open(task: Task, kind: QueueKind | undefined = "external") {
   return renderWithClient(
-    <TaskPanel id={task.id} kind={kind} closeHref="#/queues/editors" />,
+    <TaskPanel id={task.id} kind={kind} closeHref="#/neorc/queues/editors" />,
   );
 }
 
@@ -89,7 +89,7 @@ describe("TaskPanel", () => {
     expect(panel).toHaveTextContent("A first draft about tea.");
     expect(within(panel).getByRole("link", { name: "ed170000" })).toHaveAttribute(
       "href",
-      `#/runs/${WAITING.id}`,
+      `#/neorc/runs/${WAITING.id}`,
     );
   });
 
@@ -159,7 +159,7 @@ describe("TaskPanel", () => {
     // The form's own buttons complete the task: there is no other.
     expect(within(form).queryByRole("button", { name: "Complete" })).toBeNull();
     expect(within(form).getByRole("button", { name: "Re-work" })).toBeInTheDocument();
-    expect(within(form).getByRole("button", { name: "Ready" })).toHaveClass("primary");
+    expect(within(form).getByRole("button", { name: "Ready" })).toHaveClass("neorc-primary");
   });
 
   it.each([

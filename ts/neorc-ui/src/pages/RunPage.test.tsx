@@ -26,13 +26,13 @@ describe("RunPage on a recorded word_picker_rounds run", () => {
       expect(within(iteration).getByText("ran_enough")).toBeInTheDocument();
       expect(within(iteration).getByRole("link", { name: `run ${shortId(sub!.id)}` })).toHaveAttribute(
         "href",
-        `#/runs/${sub!.id}`,
+        `#/neorc/runs/${sub!.id}`,
       );
     }
     expect(screen.queryByRole("region", { name: "runs iteration 3" })).not.toBeInTheDocument();
     // The steps in the order they run, not the sorted order of the stored keys.
     expect(
-      [...(document.querySelector(".tree")?.children ?? [])].map(
+      [...(document.querySelector(".neorc-tree")?.children ?? [])].map(
         (step) => step.querySelector("strong")?.textContent,
       ),
     ).toEqual(["runs", "final_words", "decorate", "report"]);
@@ -86,7 +86,7 @@ describe("RunPage on a recorded word_picker_rounds run", () => {
     await screen.findByRole("heading", { level: 1 });
     expect(screen.getByRole("link", { name: `run ${shortId(run.id)}` })).toHaveAttribute(
       "href",
-      `#/runs/${run.id}`,
+      `#/neorc/runs/${run.id}`,
     );
     expect(screen.getByText(/at picker runs 1/)).toBeInTheDocument();
     // word_picker's own loop and fan-outs are drawn from its definition.
@@ -194,7 +194,7 @@ describe("cancelling a run", () => {
     expect(screen.getByText(/cancelled from its root/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "aaaaaaaa" })).toHaveAttribute(
       "href",
-      `#/runs/${sub.root_id}`,
+      `#/neorc/runs/${sub.root_id}`,
     );
   });
 
@@ -205,6 +205,18 @@ describe("cancelling a run", () => {
 
     await screen.findByRole("heading", { level: 1 });
     expect(screen.queryByRole("button", { name: "Cancel run" })).not.toBeInTheDocument();
+  });
+
+  it("names who started the run, by name or else by id", async () => {
+    const unnamed = { ...ACTIVE, started_by: { kind: "user" as const, id: "u-7", name: null } };
+    mockApi(activeRoutes(undefined));
+
+    const { unmount } = renderWithClient(<RunPage id={ACTIVE.id} />);
+    expect(await screen.findByText(/started .* by nightly$/)).toBeInTheDocument();
+    unmount();
+    mockApi({ ...activeRoutes(undefined), [`/runs/${ACTIVE.id}`]: unnamed });
+    renderWithClient(<RunPage id={ACTIVE.id} />);
+    expect(await screen.findByText(/started .* by u-7$/)).toBeInTheDocument();
   });
 });
 
@@ -231,7 +243,7 @@ describe("the graph view", () => {
     expect(within(canvas).getAllByLabelText("succeeded")).toHaveLength(8);
     expect(within(canvas).getByRole("link", { name: `run ${shortId(sub_runs[1]!.id)}` })).toHaveAttribute(
       "href",
-      `#/runs/${sub_runs[1]!.id}`,
+      `#/neorc/runs/${sub_runs[1]!.id}`,
     );
     // The outline is not there as well: one view at a time.
     expect(screen.queryByRole("region", { name: "runs iteration 1" })).not.toBeInTheDocument();
@@ -239,7 +251,7 @@ describe("the graph view", () => {
     expect(within(switcher).getByRole("link", { name: "Graph" })).toHaveAttribute("aria-current", "true");
     expect(within(switcher).getByRole("link", { name: "Outline" })).toHaveAttribute(
       "href",
-      `#/runs/${run.id}?view=outline`,
+      `#/neorc/runs/${run.id}?view=outline`,
     );
   });
 
@@ -345,7 +357,7 @@ describe("the graph view", () => {
     const outcome = await within(canvas).findByText(
       "ran_enough returned false on the last of 4 iterations",
     );
-    expect(outcome.closest(".graph-container")).toHaveClass("graph-failed");
+    expect(outcome.closest(".neorc-graph-container")).toHaveClass("neorc-graph-failed");
     expect(within(canvas).getByLabelText("runs: iteration shown")).toHaveValue("4");
     graph.unmount();
 
@@ -353,7 +365,7 @@ describe("the graph view", () => {
     const said = await screen.findByText(
       "iteration 4: ran_enough returned false on the last of 4 iterations",
     );
-    expect(said.closest(".card")).toHaveClass("loop-failed");
+    expect(said.closest(".neorc-card")).toHaveClass("neorc-loop-failed");
   });
 
   it("draws a run that has published nothing yet, containers not entered", async () => {
