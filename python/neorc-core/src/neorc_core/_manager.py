@@ -31,6 +31,7 @@ from neorc_core._runs import (
     QueueTask,
     Run,
     RunId,
+    RunStarter,
     RunStatus,
     StoredFlow,
     Task,
@@ -39,6 +40,7 @@ from neorc_core._runs import (
 )
 from neorc_core._task import TaskId, TaskStatus
 from neorc_core._values import JsonValue
+from neorc_core._wire import starter_to
 from neorc_core.flows import (
     Address,
     FlowDefinition,
@@ -186,15 +188,23 @@ class Manager:
         """A run's direct sub-flow runs, in the order they started."""
         return await self._store.sub_runs(run_id)
 
-    async def start_run(self, flow: str, inputs: Mapping[str, JsonValue]) -> Run:
-        """Start a run of ``flow``'s latest version.
+    async def start_run(
+        self,
+        flow: str,
+        inputs: Mapping[str, JsonValue],
+        *,
+        started_by: RunStarter | None = None,
+    ) -> Run:
+        """Start a run of ``flow``'s latest version, for ``started_by``.
 
         ``inputs`` are in their JSON form, and must be exactly the flow's
         declared inputs, each of its declared type: ``InvalidValueError``
         otherwise. ``FlowNotFoundError`` if there is no such flow.
+        ``started_by`` is who asked, as the host names them; the run and
+        every sub-flow run of its tree keep it.
         """
         _lookup(flow, "flow name")
-        run = await self._start_latest(flow, inputs)
+        run = await self._start_latest(flow, inputs, started_by=started_by)
         await self._events.notify()
         return run
 
@@ -274,15 +284,22 @@ class Manager:
         """Start the sub-flow run at ``address`` in an active parent run.
 
         It runs the called flow's latest version, with its inputs resolved now
-        and checked against that version's declared types. Starting the same
-        address again returns the run already started.
+        and checked against that version's declared types. It has the parent's
+        starter. Starting the same address again returns the run already
+        started.
         """
         run, definition, state = await self._context(parent_id)
         ensure_active(run)
         step = _step_at(definition, address, SubFlowStep)
         inputs = _inputs(run, definition, state, step, address)
+        # Whoever asks, the scheduler included: the tree is its starter's.
+        # A run's starter never changes, so the parent's holds for the write.
         sub_run = await self._start_latest(
-            step.flow, inputs, parent_id=parent_id, parent_address=address
+            step.flow,
+            inputs,
+            parent_id=parent_id,
+            parent_address=address,
+            started_by=run.started_by,
         )
         await self._events.notify()
         return sub_run
@@ -548,6 +565,7 @@ class Manager:
         *,
         parent_id: RunId | None = None,
         parent_address: Address | None = None,
+        started_by: RunStarter | None = None,
     ) -> Run:
         """Start a run on the latest version, checking inputs against that version.
 
@@ -565,6 +583,7 @@ class Manager:
                     inputs,
                     parent_id=parent_id,
                     parent_address=parent_address,
+                    started_by=started_by,
                 )
             except FlowVersionError:
                 if attempt == _START_ATTEMPTS - 1:
@@ -722,6 +741,9 @@ def _filled_in(
                 continue
             if reference.name == "flow_run_id":
                 values[name] = str(run.id)
+                continue
+            if reference.name == "started_by":
+                values[name] = starter_to(run.started_by)
                 continue
         resolved = resolve(definition, state, address, reference)
         if resolved is None:

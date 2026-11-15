@@ -77,6 +77,19 @@ A person's scripts send a personal token, which the person makes in the UI. It h
 `neorc/external-trigger` can only start new runs, of any flow. It reads nothing but the run it gets back when starting one.
 
 
+## Who started a run
+
+A run records who started it, as `started_by`: a person or a service, with the id and the name oneberth keeps.
+
+- A person is the same starter with a session, a personal token or a linked device. The id is the person's user id, and the name is the person's name.
+- A service is its token. The id is the token's id, and the name is the token's name.
+- The record holds no secret and no email.
+- A sub-flow run has the starter of its parent. The scheduler starts sub-flow runs and is never a starter.
+- A run started in process, as `neorc run` does, has no starter.
+
+A task's handler receives the starter when the task asks for `neorc.started_by`. A handler that acts for that person in a host, such as Robinauts, reads it there.
+
+
 ## Token creation
 
 Service tokens are oneberth's. The operator creates, lists and revokes them with `neorc tokens`, oneberth's admin scripts shown with neorc's roles, connecting to the database. An admin creates them in the UI too.

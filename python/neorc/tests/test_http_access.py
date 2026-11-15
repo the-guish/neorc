@@ -629,3 +629,114 @@ async def test_the_worker_listener_serves_the_routes_a_queue_role_may_call(
     assert (pending.status_code, _error(pending)) == (403, "Forbidden")
     assert flows.status_code == 404
     assert runs.status_code == 404
+
+
+# Who started a run.
+
+WHO = {
+    "name": "who",
+    "version": "1.0.0",
+    "steps": {
+        "by": {"handler": "m:by", "params": {"by": "neorc.started_by"}},
+        "call": {"flow": "f", "params": {}},
+    },
+}
+
+
+async def _ada(app: Composition) -> dict[str, Any]:
+    from oneberth.web.testing import TEST_PROVIDER
+
+    ada = await app.access.store.user_of(TEST_PROVIDER, "ada")
+    assert ada is not None
+    return {"kind": "user", "id": str(ada.id), "name": "Ada Lovelace"}
+
+
+async def _started(
+    guarded: httpx.AsyncClient, app: Composition, headers: dict[str, str]
+) -> httpx.Response:
+    ci = await token(app, Role.CI)
+    await guarded.post("/flows", json={"flows": [FLOW, WHO]}, headers=bearer(ci))
+    return await guarded.post("/flows/who/runs", json={"inputs": {}}, headers=headers)
+
+
+async def _read(guarded: httpx.AsyncClient, app: Composition, run_id: str) -> Any:
+    user = await token(app, Role.USER)
+    return (await guarded.get(f"/runs/{run_id}", headers=bearer(user))).json()
+
+
+async def test_a_run_a_person_starts_in_the_browser_is_theirs(
+    guarded: httpx.AsyncClient, app: Composition
+) -> None:
+    from oneberth.web.testing import client_of, signed_in
+
+    ci = await token(app, Role.CI)
+    await guarded.post("/flows", json={"flows": [FLOW, WHO]}, headers=bearer(ci))
+    async with client_of(app) as browser:
+        await signed_in(app, browser)
+        started = await browser.post("/neorc/flows/who/runs", json={"inputs": {}})
+        listed = await browser.get("/neorc/runs")
+
+    assert started.status_code == 201
+    assert started.json()["started_by"] == await _ada(app)
+    assert listed.json()["runs"][0]["started_by"] == await _ada(app)
+
+
+async def test_a_run_a_persons_own_token_starts_is_that_persons(
+    guarded: httpx.AsyncClient, app: Composition
+) -> None:
+    started = await _started(guarded, app, bearer(await token(app, Role.USER)))
+
+    assert started.json()["started_by"] == await _ada(app)
+    assert (await _read(guarded, app, started.json()["id"]))["started_by"] == (
+        await _ada(app)
+    )
+
+
+async def test_a_run_a_service_token_starts_is_that_services(
+    guarded: httpx.AsyncClient, app: Composition
+) -> None:
+    trigger = await token(app, Role.EXTERNAL_TRIGGER)
+    (made,) = [
+        t
+        for t in await app.access.store.service_tokens()
+        if t.grant.role == Role.EXTERNAL_TRIGGER.value
+    ]
+
+    started = await _started(guarded, app, bearer(trigger))
+
+    expected = {"kind": "service", "id": str(made.id), "name": made.name}
+    assert started.json()["started_by"] == expected
+    assert (await _read(guarded, app, started.json()["id"]))["started_by"] == expected
+
+
+async def test_what_the_scheduler_starts_and_a_handler_receives_are_the_starters(
+    guarded: httpx.AsyncClient, app: Composition
+) -> None:
+    """The scheduler starts no top-level run; a sub-flow run it starts, and the
+    tasks it publishes, are of the person who started the tree."""
+    scheduler = await token(app, Role.SCHEDULER)
+    worker = await token(app, Role.WORKER, "default")
+    run_id = (await _started(guarded, app, bearer(await token(app, Role.USER)))).json()[
+        "id"
+    ]
+
+    refused = await guarded.post(
+        "/flows/who/runs", json={"inputs": {}}, headers=bearer(scheduler)
+    )
+    sub_run = await guarded.post(
+        f"/runs/{run_id}/sub-runs",
+        json={"address": {"step": "call", "scope": []}},
+        headers=bearer(scheduler),
+    )
+    await guarded.post(
+        f"/runs/{run_id}/tasks",
+        json={"address": {"step": "by", "scope": []}},
+        headers=bearer(scheduler),
+    )
+    received = await guarded.post(
+        "/queues/default/tasks/receive", params={"timeout": 0}, headers=bearer(worker)
+    )
+
+    assert (refused.status_code, _error(refused)) == (403, "Forbidden")
+    assert sub_run.json()["started_by"] == await _ada(app)
+    assert received.json()["inputs"] == {"by": await _ada(app)}

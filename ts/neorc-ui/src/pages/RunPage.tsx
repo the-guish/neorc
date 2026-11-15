@@ -79,6 +79,7 @@ function Loaded({
           </h1>
           <p className="neorc-mono-line neorc-subtitle">
             {run.id} · version {run.version} · started {formatTime(run.created_at)}
+            {run.started_by && ` by ${run.started_by.name ?? run.started_by.id}`}
             {run.finished_at &&
               ` · finished ${formatTime(run.finished_at)}, took ${formatDuration(run.created_at, run.finished_at)}`}
           </p>

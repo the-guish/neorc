@@ -57,6 +57,13 @@ one version, cut from a single tag on `main`.
 
 ### Added
 
+- `neorc`, `neorc-core`, `neorc-ui`: a run records who started it, as
+  `RunStarter`: a person or a service, with oneberth's id and name for it. The
+  manager's route that starts a run takes it from the principal; `Manager.start_run`
+  and `Store.start_run` take `started_by`, and a sub-flow run gets its
+  parent's. Every store keeps it, and the SQLite file is at version 2. A run's
+  answer has `started_by`, and the run's page shows it. A task asks for it as
+  `neorc.started_by`.
 - `neorc`: `neorc.sqlite.SqliteStore`, the `Store` in one SQLite file, on the
   standard library's `sqlite3`. It passes the store contract. One thread and
   one connection serve it, one transaction at a time, and the event loop

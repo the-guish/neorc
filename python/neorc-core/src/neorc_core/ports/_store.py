@@ -21,6 +21,7 @@ from neorc_core._runs import (
     QueueTask,
     Run,
     RunId,
+    RunStarter,
     RunStatus,
     StoredFlow,
     Task,
@@ -122,8 +123,11 @@ class Store(ABC):
         *,
         parent_id: RunId | None = None,
         parent_address: Address | None = None,
+        started_by: RunStarter | None = None,
     ) -> Run:
         """Start an active run of ``version``, and record a "run started" event.
+
+        The run keeps ``started_by`` as it is given, for a sub-flow run too.
 
         ``version`` must still be the flow's latest, or this raises
         ``FlowVersionError``; ``FlowNotFoundError`` if the flow is unknown. A

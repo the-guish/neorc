@@ -83,6 +83,7 @@ export const SUCCEEDED: Run = {
   reason: null,
   created_at: "2026-09-13T10:00:00+00:00",
   finished_at: "2026-09-13T10:00:02.500000+00:00",
+  started_by: { kind: "user", id: "0d1e2f30-1111-4bbb-8ccc-0000000000ad", name: "Ada Lovelace" },
 };
 
 export const ACTIVE: Run = {
@@ -98,6 +99,7 @@ export const ACTIVE: Run = {
   reason: null,
   created_at: "2026-09-13T10:05:00+00:00",
   finished_at: null,
+  started_by: { kind: "service", id: "5e7f1ce0-1111-4bbb-8ccc-000000000007", name: "nightly" },
 };
 
 export const CANCELLED: Run = {

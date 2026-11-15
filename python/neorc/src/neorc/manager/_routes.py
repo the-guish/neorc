@@ -67,7 +67,9 @@ from neorc_core import (
     PayloadTooLargeError,
     Permission,
     RunId,
+    RunStarter,
     RunStatus,
+    StarterKind,
     TaskId,
     TaskStatus,
 )
@@ -303,16 +305,30 @@ async def get_flow_version(manager: Managed, name: str, version: str) -> dict[st
     return _flow_response(await manager.get_flow(name, parsed))
 
 
+def starter_of(principal: Principal) -> RunStarter:
+    """Who a run is started by: the person, whatever credential they sent, or
+    the service whose token asks. A person's id and name are oneberth's."""
+    if principal.user is None:
+        token = principal.credential
+        return RunStarter(StarterKind.SERVICE, str(token.id), principal.name)
+    user = principal.user
+    return RunStarter(StarterKind.USER, str(user.id), user.name)
+
+
 @router.post(
     "/flows/{name}/runs",
-    dependencies=[permit(Permission.RUNS_START)],
     status_code=status.HTTP_201_CREATED,
     responses=documented(RunResponse, status.HTTP_201_CREATED),
 )
-async def start_run(request: Request, manager: Managed, name: str) -> JSONResponse:
-    """Start a run of the flow's latest version."""
+async def start_run(
+    request: Request,
+    manager: Managed,
+    principal: Annotated[Principal, permit(Permission.RUNS_START)],
+    name: str,
+) -> JSONResponse:
+    """Start a run of the flow's latest version, for whoever asks."""
     body = await read_body(request, StartRunRequest)
-    run = await manager.start_run(name, body.inputs)
+    run = await manager.start_run(name, body.inputs, started_by=starter_of(principal))
     return JSONResponse(wire.run_to(run), status_code=status.HTTP_201_CREATED)
 
 

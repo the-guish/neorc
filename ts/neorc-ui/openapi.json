@@ -444,6 +444,16 @@
             "title": "Root Id",
             "type": "string"
           },
+          "started_by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StarterResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "status": {
             "$ref": "#/components/schemas/RunStatus"
           },
@@ -464,7 +474,8 @@
           "output",
           "reason",
           "created_at",
-          "finished_at"
+          "finished_at",
+          "started_by"
         ],
         "title": "RunResponse",
         "type": "object"
@@ -502,6 +513,45 @@
         ],
         "title": "RunStatus",
         "type": "string"
+      },
+      "StarterKind": {
+        "description": "What started a run: a person, or a program with a token of its own.",
+        "enum": [
+          "user",
+          "service"
+        ],
+        "title": "StarterKind",
+        "type": "string"
+      },
+      "StarterResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/StarterKind"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "name"
+        ],
+        "title": "StarterResponse",
+        "type": "object"
       },
       "StepResponse": {
         "additionalProperties": false,
@@ -1301,7 +1351,7 @@
     },
     "/neorc/flows/{name}/runs": {
       "post": {
-        "description": "Start a run of the flow's latest version.",
+        "description": "Start a run of the flow's latest version, for whoever asks.",
         "operationId": "start_run_neorc_flows__name__runs_post",
         "parameters": [
           {

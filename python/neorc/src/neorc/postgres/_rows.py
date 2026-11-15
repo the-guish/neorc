@@ -16,7 +16,16 @@ from typing import Any
 
 from neorc.postgres._driver import Record
 from neorc_core import _values, _wire
-from neorc_core._runs import Event, EventKind, Run, RunStatus, StoredFlow, Task
+from neorc_core._runs import (
+    Event,
+    EventKind,
+    Run,
+    RunStarter,
+    RunStatus,
+    StarterKind,
+    StoredFlow,
+    Task,
+)
 from neorc_core._runs import canonical_content as _canonical_content
 from neorc_core._task import TaskStatus
 from neorc_core._values import JsonValue
@@ -28,7 +37,7 @@ Row = Record
 FLOW_COLUMNS = "name, major, minor, patch, content"
 RUN_COLUMNS = (
     "id, flow, version, inputs, status, root_id, parent_id, parent_address, "
-    "output, reason, created_at, finished_at"
+    "output, reason, created_at, finished_at, starter_kind, starter_id, starter_name"
 )
 TASK_COLUMNS = (
     "id, run_id, address, queue, handler, params, fixed_params, status, "
@@ -80,7 +89,24 @@ def run_to_row(run: Run) -> dict[str, Any]:
         "reason": run.reason,
         "created_at": run.created_at,
         "finished_at": run.finished_at,
+        **starter_to_row(run.started_by),
     }
+
+
+def starter_to_row(starter: RunStarter | None) -> dict[str, Any]:
+    return {
+        "starter_kind": starter.kind.value if starter is not None else None,
+        "starter_id": starter.id if starter is not None else None,
+        "starter_name": starter.name if starter is not None else None,
+    }
+
+
+def starter_from_row(row: Row) -> RunStarter | None:
+    if row["starter_kind"] is None:
+        return None
+    return RunStarter(
+        StarterKind(row["starter_kind"]), row["starter_id"], row["starter_name"]
+    )
 
 
 def run_from_row(row: Row) -> Run:
@@ -101,6 +127,7 @@ def run_from_row(row: Row) -> Run:
         reason=row["reason"],
         created_at=row["created_at"],
         finished_at=row["finished_at"],
+        started_by=starter_from_row(row),
     )
 
 

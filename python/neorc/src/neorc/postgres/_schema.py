@@ -20,7 +20,8 @@ The choices behind the tables are in docs/working-notes/decisions-from-past-plan
   SHARE`` lock on the run it references, outside the store's lock order. The
   store's operations keep the references whole.
 - The ``CHECK`` constraints mirror ``TaskStatus``, ``RunStatus``,
-  ``EventKind`` and ``QueueKind``; a test keeps them in step with the enums.
+  ``EventKind``, ``QueueKind`` and ``StarterKind``; a test keeps them in
+  step with the enums.
 - Credentials are oneberth's, in its own schema ``oneberth`` of the same
   database: neorc keeps none.
 - Runs and tasks are ordered by ``position``, not by their timestamps:
@@ -102,7 +103,11 @@ CREATE TABLE IF NOT EXISTS {RUNS_TABLE} (
     reason           text,
     created_at       timestamptz NOT NULL DEFAULT now(),
     finished_at      timestamptz,
-    position         bigint NOT NULL DEFAULT 0
+    position         bigint NOT NULL DEFAULT 0,
+    starter_kind     text CHECK (starter_kind IN ('user', 'service')),
+    starter_id       text,
+    starter_name     text,
+    CHECK ((starter_kind IS NULL) = (starter_id IS NULL))
 );
 
 -- position orders runs by start, for listing and paging. The store sets it as

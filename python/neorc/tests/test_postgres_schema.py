@@ -61,6 +61,7 @@ from neorc_core import (
     QueueKind,
     Run,
     RunStatus,
+    StarterKind,
     StoredFlow,
     Task,
     TaskStatus,
@@ -165,13 +166,15 @@ async def test_create_schema_adds_the_columns_tables_from_before_lack(
 
             runs = await _names(conn, _COLUMNS, RUNS_TABLE)
             tasks = await _names(conn, _COLUMNS, FLOW_TASKS_TABLE)
+            # Columns added later, such as the starter's, are in the
+            # statements alone: such a table is not read as a run.
             (row,) = await conn.fetch(
-                f"SELECT {RUN_COLUMNS}, position FROM {RUNS_TABLE}"
+                f"SELECT id, created_at, position FROM {RUNS_TABLE}"
             )
 
         assert {"created_at", "finished_at", "position"} <= runs
         assert {"created_at", "started_at", "finished_at"} <= tasks
-        assert run_from_row(row).id == run_id
+        assert row["id"] == run_id
         assert row["created_at"] is not None and row["position"] == 1  # backfilled
     finally:  # the tables lack their constraints: leave nothing for the next test
         await drop_schema(database_url)
@@ -193,12 +196,14 @@ SELECT pg_get_constraintdef(c.oid) AS definition
         (RUNS_TABLE, "status", RunStatus),
         (EVENTS_TABLE, "kind", EventKind),
         (QUEUES_TABLE, "kind", QueueKind),
+        (RUNS_TABLE, "starter_kind", StarterKind),
     ],
     ids=[
         "tasks",
         "runs",
         "events",
         "queue-kinds",
+        "starter-kinds",
     ],
 )
 async def test_check_constraints_are_in_step_with_the_enums(

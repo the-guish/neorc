@@ -479,7 +479,7 @@ def test_a_consumer_address_must_match_the_definition(consumer: Address) -> None
         resolve(PICKER, picker_state(), consumer, tasks("compose_payload"))
 
 
-@pytest.mark.parametrize("name", ["task_id", "flow_run_id", "attempts"])
+@pytest.mark.parametrize("name", ["task_id", "flow_run_id", "started_by", "attempts"])
 def test_metadata_known_only_to_the_manager_or_worker_is_not_resolved(
     name: str,
 ) -> None:

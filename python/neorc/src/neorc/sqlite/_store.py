@@ -67,6 +67,7 @@ from neorc_core import (
     Run,
     RunId,
     RunNotFoundError,
+    RunStarter,
     RunStatus,
     Store,
     StoredFlow,
@@ -360,11 +361,18 @@ class SqliteStore(Store):
         *,
         parent_id: RunId | None = None,
         parent_address: Address | None = None,
+        started_by: RunStarter | None = None,
     ) -> Run:
         if (parent_id is None) != (parent_address is None):
             raise ValueError("a sub-flow run names both its parent and its address")
         return await self._write(
-            _start_run, flow, version, dict(inputs), parent_id, parent_address
+            _start_run,
+            flow,
+            version,
+            dict(inputs),
+            parent_id,
+            parent_address,
+            started_by,
         )
 
     async def get_run(self, run_id: RunId) -> Run:
@@ -583,6 +591,7 @@ def _start_run(
     inputs: dict[str, JsonValue],
     parent_id: RunId | None,
     parent_address: Address | None,
+    started_by: RunStarter | None,
 ) -> Run:
     latest = _flow(conn, flow, None).version
     if version != latest:
@@ -608,6 +617,7 @@ def _start_run(
         root_id=root_id,
         parent_id=parent_id,
         parent_address=parent_address,
+        started_by=started_by,
     )
     conn.execute(_INSERT_RUN, run_to_row(run, _now()))
     _append(conn, run_id, EventKind.RUN_STARTED)

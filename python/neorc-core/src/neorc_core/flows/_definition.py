@@ -61,7 +61,15 @@ class Namespace(StrEnum):
 
 
 NEORC_METADATA = frozenset(
-    {"task_id", "attempts", "flow_run_id", "loop_count", "index", "item"}
+    {
+        "task_id",
+        "attempts",
+        "flow_run_id",
+        "started_by",
+        "loop_count",
+        "index",
+        "item",
+    }
 )
 """What a task can request under ``neorc.``."""
 

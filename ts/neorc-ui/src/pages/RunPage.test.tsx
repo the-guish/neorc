@@ -206,6 +206,18 @@ describe("cancelling a run", () => {
     await screen.findByRole("heading", { level: 1 });
     expect(screen.queryByRole("button", { name: "Cancel run" })).not.toBeInTheDocument();
   });
+
+  it("names who started the run, by name or else by id", async () => {
+    const unnamed = { ...ACTIVE, started_by: { kind: "user" as const, id: "u-7", name: null } };
+    mockApi(activeRoutes(undefined));
+
+    const { unmount } = renderWithClient(<RunPage id={ACTIVE.id} />);
+    expect(await screen.findByText(/started .* by nightly$/)).toBeInTheDocument();
+    unmount();
+    mockApi({ ...activeRoutes(undefined), [`/runs/${ACTIVE.id}`]: unnamed });
+    renderWithClient(<RunPage id={ACTIVE.id} />);
+    expect(await screen.findByText(/started .* by u-7$/)).toBeInTheDocument();
+  });
 });
 
 describe("the graph view", () => {

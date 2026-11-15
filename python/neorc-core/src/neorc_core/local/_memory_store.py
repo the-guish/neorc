@@ -25,6 +25,7 @@ from neorc_core._runs import (
     QueueTask,
     Run,
     RunId,
+    RunStarter,
     RunStatus,
     StoredFlow,
     Task,
@@ -151,6 +152,7 @@ class MemoryStore(Store):
         *,
         parent_id: RunId | None = None,
         parent_address: Address | None = None,
+        started_by: RunStarter | None = None,
     ) -> Run:
         if (parent_id is None) != (parent_address is None):
             raise ValueError("a sub-flow run names both its parent and its address")
@@ -182,6 +184,7 @@ class MemoryStore(Store):
                 parent_id=parent_id,
                 parent_address=parent_address,
                 created_at=datetime.now(UTC),
+                started_by=started_by,
             )
             self._runs[run_id] = run
             self._append(run_id, EventKind.RUN_STARTED)

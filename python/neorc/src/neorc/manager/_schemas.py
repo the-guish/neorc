@@ -15,7 +15,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
-from neorc_core import EventKind, QueueKind, RunStatus, TaskStatus
+from neorc_core import EventKind, QueueKind, RunStatus, StarterKind, TaskStatus
 from neorc_core.flows import Outcome
 
 
@@ -50,6 +50,14 @@ class AddressResponse(_Exact):
     """The enclosing loops and fan-outs, outermost first, each with its number."""
 
 
+class StarterResponse(_Exact):
+    kind: StarterKind
+    id: str
+    """The person's user id, or the service token's id, as oneberth keeps them."""
+    name: str | None
+    """The person's name, or the service token's name."""
+
+
 class RunResponse(_Exact):
     id: str
     flow: str
@@ -63,6 +71,8 @@ class RunResponse(_Exact):
     reason: str | None
     created_at: str | None
     finished_at: str | None
+    started_by: StarterResponse | None
+    """Who started the run's tree; ``null`` for a run started in process."""
 
 
 class RunListResponse(_Exact):

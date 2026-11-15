@@ -5,7 +5,14 @@
 
 import pytest
 
-from neorc_core import Manager, ManagerClient, QueueClient, QueueKind
+from neorc_core import (
+    Manager,
+    ManagerClient,
+    QueueClient,
+    QueueKind,
+    RunStarter,
+    StarterKind,
+)
 from neorc_core.local import (
     DirectManagerClient,
     DirectQueueClient,
@@ -13,6 +20,9 @@ from neorc_core.local import (
     MemoryTaskNotifier,
 )
 from neorc_core.testing.contracts import ManagerClientContract, QueueClientContract
+
+SCRIPT = RunStarter(StarterKind.SERVICE, "1", "a deploy script")
+"""Who the direct client asks for, as a token would name a service over HTTP."""
 
 
 @pytest.fixture
@@ -35,7 +45,7 @@ def manager() -> Manager:
 class _Direct:
     @pytest.fixture
     def manager_client(self, manager: Manager) -> ManagerClient:
-        return DirectManagerClient(manager)
+        return DirectManagerClient(manager, started_by=SCRIPT)
 
     @pytest.fixture
     def queue_client(self, manager: Manager) -> QueueClient:

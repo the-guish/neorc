@@ -170,8 +170,8 @@ inputs.
 
 Metadata a task can request as inputs is filled in by whoever knows it:
 
-- Known when the task is published — `task_id`, the flow run id, the loop count,
-  the fan-out index: filled in by the manager.
+- Known when the task is published — `task_id`, the flow run id, the run's
+  starter, the loop count, the fan-out index: filled in by the manager.
 - Known only when the task is delivered — `attempts`: filled in by the worker
   SDK, from the queue backend (with SQS, the message's receive count).
 

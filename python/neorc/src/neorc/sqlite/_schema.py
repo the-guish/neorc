@@ -23,9 +23,9 @@ from __future__ import annotations
 import os
 import sqlite3
 
-from neorc_core import EventKind, QueueKind, RunStatus, TaskStatus
+from neorc_core import EventKind, QueueKind, RunStatus, StarterKind, TaskStatus
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 """The version of the tables this neorc reads and writes, kept in ``user_version``."""
 
 APPLICATION_ID = 0x6E656F72
@@ -41,7 +41,9 @@ EVENTS_TABLE = "neorc_events"
 QUEUES_TABLE = "neorc_queues"
 
 
-def _one_of(values: type[TaskStatus | RunStatus | EventKind | QueueKind]) -> str:
+def _one_of(
+    values: type[TaskStatus | RunStatus | EventKind | QueueKind | StarterKind],
+) -> str:
     return ", ".join(f"'{member.value}'" for member in values)
 
 
@@ -68,7 +70,11 @@ CREATE TABLE {RUNS_TABLE} (
     output           TEXT NOT NULL DEFAULT 'null',
     reason           TEXT,
     created_at       INTEGER NOT NULL,
-    finished_at      INTEGER
+    finished_at      INTEGER,
+    starter_kind     TEXT CHECK (starter_kind IN ({_one_of(StarterKind)})),
+    starter_id       TEXT,
+    starter_name     TEXT,
+    CHECK ((starter_kind IS NULL) = (starter_id IS NULL))
 );
 CREATE INDEX {RUNS_TABLE}_root_idx ON {RUNS_TABLE} (root_id);
 CREATE INDEX {RUNS_TABLE}_parent_idx ON {RUNS_TABLE} (parent_id);

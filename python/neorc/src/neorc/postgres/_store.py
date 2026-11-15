@@ -73,6 +73,7 @@ from neorc_core import (
     Run,
     RunId,
     RunNotFoundError,
+    RunStarter,
     RunStatus,
     Store,
     StoredFlow,
@@ -153,7 +154,7 @@ SELECT {FLOW_COLUMNS} FROM {FLOW_VERSIONS_TABLE}
 # the row back to be what the caller returns.
 _INSERT_RUN_COLUMNS = (
     "id, flow, version, inputs, status, root_id, parent_id, parent_address, "
-    "output, reason"
+    "output, reason, starter_kind, starter_id, starter_name"
 )
 _INSERT_RUN = f"""
 INSERT INTO {RUNS_TABLE} ({_INSERT_RUN_COLUMNS}, created_at)
@@ -446,6 +447,7 @@ class PostgresStore(Pooled, Store):
         *,
         parent_id: RunId | None = None,
         parent_address: Address | None = None,
+        started_by: RunStarter | None = None,
     ) -> Run:
         if (parent_id is None) != (parent_address is None):
             raise ValueError("a sub-flow run names both its parent and its address")
@@ -476,6 +478,7 @@ class PostgresStore(Pooled, Store):
                 root_id=root_id,
                 parent_id=parent_id,
                 parent_address=parent_address,
+                started_by=started_by,
             )
             row = await conn.fetchrow(
                 _INSERT_RUN, *values(run_to_row(run), _INSERT_RUN_COLUMNS)
