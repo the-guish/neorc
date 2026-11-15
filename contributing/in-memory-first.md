@@ -35,6 +35,7 @@ python/neorc-core/src/neorc_core/
 
 python/neorc/src/neorc/
   postgres/         the store and notifier ports, on Postgres
+  sqlite/           the store port, on one SQLite file
   manager/          FastAPI routes, translating HTTP to Manager calls
   http/             the client ports, over HTTP
   _cli.py           commands, including `neorc run` on LocalCluster
@@ -100,8 +101,8 @@ in the same pull request.
 
 `neorc_core.testing.contracts` holds test suites written against the ports:
 one for the store, one for each client port. `neorc-core` runs them against
-the in-memory adapters; `neorc` runs the same suites against Postgres and
-against the HTTP clients talking to a real manager.
+the in-memory adapters; `neorc` runs the same suites against Postgres, against
+SQLite, and against the HTTP clients talking to a real manager.
 
 A behaviour an adapter must have is written once, as a contract test, and
 proven on every implementation. A new adapter — another database, SQS — starts
@@ -126,7 +127,7 @@ never the command line.
 
 **`python/neorc/tests`** — only what the adapters add:
 
-- The contract suites, on Postgres and on the HTTP clients.
+- The contract suites, on Postgres, on SQLite and on the HTTP clients.
 - What has no in-memory counterpart: SQL and schema creation, connection
   pooling, `LISTEN`/`NOTIFY`, HTTP status codes and request validation, CLI
   wiring.

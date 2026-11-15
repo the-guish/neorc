@@ -5,7 +5,7 @@
 
 Importing this package pulls in no optional dependency. The adapters live in
 subpackages that match the extras that install them: ``neorc.http``,
-``neorc.manager`` and ``neorc.postgres``.
+``neorc.manager`` and ``neorc.postgres``. ``neorc.sqlite`` needs no extra.
 """
 
 from importlib.metadata import PackageNotFoundError, version
