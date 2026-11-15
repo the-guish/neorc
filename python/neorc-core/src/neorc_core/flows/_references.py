@@ -80,10 +80,10 @@ def resolve(
     loop it needs has not finished. A failed instance stays unavailable; noticing
     the failure is the planner's job.
 
-    ``neorc.task_id``, ``neorc.flow_run_id`` and ``neorc.attempts`` are not in
-    a run's state: the manager and the worker fill them in, and asking for them
-    here is a ``ValueError``. So is a ``consumer`` whose scope does not match
-    where its step is in ``definition``.
+    ``neorc.task_id``, ``neorc.flow_run_id``, ``neorc.started_by`` and
+    ``neorc.attempts`` are not in a run's state: the manager and the worker
+    fill them in, and asking for them here is a ``ValueError``. So is a
+    ``consumer`` whose scope does not match where its step is in ``definition``.
 
     Raises ``ResolutionError`` when a fan-out's ``over`` value, needed on the
     way, is not a list.

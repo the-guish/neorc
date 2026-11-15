@@ -11,6 +11,10 @@ and a body naming the class::
 A ``FlowDefinitionError`` carries its ``problems`` too. Clients raise the
 exception the ``error`` field names: several classes share a status, and
 callers branch on the type. A worker drops a task on ``RunStateError`` alone.
+
+oneberth refuses a request before it reaches the manager, in the same shape
+with a name of its own, such as ``Unauthorized``. ``ONEBERTH_REFUSALS`` gives
+each the core exception a client raises for it.
 """
 
 from __future__ import annotations
@@ -34,7 +38,6 @@ from neorc_core import (
     ResolutionError,
     RunNotFoundError,
     RunStateError,
-    SignInRefusedError,
     TaskNotFoundError,
     TaskStateError,
     UnsupportedMediaTypeError,
@@ -57,7 +60,6 @@ STATUS_OF: dict[type[NeorcError], int] = {
     AccessError: 403,
     AuthenticationError: 401,
     PermissionDeniedError: 403,
-    SignInRefusedError: 403,
     CrossSiteRequestError: 403,
     # What was named is not there.
     FlowNotFoundError: 404,
@@ -67,6 +69,21 @@ STATUS_OF: dict[type[NeorcError], int] = {
     ManagerUnavailableError: 503,
 }
 """The HTTP status each core error answers with. Every subclass is listed."""
+
+ONEBERTH_REFUSALS: dict[str, type[NeorcError]] = {
+    "Unauthorized": AuthenticationError,
+    "TwoCredentials": AuthenticationError,
+    "Forbidden": PermissionDeniedError,
+    "BearerRefused": PermissionDeniedError,
+    "FreshSignInRequired": PermissionDeniedError,
+    "CrossSite": CrossSiteRequestError,
+    "CrossOrigin": CrossSiteRequestError,
+    "UnsupportedMediaType": UnsupportedMediaTypeError,
+    "PayloadTooLarge": PayloadTooLargeError,
+    "InvalidRequest": InvalidValueError,
+    "InvalidValue": InvalidValueError,
+}
+"""The refusals oneberth answers before a route runs, by the name it gives them."""
 
 WITH_PROBLEMS: tuple[type[NeorcError], ...] = (FlowDefinitionError, HandlerError)
 """The errors built from a list of problems, carried across as such."""
@@ -103,7 +120,9 @@ def error_from(body: Any, status: int) -> NeorcError:
     detail = str(body.get("detail", body))
     if status >= 500:
         return ManagerUnavailableError(f"the manager answered {status}: {detail}")
-    cls = getattr(neorc_core, name, None) if isinstance(name, str) else None
+    cls: Any = None
+    if isinstance(name, str):
+        cls = ONEBERTH_REFUSALS.get(name) or getattr(neorc_core, name, None)
     if not (isinstance(cls, type) and issubclass(cls, NeorcError)):
         return ManagerUnavailableError(f"the manager answered {status}: {detail}")
     if issubclass(cls, WITH_PROBLEMS):

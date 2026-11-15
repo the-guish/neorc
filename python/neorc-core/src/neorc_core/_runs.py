@@ -18,7 +18,12 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 
-from neorc_core._errors import FlowDefinitionError, FlowVersionError, RunStateError
+from neorc_core._errors import (
+    FlowDefinitionError,
+    FlowVersionError,
+    InvalidValueError,
+    RunStateError,
+)
 from neorc_core._task import TaskId, TaskStatus
 from neorc_core._values import NUL, JsonValue
 from neorc_core.flows import (
@@ -60,6 +65,44 @@ class StoredFlow:
         return self.definition.version
 
 
+class StarterKind(StrEnum):
+    """What started a run: a person, or a program with a token of its own."""
+
+    USER = "user"
+    SERVICE = "service"
+
+
+MAX_STARTER_TEXT = 200
+"""The longest id or name of a starter, in characters."""
+
+
+@dataclass(frozen=True, slots=True)
+class RunStarter:
+    """Who started a run, as the host that took the start names them.
+
+    The host finds who is asking and hands the manager this plain value.
+    ``id`` is the host's id of the person or the service. ``name`` is what a
+    page shows: a person's name, or a service token's name. It holds no
+    secret and no email.
+    """
+
+    kind: StarterKind
+    id: str
+    name: str | None = None
+
+    def __post_init__(self) -> None:
+        texts = {"id": self.id, "name": self.name or ""}
+        if not self.id:
+            raise InvalidValueError("a starter has an id")
+        for what, text in texts.items():
+            if len(text) > MAX_STARTER_TEXT:
+                raise InvalidValueError(
+                    f"a starter's {what} is at most {MAX_STARTER_TEXT} characters"
+                )
+            if text != storable_text(text):
+                raise InvalidValueError(f"a starter's {what} holds what no store can")
+
+
 @dataclass(frozen=True, slots=True)
 class Run:
     """One execution of a flow version, top-level or a sub-flow of another run."""
@@ -82,6 +125,9 @@ class Run:
     """When the store started the run. Stores set it; a run built by hand may not."""
     finished_at: datetime | None = None
     """When the run left ``ACTIVE``, whatever the status it ended in."""
+    started_by: RunStarter | None = None
+    """Who started the run's tree; ``None`` for a run started in process, by
+    no one a host named. A sub-flow run has its parent's."""
 
 
 @dataclass(frozen=True, slots=True)

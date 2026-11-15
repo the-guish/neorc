@@ -23,7 +23,9 @@ from neorc_core._runs import (
     EventKind,
     QueueTask,
     Run,
+    RunStarter,
     RunStatus,
+    StarterKind,
     Task,
     TaskDelivery,
 )
@@ -81,6 +83,19 @@ def datetime_from(text: str | None) -> datetime | None:
     return datetime.fromisoformat(text) if text is not None else None
 
 
+def starter_to(starter: RunStarter | None) -> Wire | None:
+    """Who started a run, as a handler and a reader receive it, or ``None``."""
+    if starter is None:
+        return None
+    return {"kind": starter.kind.value, "id": starter.id, "name": starter.name}
+
+
+def starter_from(wire: Wire | None) -> RunStarter | None:
+    if wire is None:
+        return None
+    return RunStarter(StarterKind(wire["kind"]), wire["id"], wire["name"])
+
+
 def run_to(run: Run) -> Wire:
     return {
         "id": str(run.id),
@@ -97,6 +112,7 @@ def run_to(run: Run) -> Wire:
         "reason": run.reason,
         "created_at": datetime_to(run.created_at),
         "finished_at": datetime_to(run.finished_at),
+        "started_by": starter_to(run.started_by),
     }
 
 
@@ -116,6 +132,7 @@ def run_from(wire: Wire) -> Run:
         reason=wire["reason"],
         created_at=datetime_from(wire["created_at"]),
         finished_at=datetime_from(wire["finished_at"]),
+        started_by=starter_from(wire["started_by"]),
     )
 
 

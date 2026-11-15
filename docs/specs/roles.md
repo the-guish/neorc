@@ -6,14 +6,24 @@ Permissions described in these default roles are exhaustive: only these operatio
 
 Today they can be granular on the "queue" resource. In future versions some users may have permissions on specific "flow" resources.
 
-Every token has exactly one role. A signed-in person has the User role.
+The roles are oneberth roles. oneberth signs people in, keeps the tokens and checks a permission ([oneberth's identity spec](https://github.com/the-guish/oneberth/blob/main/docs/specs/identity.md), "Roles"). `neorc-core` names neorc's permissions and roles as plain data, and the `neorc` application registers them with oneberth when its backend starts.
 
-With authentication off (`neorc manager start --no-auth`) there are no roles: every operation is allowed.
+Every name starts with `neorc/`. A role is `neorc/worker`, and a permission is `neorc/runs:start`.
+
+| role | given to | resource |
+|---|---|---|
+| `neorc/user` | every person who may sign in | none |
+| `neorc/worker`, `neorc/responder` | a service token | one queue |
+| `neorc/scheduler`, `neorc/ci`, `neorc/external-trigger` | a service token | none |
+
+Every service token has exactly one role. A signed-in person holds `neorc/user`, and so do the person's own tokens and linked devices. Every request has a signed-in person or a token behind it.
+
+Every route of the manager declares the one permission it needs, with oneberth's `permit`. oneberth refuses a route without one.
 
 
 ### Workers
 
-There is one worker role. Each worker token is bound to one queue when it is created, and its permissions apply only to that queue.
+There is one worker role, `neorc/worker`. Each worker token is bound to one queue when it is created, and its permissions apply only to that queue.
 
 The worker permissions allow fetching task definitions, receiving, claiming, heartbeat and reporting a task finished, for a single, specific queue.
 
@@ -30,7 +40,7 @@ A worker token is bound to a worker queue. An external queue has no workers (see
 
 ### Responders
 
-There is one responder role. Each responder token is bound to one queue of either kind, and its permissions apply only to that queue.
+There is one responder role, `neorc/responder`. Each responder token is bound to one queue of either kind, and its permissions apply only to that queue.
 
 The responder permissions allow listing the pending tasks of the queue and completing them (see [task-completion.md](task-completion.md)).
 
@@ -39,7 +49,7 @@ Listing the pending tasks of another queue than the token's is refused. Completi
 
 ### Scheduler
 
-Scheduler will have a dedicated default role with all needed to carry its responsibilities:
+The scheduler, `neorc/scheduler`, will have a dedicated default role with all needed to carry its responsibilities:
 
 - fetch flow definitions and poll events;
 - read runs and their state, including task results;
@@ -50,26 +60,43 @@ It should not be able to create, modify or delete flows, start top-level runs or
 
 ### CI
 
-The CI should be able to post new versions of a flow.
+The CI, `neorc/ci`, should be able to post new versions of a flow.
 Uploading a new version cancels that flow's active runs (see [core.md](core.md), "Cancellation and failure"). CI has no permission to cancel runs otherwise.
 
 ### User
 
-Anyone signed in to the UI will be able to list flows and read their versions, start new runs, read runs with their tasks and results, and cancel them. The UI reads events to refresh its pages.
+Anyone signed in to the UI holds `neorc/user`, and will be able to list flows and read their versions, start new runs, read runs with their tasks and results, and cancel them. The UI reads events to refresh its pages.
 
 A user lists the queues and the tasks of any queue, in any state. A user completes a pending task of any queue (see [task-completion.md](task-completion.md)).
 
-A User token can also be created, for a person's scripts; it has the same permissions as a signed-in session.
+A person's scripts send a personal token, which the person makes in the UI. It has the roles of the person.
 
 
 ### External trigger
 
-Can only start new runs, of any flow. It reads nothing but the run it gets back when starting one.
+`neorc/external-trigger` can only start new runs, of any flow. It reads nothing but the run it gets back when starting one.
+
+
+## Who started a run
+
+A run records who started it, as `started_by`: a person or a service, with the id and the name oneberth keeps.
+
+- A person is the same starter with a session, a personal token or a linked device. The id is the person's user id, and the name is the person's name.
+- A service is its token. The id is the token's id, and the name is the token's name.
+- The record holds no secret and no email.
+- A sub-flow run has the starter of its parent. The scheduler starts sub-flow runs and is never a starter.
+- A run started in process, as `neorc run` does, has no starter.
+
+A task's handler receives the starter when the task asks for `neorc.started_by`. A handler that acts for that person in a host, such as Robinauts, reads it there.
 
 
 ## Token creation
 
-Tokens are created, listed and revoked with the CLI connecting to the DB. A token's role is required; a queue is required for the worker and responder roles and refused for any other. The queue is declared before a token is bound to it.
+Service tokens are oneberth's. The operator creates, lists and revokes them with `neorc tokens`, oneberth's admin scripts shown with neorc's roles, connecting to the database. An admin creates them in the UI too.
+
+A token's role is required. A queue is required for the worker and responder roles, as `--resource`, and refused for any other.
+
+The queue is declared before a token is bound to it, and a worker token is bound to a worker queue. neorc gives oneberth this check, and oneberth runs it for every service token: from `neorc tokens create`, from an admin in the UI and from a launcher. The manager still serves no worker from an external queue.
 
 
 ## Not in scope
@@ -79,5 +106,5 @@ At this version the following are not needed, and may be planned in future work.
 - Role editing. Only the default, fixed roles are shipped.
 - Multiple different users roles.
 - UI for querying roles or users.
-- Hiding in the UI what a person cannot do: every person has the User role.
+- Hiding in the UI what a person cannot do: every person has the `neorc/user` role.
 - Limiting the External trigger to specific flows: it waits for "flow" resources.

@@ -20,8 +20,10 @@ The choices behind the tables are in docs/working-notes/decisions-from-past-plan
   SHARE`` lock on the run it references, outside the store's lock order. The
   store's operations keep the references whole.
 - The ``CHECK`` constraints mirror ``TaskStatus``, ``RunStatus``,
-  ``EventKind``, ``PrincipalKind`` and ``Role``; a test keeps them in step
-  with the enums.
+  ``EventKind``, ``QueueKind`` and ``StarterKind``; a test keeps them in
+  step with the enums.
+- Credentials are oneberth's, in its own schema ``oneberth`` of the same
+  database: neorc keeps none.
 - Runs and tasks are ordered by ``position``, not by their timestamps:
   ``now()`` can give two rows the same time. The timestamps are for display.
   A task's position is an identity column, allocated at insert; a run's is
@@ -31,10 +33,8 @@ The choices behind the tables are in docs/working-notes/decisions-from-past-plan
 A few columns added early on are also added to existing tables, when a check
 of ``information_schema`` finds them missing; the check comes first because
 ``ALTER TABLE`` locks the table exclusively before it looks. Later changes,
-such as the unique task address and the roles on credentials, are made to the
-statements alone: neorc is installed nowhere yet, so there is no database to
-keep. The responder role is one of those: a database created before it keeps
-``CHECK`` constraints that refuse a responder token.
+such as the unique task address, are made to the statements alone: neorc is
+installed nowhere yet, so there is no database to keep.
 """
 
 from __future__ import annotations
@@ -46,12 +46,6 @@ RUNS_TABLE = "neorc_runs"
 FLOW_TASKS_TABLE = "neorc_flow_tasks"
 EVENTS_TABLE = "neorc_events"
 QUEUES_TABLE = "neorc_queues"
-TOKENS_TABLE = "neorc_api_tokens"
-SESSIONS_TABLE = "neorc_sessions"
-PENDING_LOGINS_TABLE = "neorc_pending_logins"
-
-CREDENTIAL_TABLES = (TOKENS_TABLE, SESSIONS_TABLE, PENDING_LOGINS_TABLE)
-"""The tables of the credential store, which a manager with authentication needs."""
 
 TABLES = (
     FLOW_VERSIONS_TABLE,
@@ -59,11 +53,15 @@ TABLES = (
     FLOW_TASKS_TABLE,
     EVENTS_TABLE,
     QUEUES_TABLE,
-    *CREDENTIAL_TABLES,
 )
 """Every table ``create_schema`` creates."""
 
-RETIRED_TABLES = ("neorc_tasks",)
+RETIRED_TABLES = (
+    "neorc_tasks",
+    "neorc_api_tokens",
+    "neorc_sessions",
+    "neorc_pending_logins",
+)
 """Tables of earlier versions, no longer created; ``drop_schema`` removes them too."""
 
 INDEXES = (
@@ -75,8 +73,6 @@ INDEXES = (
     f"{FLOW_TASKS_TABLE}_run_address_idx",
     f"{FLOW_TASKS_TABLE}_receive_idx",
     f"{FLOW_TASKS_TABLE}_queue_idx",
-    f"{SESSIONS_TABLE}_expires_idx",
-    f"{PENDING_LOGINS_TABLE}_expires_idx",
 )
 """Every index ``create_schema`` creates, besides primary keys."""
 
@@ -107,7 +103,11 @@ CREATE TABLE IF NOT EXISTS {RUNS_TABLE} (
     reason           text,
     created_at       timestamptz NOT NULL DEFAULT now(),
     finished_at      timestamptz,
-    position         bigint NOT NULL DEFAULT 0
+    position         bigint NOT NULL DEFAULT 0,
+    starter_kind     text CHECK (starter_kind IN ('user', 'service')),
+    starter_id       text,
+    starter_name     text,
+    CHECK ((starter_kind IS NULL) = (starter_id IS NULL))
 );
 
 -- position orders runs by start, for listing and paging. The store sets it as
@@ -221,57 +221,6 @@ CREATE TABLE IF NOT EXISTS {QUEUES_TABLE} (
     kind             text NOT NULL CHECK (kind IN ('worker', 'external')),
     created_at       timestamptz NOT NULL DEFAULT now()
 );
-
--- Credentials. Secrets are never stored, only their SHA-256 in hex, which
--- rows are found by. Times come from now(), so expiry is decided by one clock.
--- role mirrors Role; a worker or responder token alone is bound to a queue.
-CREATE TABLE IF NOT EXISTS {TOKENS_TABLE} (
-    id               uuid PRIMARY KEY,
-    name             text NOT NULL UNIQUE,
-    secret_hash      text NOT NULL UNIQUE,
-    role             text NOT NULL
-                     CHECK (role IN ('worker', 'responder', 'scheduler', 'ci',
-                                     'user', 'external-trigger')),
-    queue            text,
-    created_at       timestamptz NOT NULL DEFAULT now(),
-    expires_at       timestamptz,
-    CONSTRAINT {TOKENS_TABLE}_queue_check
-        CHECK ((role IN ('worker', 'responder')) = (queue IS NOT NULL))
-);
-
--- Who signed in, as their provider said; kind mirrors PrincipalKind, role Role.
-CREATE TABLE IF NOT EXISTS {SESSIONS_TABLE} (
-    secret_hash      text PRIMARY KEY,
-    kind             text NOT NULL CHECK (kind IN ('token', 'session')),
-    subject          text NOT NULL,
-    name             text NOT NULL,
-    role             text NOT NULL
-                     CHECK (role IN ('worker', 'responder', 'scheduler', 'ci',
-                                     'user', 'external-trigger')),
-    queue            text,
-    provider         text,
-    email            text,
-    created_at       timestamptz NOT NULL DEFAULT now(),
-    expires_at       timestamptz NOT NULL,
-    CONSTRAINT {SESSIONS_TABLE}_queue_check
-        CHECK ((role IN ('worker', 'responder')) = (queue IS NOT NULL))
-);
-
-CREATE TABLE IF NOT EXISTS {PENDING_LOGINS_TABLE} (
-    state_hash       text PRIMARY KEY,
-    provider         text NOT NULL,
-    nonce            text NOT NULL,
-    verifier         text NOT NULL,
-    created_at       timestamptz NOT NULL DEFAULT now(),
-    expires_at       timestamptz NOT NULL
-);
-
--- The sweep of expired sessions and sign-ins deletes by expiry; anyone may
--- start a sign-in, so it must not scan the table.
-CREATE INDEX IF NOT EXISTS {SESSIONS_TABLE}_expires_idx
-    ON {SESSIONS_TABLE} (expires_at);
-CREATE INDEX IF NOT EXISTS {PENDING_LOGINS_TABLE}_expires_idx
-    ON {PENDING_LOGINS_TABLE} (expires_at);
 """
 
 DROP_SCHEMA = f"DROP TABLE IF EXISTS {', '.join(TABLES + RETIRED_TABLES)}"
@@ -307,15 +256,6 @@ async def missing_tables(
 
 class MissingTablesError(RuntimeError):
     """The database lacks tables the manager needs; the message names the fix."""
-
-
-async def ensure_credential_tables(dsn: str, *, schema: str | None = None) -> None:
-    """Raise ``MissingTablesError`` naming the fix if the credential tables are missing.
-
-    A manager with authentication on would otherwise answer every request with
-    a 500, which workers and schedulers take for an outage and retry forever.
-    """
-    await ensure_tables(dsn, CREDENTIAL_TABLES, schema=schema)
 
 
 async def ensure_tables(

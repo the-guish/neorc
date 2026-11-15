@@ -1,16 +1,16 @@
 # Copyright 2026 The neorc Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""The guard on the manager's routes: API tokens, and writes from other sites.
+"""neorc's roles on the manager's routes, as oneberth composes them.
 
-Over an ASGI transport, on the memory stores. What a token is, and when it is
-refused, is settled in core; here, only what HTTP adds: where the token is
-read from, the statuses, which routes are guarded, and before what.
+Over an ASGI transport, on the memory stores. What a credential is, and when
+it is refused, is oneberth's; here, only what neorc adds: the permission each
+route needs, the roles that hold them, and the queue a worker's or a
+responder's token is bound to.
 """
 
 from __future__ import annotations
 
-import asyncio
 import re
 import uuid
 from collections.abc import AsyncIterator, Iterable, Iterator
@@ -19,21 +19,23 @@ from typing import Any
 
 import httpx
 import pytest
+from conftest import (
+    PUBLIC_URL,
+    composed,
+    identity_store,
+    person_token,
+    service_token,
+)
 from fastapi.routing import APIRoute
+from oneberth.identity import OPERATOR
+from oneberth.web import Composition, Permit
+from oneberth.web._component import PERMIT_MARK
 from starlette.routing import Route
 
-from neorc.manager import create_app
-from neorc.manager._access import PERMISSION_ATTRIBUTE
-from neorc_core import Access, Manager, Role
-from neorc_core.local import MemoryCredentialStore
+from neorc_core import Manager, QueueKind, Role
 
 FLOW = {"name": "f", "version": "1.0.0", "steps": {"work": {"handler": "m:work"}}}
 JSON = {"content-type": "application/json"}
-
-
-@pytest.fixture
-def access() -> Access:
-    return Access(MemoryCredentialStore())
 
 
 @pytest.fixture
@@ -43,23 +45,25 @@ def static(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-async def guarded(
-    manager: Manager, access: Access, static: Path
-) -> AsyncIterator[httpx.AsyncClient]:
-    app = create_app(manager, access=access, long_poll_timeout=1, ui=static)
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://manager.test"
-    ) as client:
-        yield client
+async def app(manager: Manager, static: Path) -> AsyncIterator[Composition]:
+    composition = await composed(manager, long_poll_timeout=1, interface=static)
+    async with composition.lifespan():
+        yield composition
 
 
 @pytest.fixture
-async def open_app(manager: Manager) -> AsyncIterator[httpx.AsyncClient]:
-    app = create_app(manager, access=None, long_poll_timeout=1)
+async def guarded(app: Composition) -> AsyncIterator[httpx.AsyncClient]:
     async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://manager.test"
+        transport=httpx.ASGITransport(app=app), base_url=f"{PUBLIC_URL}/neorc"
     ) as client:
         yield client
+
+
+async def token(app: Composition, role: Role, queue: str | None = None) -> str:
+    """A token of ``role``: a person's own for ``neorc/user``, else a service's."""
+    if role is Role.USER:
+        return await person_token(app)
+    return await service_token(app, role, queue)
 
 
 def bearer(secret: str) -> dict[str, str]:
@@ -148,45 +152,29 @@ async def test_the_token_is_checked_before_the_request_is_read(
     bad_query = await guarded.get("/runs", params={"limit": "many"})
 
     for response in (malformed, bad_id, bad_query):
-        assert (response.status_code, _error(response)) == (401, "AuthenticationError")
+        assert (response.status_code, _error(response)) == (401, "Unauthorized")
 
 
-async def test_what_holds_no_data_is_open_without_a_token(
-    guarded: httpx.AsyncClient,
-) -> None:
-    health = await guarded.get("/health")
-    root = await guarded.get("/")
-    page = await guarded.get("/ui/")
-    schema = await guarded.get("/openapi.json")
+async def test_what_holds_no_data_is_open_without_a_token(app: Composition) -> None:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url=PUBLIC_URL
+    ) as client:
+        health = await client.get("/health")
+        root = await client.get("/")
+        page = await client.get("/ui/")
+        schema = await client.get("/neorc/openapi.json")
 
-    assert health.status_code == 200
-    assert root.status_code == 307
+    assert (health.status_code, health.json()["components"]) == (200, {"neorc": "ok"})
+    assert (root.status_code, root.headers["location"]) == (307, "/ui/")
     assert page.status_code == 200
     assert schema.status_code == 200
-    assert "HTTPBearer" in schema.json()["components"]["securitySchemes"]
+    assert "/neorc/runs" in schema.json()["paths"]
 
 
-async def test_the_documentation_pages_are_served_only_without_authentication(
-    guarded: httpx.AsyncClient, open_app: httpx.AsyncClient
-) -> None:
-    for path in ("/docs", "/redoc"):
-        assert (await guarded.get(path)).status_code == 404
-        assert (await open_app.get(path)).status_code == 200
-
-
-PUBLIC = {
-    "/health",
-    "/openapi.json",
-    "/auth/session",
-    "/auth/login/{provider}",
-    "/auth/callback/{provider}",
-    "/auth/logout",
-}
-"""What a person with no session reaches: to sign in, and out."""
-
-
-def every_route(routes: Iterable[Any], prefix: str = "") -> Iterator[tuple[str, str]]:
-    """Every method and path the app routes, whether the schema shows it or not.
+def every_route(
+    routes: Iterable[Any], prefix: str = ""
+) -> Iterator[tuple[str, str, Any]]:
+    """Method, path and route of every route an app serves, schema or not.
 
     FastAPI keeps an included router whole in the app's routes, from 0.141,
     rather than copying its routes in; both shapes are walked.
@@ -199,29 +187,30 @@ def every_route(routes: Iterable[Any], prefix: str = "") -> Iterator[tuple[str, 
             )
         elif isinstance(route, Route):
             for method in sorted(route.methods or ()):
-                yield method, prefix + route.path
+                yield method, prefix + route.path, route
 
 
-async def test_every_route_but_the_public_ones_needs_a_token(
-    manager: Manager, access: Access, guarded: httpx.AsyncClient
+def neorc_routes(app: Composition) -> Iterator[tuple[str, str, Any]]:
+    """Method, path and route of every route the composition serves under /neorc/."""
+    for method, path, route in every_route(app.front.routes):
+        if path.startswith("/neorc/") and path != "/neorc/openapi.json":
+            yield method, path.removeprefix("/neorc"), route
+
+
+async def test_every_route_needs_a_token(
+    app: Composition, guarded: httpx.AsyncClient
 ) -> None:
-    """Asked of the app's routes, not its schema, which leaves some out."""
-    app = create_app(manager, access=access)
+    """Asked of the composition's routes, not its schema, which leaves some out."""
     samples = {"run_id": str(uuid.uuid4()), "task_id": str(uuid.uuid4())}
-    operations = sorted(set(every_route(app.routes)) - {("HEAD", "/openapi.json")})
-    paths = {path for _, path in operations}
+    operations = sorted({(method, path) for method, path, _ in neorc_routes(app)})
     assert len(operations) > 20
-    assert {"/auth/login/{provider}", "/auth/callback/{provider}"} <= paths
 
     for method, path in operations:
         url = re.sub(
             r"{(\w+)}", lambda m: samples.get(m.group(1), "sample"), path
         ).replace("/versions/sample", "/versions/1.0.0")
         response = await guarded.request(method, url, headers=JSON)
-        if path in PUBLIC:
-            assert response.status_code != 401, f"{method} {path}"
-        else:
-            assert response.status_code == 401, f"{method} {path}"
+        assert response.status_code == 401, f"{method} {path}"
 
 
 # Permissions.
@@ -283,39 +272,42 @@ ALLOWED = {
 }
 
 
-def permissions_asked(dependant: Any) -> list[str]:
-    """Every permission a route's dependencies ask for, at any depth."""
+QUEUE_RESOURCE = {"queue:definitions", "queue:receive", "queue:pending"}
+"""The permissions whose routes name, in their path, the queue they act on."""
+
+QUEUE_BOUND = {"tasks:claim", "tasks:heartbeat", "tasks:finish", "tasks:complete"}
+"""The permissions whose routes name a task, not a queue: a grant bound to one
+queue passes, and the route confines the task to that queue."""
+
+
+def expected_permit(value: str) -> Permit:
+    resource = "queue" if value in QUEUE_RESOURCE else None
+    return Permit(f"neorc/{value}", resource, value in QUEUE_BOUND)
+
+
+def permits_asked(dependant: Any) -> list[Permit]:
+    """Every ``permit`` a route's dependencies declare, at any depth."""
     asked = []
     for dependency in dependant.dependencies:
-        permission = getattr(dependency.call, PERMISSION_ATTRIBUTE, None)
-        if permission is not None:
-            asked.append(permission.value)
-        asked.extend(permissions_asked(dependency))
+        declared = getattr(dependency.call, PERMIT_MARK, None)
+        if isinstance(declared, Permit):
+            asked.append(declared)
+        asked.extend(permits_asked(dependency))
     return asked
 
 
-def guarded_routes(routes: Iterable[Any]) -> Iterator[tuple[str, str, Any]]:
-    """Method, path and route of every route in the guarded router."""
-    for route in routes:
-        included = getattr(route, "original_router", None)
-        if included is not None:
-            yield from guarded_routes(included.routes)
-        elif isinstance(route, APIRoute) and route.path not in PUBLIC:
-            for method in sorted(route.methods or ()):
-                yield method, route.path, route
-
-
-def test_every_route_asks_for_exactly_the_permission_it_needs(
-    manager: Manager, access: Access
+async def test_every_route_asks_for_exactly_the_permission_it_needs(
+    app: Composition,
 ) -> None:
-    app = create_app(manager, access=access)
-
     asked = {
-        (method, path): permissions_asked(route.dependant)
-        for method, path, route in guarded_routes(app.routes)
+        (method, path): permits_asked(route.dependant)
+        for method, path, route in neorc_routes(app)
+        if isinstance(route, APIRoute)
     }
 
-    assert asked == {key: [value] for key, value in ROUTE_PERMISSIONS.items()}
+    assert asked == {
+        key: [expected_permit(value)] for key, value in ROUTE_PERMISSIONS.items()
+    }
 
 
 def sample_url(path: str, queue: str = "default") -> str:

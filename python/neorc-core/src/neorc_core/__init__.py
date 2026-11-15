@@ -5,21 +5,7 @@
 
 from importlib.metadata import PackageNotFoundError, version
 
-from neorc_core._access import (
-    PERMISSIONS,
-    QUEUE_PERMISSIONS,
-    Access,
-    Allow,
-    ApiToken,
-    Identity,
-    Matcher,
-    PendingLogin,
-    Permission,
-    Principal,
-    PrincipalKind,
-    Role,
-    authorize,
-)
+from neorc_core._declarations import QueueDeclarations, check_token_queue
 from neorc_core._errors import (
     AccessError,
     AuthenticationError,
@@ -35,20 +21,31 @@ from neorc_core._errors import (
     ResolutionError,
     RunNotFoundError,
     RunStateError,
-    SignInRefusedError,
     TaskNotFoundError,
     TaskStateError,
     UnsupportedMediaTypeError,
 )
 from neorc_core._manager import Manager
 from neorc_core._queues import Queue, QueueKind
+from neorc_core._roles import (
+    DEFAULT_ROLE,
+    PEOPLE_ROLES,
+    PERMISSIONS,
+    QUEUE_PERMISSIONS,
+    QUEUE_RESOURCE,
+    QUEUE_ROLES,
+    Permission,
+    Role,
+)
 from neorc_core._runs import (
     Event,
     EventKind,
     QueueTask,
     Run,
     RunId,
+    RunStarter,
     RunStatus,
+    StarterKind,
     StoredFlow,
     Task,
     TaskDelivery,
@@ -64,12 +61,13 @@ from neorc_core._task import (
 )
 from neorc_core._worker import HandlerError, Worker
 from neorc_core.ports import (
-    CredentialStore,
     ManagerClient,
     QueueClient,
     Store,
     Subscription,
     TaskNotifier,
+    TokenGrant,
+    TokenGrants,
 )
 
 try:
@@ -78,16 +76,16 @@ except PackageNotFoundError:  # a source checkout on sys.path, not installed
     __version__ = "0+unknown"
 
 __all__ = [
+    "DEFAULT_ROLE",
     "LEASED_STATUSES",
+    "PEOPLE_ROLES",
     "PERMISSIONS",
     "QUEUE_PERMISSIONS",
+    "QUEUE_RESOURCE",
+    "QUEUE_ROLES",
     "TERMINAL_STATUSES",
-    "Access",
     "AccessError",
-    "Allow",
-    "ApiToken",
     "AuthenticationError",
-    "CredentialStore",
     "CrossSiteRequestError",
     "Event",
     "EventKind",
@@ -95,21 +93,17 @@ __all__ = [
     "FlowNotFoundError",
     "FlowVersionError",
     "HandlerError",
-    "Identity",
     "InvalidValueError",
     "Manager",
     "ManagerClient",
     "ManagerUnavailableError",
-    "Matcher",
     "NeorcError",
     "PayloadTooLargeError",
-    "PendingLogin",
     "Permission",
     "PermissionDeniedError",
-    "Principal",
-    "PrincipalKind",
     "Queue",
     "QueueClient",
+    "QueueDeclarations",
     "QueueKind",
     "QueueTask",
     "ResolutionError",
@@ -117,10 +111,11 @@ __all__ = [
     "Run",
     "RunId",
     "RunNotFoundError",
+    "RunStarter",
     "RunStateError",
     "RunStatus",
     "Scheduler",
-    "SignInRefusedError",
+    "StarterKind",
     "Store",
     "StoredFlow",
     "Subscription",
@@ -131,10 +126,12 @@ __all__ = [
     "TaskNotifier",
     "TaskStateError",
     "TaskStatus",
+    "TokenGrant",
+    "TokenGrants",
     "UnsupportedMediaTypeError",
     "Worker",
     "__version__",
-    "authorize",
+    "check_token_queue",
     "ensure_completable",
     "ensure_transition",
 ]
