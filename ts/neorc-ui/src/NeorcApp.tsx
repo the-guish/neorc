@@ -86,7 +86,7 @@ function Live() {
   return null;
 }
 
-function Page({ route }: { route: Route }) {
+function Page({ route }: Readonly<{ route: Route }>) {
   const { href } = useNav();
   switch (route.name) {
     case "runs":

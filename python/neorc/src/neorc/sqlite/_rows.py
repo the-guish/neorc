@@ -32,8 +32,6 @@ from neorc_core._task import TaskStatus
 from neorc_core._values import JsonValue
 from neorc_core.flows import Address, Version, parse_flow
 
-Row = sqlite3.Row
-
 EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 _MICROSECOND = timedelta(microseconds=1)
 
@@ -81,7 +79,7 @@ def flow_to_row(flow: StoredFlow) -> dict[str, Any]:
     }
 
 
-def flow_from_row(row: Row) -> StoredFlow:
+def flow_from_row(row: sqlite3.Row) -> StoredFlow:
     content = json.loads(row["content"])
     return StoredFlow(parse_flow(content), content)
 
@@ -108,7 +106,7 @@ def run_to_row(run: Run, created_at: datetime) -> dict[str, Any]:
     }
 
 
-def starter_from_row(row: Row) -> RunStarter | None:
+def starter_from_row(row: sqlite3.Row) -> RunStarter | None:
     if row["starter_kind"] is None:
         return None
     return RunStarter(
@@ -116,7 +114,7 @@ def starter_from_row(row: Row) -> RunStarter | None:
     )
 
 
-def run_from_row(row: Row) -> Run:
+def run_from_row(row: sqlite3.Row) -> Run:
     created_at = time_from(row["created_at"])
     assert created_at is not None
     return Run(
@@ -162,7 +160,7 @@ def task_to_row(task: Task, created_at: datetime) -> dict[str, Any]:
     }
 
 
-def task_from_row(row: Row) -> Task:
+def task_from_row(row: sqlite3.Row) -> Task:
     return Task(
         id=uuid.UUID(row["id"]),
         run_id=uuid.UUID(row["run_id"]),
@@ -182,5 +180,5 @@ def task_from_row(row: Row) -> Task:
     )
 
 
-def event_from_row(row: Row) -> Event:
+def event_from_row(row: sqlite3.Row) -> Event:
     return Event(row["sequence"], uuid.UUID(row["run_id"]), EventKind(row["kind"]))

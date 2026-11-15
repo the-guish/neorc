@@ -22,7 +22,7 @@ out=$(CDPATH= cd -- "$1" && pwd)
 "$root/scripts/oneberth-ui-from-source.sh" >&2
 cd "$root/ts/neorc-ui"
 # The package ships src/api/schema.d.ts, which `npm run generate` writes.
-npm ci --silent >&2
+npm ci --ignore-scripts --silent >&2
 npm run --silent generate >&2
 npm pack --ignore-scripts --silent --pack-destination "$out" >/dev/null
 cp vendor/oneberth-ui-0.0.0.tgz "$out/oneberth-ui-0.0.0.tgz"

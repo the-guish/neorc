@@ -233,17 +233,26 @@ router = APIRouter(
 )
 
 
-def _bound(
-    request: Request, principal: Principal, permission: Permission
-) -> str | None:
-    """The queue a worker's or responder's request is confined to: its grant's.
+def bound_queue(permission: Permission) -> Any:
+    """A dependency that permits a task route and gives the queue it is confined to.
 
-    ``None`` for a principal that holds ``permission`` on every queue, such as
-    a person completing a task.
+    The route names no queue in its path, so it declares ``permit(...,
+    bound=True)``: a worker's or responder's grant, bound to one queue, passes,
+    and the value is that queue. ``None`` for a principal that holds
+    ``permission`` on every queue, such as a person completing a task.
     """
-    access = request.app.state.oneberth.access
-    queue: str | None = access.bound_resource(principal, permission)
-    return queue
+
+    permitted = permit(permission, bound=True)
+
+    async def confined(
+        request: Request, principal: Principal = permitted
+    ) -> str | None:
+        queue: str | None = request.app.state.oneberth.access.bound_resource(
+            principal, permission
+        )
+        return queue
+
+    return Depends(confined)
 
 
 def _flow_response(flow: Any) -> dict[str, Any]:
@@ -651,15 +660,12 @@ async def get_task(manager: Managed, task_id: TaskId) -> dict[str, Any]:
 
 @router.post("/tasks/{task_id}/claim", status_code=status.HTTP_204_NO_CONTENT)
 async def claim_task(
-    request: Request,
     manager: Managed,
     task_id: TaskId,
-    principal: Annotated[Principal, permit(Permission.TASKS_CLAIM)],
+    queue: Annotated[str | None, bound_queue(Permission.TASKS_CLAIM)],
 ) -> Response:
     """A worker claims a task it received; 409 if its run is no longer active."""
-    await manager.claim_task(
-        task_id, queue=_bound(request, principal, Permission.TASKS_CLAIM)
-    )
+    await manager.claim_task(task_id, queue=queue)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -672,14 +678,14 @@ async def extend_lease(
     request: Request,
     manager: Managed,
     task_id: TaskId,
-    principal: Annotated[Principal, permit(Permission.TASKS_HEARTBEAT)],
+    queue: Annotated[str | None, bound_queue(Permission.TASKS_HEARTBEAT)],
 ) -> dict[str, str]:
     """A worker keeping the task it holds; when its lease now lapses."""
     body = await read_body(request, HeartbeatRequest)
     expires_at = await manager.extend_lease(
         task_id,
         lease_seconds=body.lease_seconds,
-        queue=_bound(request, principal, Permission.TASKS_HEARTBEAT),
+        queue=queue,
     )
     return {"lease_expires_at": expires_at.isoformat()}
 
@@ -689,7 +695,7 @@ async def report_finished(
     request: Request,
     manager: Managed,
     task_id: TaskId,
-    principal: Annotated[Principal, permit(Permission.TASKS_FINISH)],
+    queue: Annotated[str | None, bound_queue(Permission.TASKS_FINISH)],
 ) -> Response:
     """A worker's result in its JSON form, or its failure."""
     body = await read_body(request, FinishedRequest)
@@ -697,7 +703,7 @@ async def report_finished(
         task_id,
         result=body.result,
         error=body.error,
-        queue=_bound(request, principal, Permission.TASKS_FINISH),
+        queue=queue,
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -732,7 +738,7 @@ async def complete_task(
     request: Request,
     manager: Managed,
     task_id: TaskId,
-    principal: Annotated[Principal, permit(Permission.TASKS_COMPLETE)],
+    queue: Annotated[str | None, bound_queue(Permission.TASKS_COMPLETE)],
 ) -> Response:
     """End a pending task with a result, or an error; 409 unless it is pending."""
     body = await read_body(request, CompleteRequest)
@@ -740,7 +746,7 @@ async def complete_task(
         task_id,
         result=body.result,
         error=body.error,
-        queue=_bound(request, principal, Permission.TASKS_COMPLETE),
+        queue=queue,
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

@@ -77,52 +77,12 @@ async def opened_stores(
     """
     initialising = getattr(args, "store_command", None) == "init"
     async with AsyncExitStack() as stack:
-        identity: IdentityStore
-        neorc_store: Store
         if args.database_file is not None:
-            from oneberth.identity.sqlite import FILE_NAME, SqliteIdentityStore
-
-            from neorc.sqlite import SqliteStore
-
-            path: Path = args.database_file
-            if not path.is_file() or not (path.parent / FILE_NAME).is_file():
-                raise ConnectError(
-                    f"no database file at {path}, or no {FILE_NAME} beside it: start "
-                    "the manager on it first"
-                )
-            identity = await stack.enter_async_context(
-                SqliteIdentityStore(path.parent / FILE_NAME)
-            )
-            neorc_store = await stack.enter_async_context(SqliteStore(path))
+            identity, neorc_store = await _open_sqlite(stack, args.database_file)
         else:
-            url = args.database_url or os.environ.get(DATABASE_URL_ENV)
-            if not url:
-                raise ConnectError(
-                    f"no database: pass --database-url or set ${DATABASE_URL_ENV}"
-                )
-            try:
-                from oneberth.identity.postgres import PostgresIdentityStore
-
-                from neorc.postgres import PostgresStore
-                from neorc.postgres._driver import CONNECTION_ERRORS
-                from neorc.postgres._schema import QUEUES_TABLE, ensure_tables
-            except ImportError:
-                raise ConnectError(
-                    "the PostgreSQL store needs the postgres extra: neorc[postgres]"
-                ) from None
-            try:
-                identity = await stack.enter_async_context(
-                    PostgresIdentityStore(url, max_size=1)
-                )
-                neorc_store = await stack.enter_async_context(
-                    PostgresStore(url, max_size=1)
-                )
-                if not initialising:
-                    await ensure_tables(url, (QUEUES_TABLE,))
-            except CONNECTION_ERRORS as exc:
-                raise ConnectError(f"cannot reach the database: {exc}") from None
-            except RuntimeError as exc:  # the manager's tables are missing
-                raise ConnectError(str(exc)) from None
+            identity, neorc_store = await _open_postgres(
+                stack, args.database_url, initialising=initialising
+            )
         if not initialising:
             try:
                 await check_schema(identity)
@@ -132,6 +92,56 @@ async def opened_stores(
                     "`neorc store init`"
                 ) from None
         yield identity, neorc_store
+
+
+async def _open_sqlite(
+    stack: AsyncExitStack, path: Path
+) -> tuple[IdentityStore, Store]:
+    from oneberth.identity.sqlite import FILE_NAME, SqliteIdentityStore
+
+    from neorc.sqlite import SqliteStore
+
+    if not path.is_file() or not (path.parent / FILE_NAME).is_file():
+        raise ConnectError(
+            f"no database file at {path}, or no {FILE_NAME} beside it: start "
+            "the manager on it first"
+        )
+    identity = await stack.enter_async_context(
+        SqliteIdentityStore(path.parent / FILE_NAME)
+    )
+    return identity, await stack.enter_async_context(SqliteStore(path))
+
+
+async def _open_postgres(
+    stack: AsyncExitStack, url: str | None, *, initialising: bool
+) -> tuple[IdentityStore, Store]:
+    url = url or os.environ.get(DATABASE_URL_ENV)
+    if not url:
+        raise ConnectError(
+            f"no database: pass --database-url or set ${DATABASE_URL_ENV}"
+        )
+    try:
+        from oneberth.identity.postgres import PostgresIdentityStore
+
+        from neorc.postgres import PostgresStore
+        from neorc.postgres._driver import CONNECTION_ERRORS
+        from neorc.postgres._schema import QUEUES_TABLE, ensure_tables
+    except ImportError:
+        raise ConnectError(
+            "the PostgreSQL store needs the postgres extra: neorc[postgres]"
+        ) from None
+    try:
+        identity = await stack.enter_async_context(
+            PostgresIdentityStore(url, max_size=1)
+        )
+        neorc_store = await stack.enter_async_context(PostgresStore(url, max_size=1))
+        if not initialising:
+            await ensure_tables(url, (QUEUES_TABLE,))
+    except CONNECTION_ERRORS as exc:
+        raise ConnectError(f"cannot reach the database: {exc}") from None
+    except RuntimeError as exc:  # the manager's tables are missing
+        raise ConnectError(str(exc)) from None
+    return identity, neorc_store
 
 
 class NeorcConnector:

@@ -106,7 +106,8 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=None,
         help="a SQLite file instead, created if it is not there; oneberth.db, "
-        "the store of sign-ins and tokens, is created beside it",
+        "the store of sign-ins and tokens, is created beside it. One manager "
+        "process serves a file: another one's long polls would not be woken",
     )
     manager_start.add_argument(
         "--create-schema",

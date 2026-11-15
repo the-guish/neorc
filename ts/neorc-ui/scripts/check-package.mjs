@@ -10,7 +10,7 @@ const here = new URL("..", import.meta.url);
 const manifest = JSON.parse(readFileSync(new URL("package.json", here), "utf8"));
 const failures = [];
 
-const peers = Object.keys(manifest.peerDependencies ?? {}).sort();
+const peers = Object.keys(manifest.peerDependencies ?? {}).sort((a, b) => a.localeCompare(b));
 if (peers.join(",") !== "@oneberth/ui,react,react-dom") {
   failures.push(`the peers are ${peers.join(", ")}; they must be @oneberth/ui, react and react-dom`);
 }
@@ -31,7 +31,8 @@ if (manifest.exports?.["."] !== "./src/index.tsx") failures.push("the entry poin
 if (manifest.exports?.["./app"] !== "./src/NeorcApp.tsx") failures.push("./app must be ./src/NeorcApp.tsx");
 
 const [packed] = JSON.parse(
-  execFileSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
+  // npm from the PATH of the `npm run` that runs this check.
+  execFileSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], { // NOSONAR
     cwd: here,
     encoding: "utf8",
   }),

@@ -386,7 +386,8 @@ async def test_a_runs_starter_reaches_its_sub_flow_runs_and_their_handlers(
 
     assert run.started_by == starter
     assert sub_run.started_by == starter
-    assert first is not None and second is not None
+    assert first is not None
+    assert second is not None
     assert first.inputs == {"by": handed}
     assert second.inputs == {"by": handed}
 

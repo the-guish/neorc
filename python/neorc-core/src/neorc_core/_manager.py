@@ -731,19 +731,18 @@ def _filled_in(
     task_id: TaskId,
 ) -> dict[str, JsonValue]:
     """Params with every reference resolved, except ``neorc.attempts``."""
+    known: dict[str, JsonValue] = {
+        "task_id": str(task_id),
+        "flow_run_id": str(run.id),
+        "started_by": starter_to(run.started_by),
+    }
     values: dict[str, JsonValue] = {}
     for name, reference in params.items():
         if reference.namespace is Namespace.NEORC:
             if reference.name == "attempts":
                 continue  # the worker's to fill in
-            if reference.name == "task_id":
-                values[name] = str(task_id)
-                continue
-            if reference.name == "flow_run_id":
-                values[name] = str(run.id)
-                continue
-            if reference.name == "started_by":
-                values[name] = starter_to(run.started_by)
+            if reference.name in known:
+                values[name] = known[reference.name]
                 continue
         resolved = resolve(definition, state, address, reference)
         if resolved is None:

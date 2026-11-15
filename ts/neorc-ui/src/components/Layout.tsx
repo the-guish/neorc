@@ -35,7 +35,7 @@ export const QUEUE_KIND_KEY = "neorc-ui.queue-kind";
  * The shell draws the rail, the sign-in page and the account; on a small
  * screen it draws the panel in its drawer (`ShellPanel`).
  */
-export function Layout({ route, children }: { route: Route; children: ReactNode }) {
+export function Layout({ route, children }: Readonly<{ route: Route; children: ReactNode }>) {
   const [collapsed, setCollapsed] = useSidebarCollapsed();
   const [folded, fold] = useFoldedEntries();
   const { href } = useNav();
@@ -109,7 +109,7 @@ export function Layout({ route, children }: { route: Route; children: ReactNode 
 }
 
 /** The page. */
-function Content({ children }: { children: ReactNode }) {
+function Content({ children }: Readonly<{ children: ReactNode }>) {
   return (
     <div className="neorc-content">
       <main>{children}</main>
@@ -208,7 +208,7 @@ function Queues({ route }: { route: Route }) {
   const listed = queues.data.filter((queue) => kind === "all" || queue.kind === kind);
   return (
     <nav className="neorc-sidebar-section" aria-label="Queues">
-      <div className="neorc-segmented neorc-label" role="group" aria-label="Kind of queue">
+      <fieldset className="neorc-segmented neorc-label" aria-label="Kind of queue">
         {KIND_FILTERS.map((each) => (
           <button
             key={each}
@@ -219,7 +219,7 @@ function Queues({ route }: { route: Route }) {
             {each}
           </button>
         ))}
-      </div>
+      </fieldset>
       {listed.map((queue) => (
         <a
           key={queue.name}

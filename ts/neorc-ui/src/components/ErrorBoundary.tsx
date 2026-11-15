@@ -7,7 +7,7 @@ export class ErrorBoundary extends Component<
   { children: ReactNode },
   { error: Error | null }
 > {
-  static override contextType = NavContext;
+  static override readonly contextType = NavContext;
   declare context: ContextType<typeof NavContext>;
   override state = { error: null as Error | null };
 

@@ -29,49 +29,53 @@ export type Route =
 export function parseRoute(route: string): Route {
   const [path = "", query = ""] = route.split("?", 2);
   const params = new URLSearchParams(query);
-  const parts = path.split("/").filter((part) => part !== "");
+  const option: Option = (key) => params.get(key) ?? undefined;
+  const parts = path.split("/").filter((part) => part !== "").map(safeDecode);
   // The hash is the reader's to type: a bad escape is not a route, not a crash.
-  if (parts.some((part) => safeDecode(part) === undefined)) {
-    return { name: "unknown", route };
+  if (parts.includes(undefined) || parts.length > 2) return { name: "unknown", route };
+  const [section = "runs", id] = parts as string[];
+  const parsed = id === undefined ? sectionRoute(section, option) : itemRoute(section, id, option);
+  return parsed ?? { name: "unknown", route };
+}
+
+type Option = (key: string) => string | undefined;
+
+/** A list: `/runs`, `/flows` or `/queues`. */
+function sectionRoute(section: string, option: Option): Route | undefined {
+  switch (section) {
+    case "runs":
+      return { name: "runs", flow: option("flow"), status: option("status") };
+    case "flows":
+      return { name: "flows" };
+    case "queues":
+      return { name: "queues", kind: option("kind") };
+    default:
+      return undefined;
   }
-  if (parts.length === 0 || (parts.length === 1 && parts[0] === "runs")) {
-    return {
-      name: "runs",
-      flow: params.get("flow") ?? undefined,
-      status: params.get("status") ?? undefined,
-    };
-  }
-  if (parts.length === 1 && parts[0] === "flows") return { name: "flows" };
-  if (parts.length === 1 && parts[0] === "queues") {
-    return { name: "queues", kind: params.get("kind") ?? undefined };
-  }
-  if (parts.length === 2 && parts[0] === "queues" && parts[1]) {
-    return {
-      name: "queue",
-      queue: safeDecode(parts[1]) ?? parts[1],
-      status: params.get("status") ?? undefined,
-      flow: params.get("flow") ?? undefined,
-      window: params.get("window") ?? undefined,
-      task: params.get("task") ?? undefined,
-    };
-  }
-  if (parts.length === 2 && parts[0] === "flows" && parts[1]) {
-    return {
-      name: "flow",
-      flow: safeDecode(parts[1]) ?? parts[1],
-      version: params.get("version") ?? undefined,
-    };
-  }
-  if (parts.length === 2 && parts[0] === "runs" && parts[1]) {
-    const view = params.get("view");
-    return {
-      name: "run",
-      id: safeDecode(parts[1]) ?? parts[1],
+}
+
+/** One of a list: `/runs/7`, `/flows/f` or `/queues/q`. */
+function itemRoute(section: string, id: string, option: Option): Route | undefined {
+  switch (section) {
+    case "queues":
+      return {
+        name: "queue",
+        queue: id,
+        status: option("status"),
+        flow: option("flow"),
+        window: option("window"),
+        task: option("task"),
+      };
+    case "flows":
+      return { name: "flow", flow: id, version: option("version") };
+    case "runs": {
+      const view = option("view");
       // Any other value is not a view: the page falls back to its own choice.
-      view: view === "outline" || view === "graph" ? view : undefined,
-    };
+      return { name: "run", id, view: view === "outline" || view === "graph" ? view : undefined };
+    }
+    default:
+      return undefined;
   }
-  return { name: "unknown", route };
 }
 
 function safeDecode(part: string): string | undefined {

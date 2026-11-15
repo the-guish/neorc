@@ -326,6 +326,15 @@ ALLOWED = {
 QUEUE_RESOURCE = {"queue:definitions", "queue:receive", "queue:pending"}
 """The permissions whose routes name, in their path, the queue they act on."""
 
+QUEUE_BOUND = {"tasks:claim", "tasks:heartbeat", "tasks:finish", "tasks:complete"}
+"""The permissions whose routes name a task, not a queue: a grant bound to one
+queue passes, and the route confines the task to that queue."""
+
+
+def expected_permit(value: str) -> Permit:
+    resource = "queue" if value in QUEUE_RESOURCE else None
+    return Permit(f"neorc/{value}", resource, value in QUEUE_BOUND)
+
 
 def permits_asked(dependant: Any) -> list[Permit]:
     """Every ``permit`` a route's dependencies declare, at any depth."""
@@ -348,8 +357,7 @@ async def test_every_route_asks_for_exactly_the_permission_it_needs(
     }
 
     assert asked == {
-        key: [Permit(f"neorc/{value}", "queue" if value in QUEUE_RESOURCE else None)]
-        for key, value in ROUTE_PERMISSIONS.items()
+        key: [expected_permit(value)] for key, value in ROUTE_PERMISSIONS.items()
     }
 
 

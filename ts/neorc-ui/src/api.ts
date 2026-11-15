@@ -46,7 +46,9 @@ type Query = Record<string, string | number | boolean | undefined>;
  * helper, on this origin: a 401 signs the person out of the shell.
  */
 export function createApi(base: string) {
-  const root = base.replace(/\/+$/, "");
+  let end = base.length;
+  while (end > 0 && base[end - 1] === "/") end -= 1;
+  const root = base.slice(0, end);
   if (!root.startsWith("/") || root.startsWith("//")) {
     throw new TypeError(`neorc's API is a path on this origin, such as /neorc/: ${base}`);
   }

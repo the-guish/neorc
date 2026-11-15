@@ -181,7 +181,9 @@ def _base_url(manager_address: str) -> str:
     """
     if "://" in manager_address:
         return manager_address.rstrip("/") + API_PATH
-    return f"http://{manager_address.rstrip('/')}{API_PATH}"
+    # A bare address is a local manager; _ensure_private refuses to send a
+    # token over plain http to anything but loopback.
+    return f"http://{manager_address.rstrip('/')}{API_PATH}"  # NOSONAR
 
 
 def _ensure_private(base_url: str) -> None:

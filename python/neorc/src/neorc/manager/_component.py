@@ -139,7 +139,7 @@ def manager_component(
             if stops:
                 stops[0].set()
 
-    async def health() -> bool:
+    async def health() -> bool:  # NOSONAR: oneberth awaits a component's health
         return bool(running)
 
     async def queue_kind(name: str) -> QueueKind | None:

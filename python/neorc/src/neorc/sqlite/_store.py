@@ -53,6 +53,7 @@ from neorc.sqlite._schema import (
     QUEUES_TABLE,
     RUNS_TABLE,
     connect,
+    rollback,
 )
 from neorc_core import (
     LEASED_STATUSES,
@@ -492,7 +493,7 @@ def _transaction(
     try:
         result = operation(conn, *args)
     except BaseException:
-        conn.execute("ROLLBACK")
+        rollback(conn)
         raise
     conn.execute("COMMIT")
     return result

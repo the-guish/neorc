@@ -68,7 +68,7 @@ one version, cut from a single tag on `main`.
   `RunStarter`: a person or a service, with oneberth's id and name for it. The
   manager's route that starts a run takes it from the principal; `Manager.start_run`
   and `Store.start_run` take `started_by`, and a sub-flow run gets its
-  parent's. Every store keeps it, and the SQLite file is at version 2. A run's
+  parent's. Every store keeps it. A run's
   answer has `started_by`, and the run's page shows it. A task asks for it as
   `neorc.started_by`.
 - `neorc`: `neorc.NEORC_ROLES` and `neorc.registry()` give neorc's role table,

@@ -124,7 +124,7 @@ export function StartRunForm({ flow }: { flow: Flow }) {
   );
 }
 
-function StartRun({ flow, hostForm }: { flow: Flow; hostForm: Form | null }) {
+function StartRun({ flow, hostForm }: Readonly<{ flow: Flow; hostForm: Form | null }>) {
   const api = useApi();
   const { navigate } = useNav();
   const inputs = inputsOf(flow.content);

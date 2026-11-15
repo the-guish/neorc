@@ -619,6 +619,7 @@
 
 .neorc-filters {
   display: flex;
+  flex-wrap: wrap;
   gap: 1rem;
   margin: 0.25rem 0 0;
 }
@@ -882,15 +883,17 @@
   border-radius: 2px;
 }
 
-.neorc-segmented {
+.neorc-sidebar-section .neorc-segmented {
   display: flex;
+  min-inline-size: 0;
+  padding: 0;
   margin: 0.25rem 0.6rem 0.4rem 1.7rem;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   overflow: hidden;
 }
 
-.neorc-segmented button {
+.neorc-sidebar-section .neorc-segmented button {
   flex: 1;
   border: 0;
   border-radius: 0;
@@ -900,11 +903,11 @@
   padding: 0.15rem 0.25rem;
 }
 
-.neorc-segmented button + button {
+.neorc-sidebar-section .neorc-segmented button + button {
   border-left: 1px solid var(--line);
 }
 
-.neorc-segmented button[aria-pressed="true"] {
+.neorc-sidebar-section .neorc-segmented button[aria-pressed="true"] {
   background: var(--tint);
   color: var(--ink);
   font-weight: 600;
@@ -932,10 +935,6 @@
   color: var(--neorc-going);
   border-color: color-mix(in srgb, var(--neorc-going) 35%, transparent);
   background: color-mix(in srgb, var(--neorc-going) 10%, transparent);
-}
-
-.neorc-filters {
-  flex-wrap: wrap;
 }
 
 .neorc-queue-body {

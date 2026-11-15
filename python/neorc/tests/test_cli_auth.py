@@ -413,7 +413,8 @@ def test_tokens_are_created_listed_and_revoked(
     after = capsys.readouterr().out
 
     secret = created.out.strip()
-    assert secret.startswith("ob_svc_") and "\n" not in secret
+    assert secret.startswith("ob_svc_")
+    assert "\n" not in secret
     assert "'worker-1', neorc/worker on gpu" in created.err
     assert "never" in created.err
     assert secret not in created.err

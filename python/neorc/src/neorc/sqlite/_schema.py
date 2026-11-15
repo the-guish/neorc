@@ -20,12 +20,15 @@ The choices that differ from the Postgres tables:
 
 from __future__ import annotations
 
+import contextlib
+import enum
 import os
 import sqlite3
+from collections.abc import Iterable
 
 from neorc_core import EventKind, QueueKind, RunStatus, StarterKind, TaskStatus
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 1
 """The version of the tables this neorc reads and writes, kept in ``user_version``."""
 
 APPLICATION_ID = 0x6E656F72
@@ -41,9 +44,7 @@ EVENTS_TABLE = "neorc_events"
 QUEUES_TABLE = "neorc_queues"
 
 
-def _one_of(
-    values: type[TaskStatus | RunStatus | EventKind | QueueKind | StarterKind],
-) -> str:
+def _one_of(values: Iterable[enum.Enum]) -> str:
     return ", ".join(f"'{member.value}'" for member in values)
 
 
@@ -177,8 +178,18 @@ def _check_or_create(conn: sqlite3.Connection, path: str) -> None:
             )
         conn.execute("COMMIT")
     except BaseException:
-        conn.execute("ROLLBACK")
+        rollback(conn)
         raise
+
+
+def rollback(conn: sqlite3.Connection) -> None:
+    """Undo the open transaction, for a caller already raising an error.
+
+    SQLite undoes some failed transactions itself, and a ``ROLLBACK`` then
+    fails; that failure would hide the error that matters, so it is dropped.
+    """
+    with contextlib.suppress(sqlite3.Error):
+        conn.execute("ROLLBACK")
 
 
 def _statements(script: str) -> list[str]:

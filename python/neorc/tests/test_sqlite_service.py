@@ -80,7 +80,8 @@ async def test_a_flow_runs_to_its_end_on_a_sqlite_file(tmp_path: Path) -> None:
             page = await http.get("/ui/")
             (finished,) = (await http.get("/neorc/runs")).json()["runs"]
 
-    assert page.status_code == 200 and "stand-in" in page.text
+    assert page.status_code == 200
+    assert "stand-in" in page.text
     assert finished["status"] == "succeeded"
     assert (tmp_path / "oneberth.db").is_file()
 
@@ -140,7 +141,8 @@ async def test_a_published_task_wakes_a_waiting_worker_in_memory(
         group.create_task(publish_shortly())
         delivery = await queue.receive_task("default", timeout=5)
 
-    assert delivery is not None and delivery.task.run_id == run.id
+    assert delivery is not None
+    assert delivery.task.run_id == run.id
     # Woken by the announcement, not by falling out of the poll timeout.
     assert loop.time() - begun < 3
 

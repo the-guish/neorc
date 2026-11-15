@@ -65,7 +65,8 @@ async def test_the_file_keeps_everything_across_a_restart(tmp_path: Path) -> Non
         runs = await store.list_runs()
         events = await store.events_after(0)
 
-    assert received is not None and received.id == task.id
+    assert received is not None
+    assert received.id == task.id
     assert received.params == {"x": Reference.parse("inputs.x")}
     assert [r.id for r in runs] == [second.id, run.id]
     assert runs[1].created_at == run.created_at
@@ -101,8 +102,9 @@ async def test_a_file_of_another_version_is_refused_and_left_as_it_is(
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION + 1}")
     conn.close()
 
+    store = SqliteStore(path)
     with pytest.raises(SchemaVersionError, match=rf"version {SCHEMA_VERSION + 1}"):
-        await SqliteStore(path).open()
+        await store.open()
 
     with sqlite3.connect(path) as conn:
         assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION + 1
@@ -116,8 +118,9 @@ async def test_a_file_of_another_application_is_refused(tmp_path: Path) -> None:
         conn.execute("CREATE TABLE notes (body TEXT)")
     conn.close()
 
+    store = SqliteStore(path)
     with pytest.raises(SchemaVersionError, match="not a neorc database"):
-        await SqliteStore(path).open()
+        await store.open()
 
     with sqlite3.connect(path) as conn:
         tables = conn.execute("SELECT name FROM sqlite_master").fetchall()
