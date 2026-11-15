@@ -10,8 +10,82 @@ one version, cut from a single tag on `main`.
 
 ## [Unreleased]
 
+### Changed
+
+- `neorc`, `neorc-core`, `neorc-ui`: neorc is built on oneberth, pinned by
+  commit, and gets FastAPI, Starlette and uvicorn through `oneberth[web]`.
+  oneberth signs people in, keeps sessions and tokens, checks each route's
+  permission, applies the checks on a request and the security headers.
+  `new_manager_webapp` gives the manager as a oneberth component named
+  `neorc`, and its API is under `/neorc/`. Standalone neorc composes it alone
+  with `compose_app`. The roles are oneberth roles, `neorc/user`,
+  `neorc/worker`, `neorc/responder`, `neorc/scheduler`, `neorc/ci` and
+  `neorc/external-trigger`, with permissions named `neorc/...`. `neorc-core`
+  keeps them as plain data and imports nothing of oneberth; the rules between
+  a queue's kind and its tokens are `QueueDeclarations`, and oneberth runs
+  neorc's check of a token's queue for every service token it creates.
+  `neorc manager start`
+  reads oneberth's TOML file, `--config` or `ONEBERTH_CONFIG`, or runs in
+  oneberth's local mode with `--local`. `neorc tokens`, `sessions`, `devices`
+  and `store` are oneberth's admin scripts, with neorc's roles and
+  `--database-file` too. On a SQLite file, oneberth's store is `oneberth.db`
+  beside it. The clients reach the API under `/neorc/` at a backend's
+  address, and the UI reads the session from oneberth's `/auth/session`.
+- `neorc-ui`: the interface is `@neorc/ui`, a node package with one root
+  component, `NeorcApp`, for oneberth's shell (`@oneberth/ui`). A host gives
+  it the address of neorc's API and what the shell gives every application;
+  `neorcApp({ api, forms })` registers neorc with the shell. Its routes are
+  under `#/neorc/`, through the shell. A hidden neorc stops its long poll and
+  its polls. The shell draws the rail, the sign-in page and the account; neorc
+  draws its own panel, which the shell puts in its drawer on a small screen.
+  Every class starts with `neorc-`, and the colours are oneberth's tokens. A
+  host may give `forms`, a source of A2UI forms that take the place of the
+  form to start a run of a flow. The built interface is standalone neorc: the
+  shell with one application, neorc. React is 19.3.1. `@oneberth/ui` comes
+  from the oneberth commit `pyproject.toml` pins, packed by
+  `scripts/oneberth-ui-from-source.sh`.
+- `neorc`: the manager's long polls, the events and a worker's receive, end
+  when the client leaves and when the backend begins to stop. The answer then
+  says that nothing came yet. A backend with a waiting client stops at once,
+  instead of waiting out the server's grace.
+
+### Removed
+
+- `neorc-ui`: the `?embedded` switch, its own session, sign-in page and
+  profile with sign-out: they are the shell's.
+
+- `neorc`, `neorc-core`: neorc's own identity core, sign-in configuration,
+  OpenID Connect client, cookies, `/auth` routes, credential stores and
+  credential tables; `--no-auth`, `--auth-config` and `--ssl-certfile`;
+  `create_app`. TLS ends in front of the backend.
+
 ### Added
 
+- `neorc-ui`: `@neorc/ui` exports `formOf`, the reader of a form, and its
+  type `Form`. A host's test checks the form it gives neorc against neorc's
+  subset with `formOf({ form: messages })`.
+- `neorc`, `neorc-core`, `neorc-ui`: a run records who started it, as
+  `RunStarter`: a person or a service, with oneberth's id and name for it. The
+  manager's route that starts a run takes it from the principal; `Manager.start_run`
+  and `Store.start_run` take `started_by`, and a sub-flow run gets its
+  parent's. Every store keeps it. A run's
+  answer has `started_by`, and the run's page shows it. A task asks for it as
+  `neorc.started_by`.
+- `neorc`: `neorc.NEORC_ROLES` and `neorc.registry()` give neorc's role table,
+  and oneberth's with it, to a host that builds no manager.
+- `neorc`: `neorc.sqlite.SqliteStore`, the `Store` in one SQLite file, on the
+  standard library's `sqlite3`. It passes the store contract. One thread and
+  one connection serve it, one transaction at a time, and the event loop
+  awaits each. The file uses the write-ahead log, syncs every commit, and
+  holds neorc's `application_id` and the schema version, `SCHEMA_VERSION`; a
+  file of another version or application is refused with
+  `SchemaVersionError`. `build_app` and `run` take `database_file`, and
+  `neorc manager start --database-file` serves a manager on that file, its
+  notifiers in memory. The SQLite store keeps no credentials, so a manager on
+  it needs `--no-auth`, and is refused without it. `neorc queues declare` and
+  `neorc queues list` take `--database-file` too.
+  [sqlite-implementation.md](docs/specs/sqlite-implementation.md) has the
+  choices.
 - `neorc-core`, `neorc-ui`: a task's form can read the task's inputs and end
   with buttons, so a person triages a list on a queue's page. The inputs seed
   the form's data under `/inputs`, read only. A `Text` may show a value there,

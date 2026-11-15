@@ -26,7 +26,7 @@ is released from a single tag, so all packages share one version.
     python/neorc-core/    core primitives
     python/neorc/         top-level package, builds on neorc-core
     python/neorc-ui/      the built web UI as a distribution: assets, no code
-    ts/neorc-ui/          the web UI's source: React, TypeScript, Vite
+    ts/neorc-ui/          the web UI's source, and @neorc/ui: React, TypeScript, Vite
 
 The Python packages form a [uv workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/)
 whose root is the `pyproject.toml` at the top of the repository: it holds the
@@ -84,16 +84,21 @@ Run the same checks as CI before opening a pull request:
 ## Working on the web UI
 
 Node.js at the version in `ts/neorc-ui/.nvmrc`, installed as
-[contributing/dev-environment.md](contributing/dev-environment.md) says. Then,
-in `ts/neorc-ui`:
+[contributing/dev-environment.md](contributing/dev-environment.md) says.
+The interface is built on oneberth's shell, `@oneberth/ui`, which
+`scripts/oneberth-ui-from-source.sh` packs from the oneberth commit the root
+`pyproject.toml` pins. Then, in `ts/neorc-ui`:
 
+    ../../scripts/oneberth-ui-from-source.sh
     nvm install
     npm ci
     npm run dev
 
-`npm run dev` serves the app and proxies the API to a `neorc manager start
---no-ui` on `127.0.0.1:8420`: a checkout holds no built UI, and the dev server
-is the UI here. To have the manager serve it instead, as it does from the
+`npm run dev` serves the app and proxies the API and `/auth` to a `neorc
+manager start --local --no-ui` on `127.0.0.1:8420`: a checkout holds no built
+UI, and the dev server is the UI here. The manager prints an address that
+signs you in; open it with the dev server's host and port in place of
+`127.0.0.1:8420`, then open the dev server's page. To have the manager serve it instead, as it does from the
 wheel, `npm run build` and copy `dist/` to `python/neorc-ui/src/neorc_ui/static/`,
 which is gitignored. The checks CI runs are `npm run lint`, `npm run
 typecheck`, `npm test` and `npm run build`; the build also writes `bundled-packages.txt`,

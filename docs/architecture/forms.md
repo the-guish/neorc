@@ -143,6 +143,21 @@ It sets no value for a control in a List's template, and nothing at
   per input. The manager has refused such a form already; this is for a page
   older than its manager.
 
+## A host's form
+
+A host application, such as Robinauts, mounts neorc's root component in its
+own shell. It may give the root component `forms`, its source of forms to
+start a run.
+
+- The source gets a flow's name, latest version and definition. It answers
+  the form's messages, in the same subset, or null.
+- A form from the host takes the place of the flow's own form and of the
+  fields. neorc draws its own for a flow the host has no form for.
+- A host's form the page cannot read is not drawn. The page says so, and
+  draws its own form.
+- The form sends the flow's inputs, whoever described it. The manager holds
+  every start to the flow's own form, if the flow has one.
+
 ## What the manager does
 
 - **At upload**, a form outside the subset is refused, with every reason, and
@@ -339,7 +354,7 @@ for a task's:
 | `neorc_core/flows/_loader.py`, `_TOP_KEYS` and `_Parser.flow` | a flow may have a `form`, and `form_problems` says what is wrong with it |
 | `neorc_core/flows/_loader.py`, `load_flow_yaml`, `load_flow_file`, `read_flows` | `inline_form` reads the files a flow file names, the tasks' too |
 | `neorc_core/_manager.py`, `_start_latest` | `check_form_inputs`, after `check_inputs` |
-| `ts/neorc-ui/src/components/StartRunForm.tsx` | `formOf`, `answered` and `<FlowForm>`, in the place of the fields |
+| `ts/neorc-ui/src/components/StartRunForm.tsx` | `formOf`, `answered` and `<FlowForm>`, in the place of the fields; `useHostForm`, the host's form, before the flow's own |
 | `neorc_core/flows/_loader.py`, `_STEP_KEYS`, `_Parser.step` and `_Parser.loop` | a task may have a `form`, which reads only the task's params, and an exit condition may not |
 | `neorc_core/_manager.py`, `upload_flows` | `step_forms`: a form is for a task of an external queue |
 | `neorc_core/_manager.py`, `complete_task` | `check_form_result`, with the task's inputs, before the completion is stored |
@@ -361,7 +376,8 @@ read; a test in `python/neorc-core/tests/forms/` fails when a copy differs.
    `_Parser.loop`; make the three readers of `_loader.py` read a file's
    structure as it is; take the lines out of `_start_latest`, `upload_flows`
    and `complete_task`; give `StartRunForm` back its fields alone, and
-   `TaskPanel` its text field.
+   `TaskPanel` its text field. Take `forms` off the root component
+   (`ts/neorc-ui/src/context.ts`, `NeorcApp.tsx`).
 3. Take the journey on `examples/review_loop` out of
    `python/neorc/tests/test_ui_browser.py`.
 4. Take the entries out of `CHANGELOG.md` and the paragraphs out of

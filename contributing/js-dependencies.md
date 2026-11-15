@@ -2,8 +2,10 @@
 
 Rules for the packages under `ts/`. Their code ships to users inside a wheel,
 compiled into a bundle nobody reads, and runs in a browser beside a person's
-session on the manager, able to do whatever they may. Every dependency is
-code the project vouches for, at every version it takes.
+session on the manager, able to do whatever they may. `ts/neorc-ui` is also
+`@neorc/ui`, a node package of TypeScript source that a host compiles into
+its own bundle. Every dependency is code the project vouches for, at every
+version it takes.
 
 ## Keep them few
 
@@ -11,10 +13,16 @@ code the project vouches for, at every version it takes.
   vetting the package, and its transitive tree, now and at every update.
 - `dependencies` is what the bundle ships; `devDependencies` is build tooling.
   Keep the first list as short as it can be.
+- React, React DOM and `@oneberth/ui` are `peerDependencies`: a host brings
+  one copy of each, and standalone neorc has them as development
+  dependencies. A host gets the other dependencies of `@neorc/ui` from npm
+  with it.
 - `ts/neorc-ui/bundled-packages.txt` lists every package that ends up in the
   bundle. The build writes it and CI fails when it differs, so a new bundled
   package is a line in the pull request diff. Never edit it by hand.
-- Everything shipped fits in 500 KB gzipped; the build fails past that.
+- Standalone neorc, the shell with neorc, fits in 500 KB gzipped; the build
+  fails past that. The build also prints the size of neorc's own chunks,
+  which is what a host's bundle gains.
 
 ## Vet before adding
 
@@ -38,11 +46,20 @@ stated reason. Build tooling is not distributed and is not checked.
 ## Installing and updating
 
 - Exact versions in `package.json`, no ranges. `package-lock.json` is
-  committed and installs are `npm ci`, never `npm install`.
+  committed and installs are `npm ci`, never `npm install`. The peers take a
+  range, which every host on React 19 meets.
+- `@oneberth/ui` comes from no registry. `scripts/oneberth-ui-from-source.sh`
+  packs it from the oneberth commit that the root `pyproject.toml` pins, into
+  `ts/neorc-ui/vendor/`, which is not committed. CI and a developer run it
+  before `npm ci`. `package-lock.json` holds the tarball's integrity, so
+  `npm ci` installs the content of that commit or refuses. Moving the pin
+  moves both packages: run the script, then `npm install` the tarball again.
+- A host installs `@neorc/ui` the same way, from a checkout of the neorc
+  commit it pins: `scripts/neorc-ui-pack.sh` packs it, with `@oneberth/ui`.
 - `.npmrc` sets `ignore-scripts=true`; install scripts do not run on any
   machine or in CI.
 - Updates come from Dependabot, with a cooldown: no version published fewer
-  than 10 days ago. Do not update by hand to a version younger than that;
+  than 10 days ago. Dependabot leaves `@oneberth/ui` alone. Do not update by hand to a version younger than that;
   compromised releases are usually withdrawn within days.
 - One dependency change per pull request, never as a side effect of a feature.
 - CI runs `npm audit` for known advisories on everything installed, and
@@ -54,7 +71,7 @@ stated reason. Build tooling is not distributed and is not checked.
 
 ## In the browser
 
-- The manager serves `/ui/` with a Content-Security-Policy that allows
+- The backend serves `/ui/` with oneberth's Content-Security-Policy, which allows
   scripts and connections from its own origin only, and styles from it or
   inline, which React needs for `style` attributes. Do not loosen it for a
   library; choose another library.
@@ -71,9 +88,12 @@ never released.
 
 - `ts/neorc-ui/vite.config.ts`: the license allowlist, the size budget and
   the bundled-package list.
+- `ts/neorc-ui/scripts/check-package.mjs`: the peers, exact versions, no
+  install script, and what `npm pack` ships.
 - `ts/neorc-ui/.npmrc`: exact versions and no install scripts.
 - `.github/dependabot.yml`: the updates and their cooldown.
 - `.github/workflows/ci.yml`, the `ui` job: audits, signatures, the build
   and the committed list; a red step there names this file.
-- `python/neorc/src/neorc/manager/_ui.py`: the Content-Security-Policy.
+- oneberth's web part, `oneberth.web.CONTENT_SECURITY_POLICY`: the
+  Content-Security-Policy.
 - `ts/neorc-ui/AGENTS.md`: the same rules, as do-nots for coding agents.

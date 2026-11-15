@@ -26,7 +26,9 @@ for `sudo`):
     uv run playwright install --with-deps chromium
 
 Without it, the browser tests skip. Repeat after `uv sync` bumps `playwright`:
-each release wants its own browser build.
+each release wants its own browser build. `NEORC_TEST_CHROMIUM` names a
+Chromium the tests launch instead, such as a headless shell already on the
+machine.
 
 ## Node.js, only to work on `ts/`
 
@@ -36,7 +38,8 @@ version is pinned in that package's `.nvmrc`; use it, not the distribution's
 
 Install [nvm](https://github.com/nvm-sh/nvm) from a tagged GitHub release,
 not a piped install script. It downloads the official build from nodejs.org.
-Then, in the package directory:
+Then, in the package directory, after `scripts/oneberth-ui-from-source.sh`
+for `ts/neorc-ui`:
 
     nvm install
     npm ci

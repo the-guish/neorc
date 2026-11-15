@@ -1,5 +1,9 @@
 # Plan: authentication, with sign-in through Google and Okta
 
+> Superseded by oneberth's identity spec, `docs/specs/identity.md` in
+> [oneberth](https://github.com/the-guish/oneberth): oneberth signs people in,
+> keeps the tokens and checks the roles. This plan is kept as a record.
+
 Goal: no request reaches a manager's data without an identity. People sign in
 to the web UI with an OpenID Connect identity provider, Google or Okta.
 Machines, the scheduler, workers, `neorc flows upload` and scripts, send an
