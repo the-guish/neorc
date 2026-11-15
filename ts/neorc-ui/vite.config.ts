@@ -1,4 +1,9 @@
 // Dependencies and the checks below follow contributing/js-dependencies.md.
+//
+// The build is standalone neorc (src/standalone/): oneberth's shell with one
+// application, neorc, which the neorc-ui wheel ships. neorc's root component
+// loads as chunks of its own, the part a host's bundle gains by mounting
+// neorc; the build says how large they are.
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { gzipSync } from "node:zlib";
@@ -35,13 +40,13 @@ const here = import.meta.dirname;
  */
 const BUNDLED_PACKAGES = resolve(here, "bundled-packages.txt");
 
-function gzippedSize(dir: string): number {
+function gzippedSize(dir: string, only: (name: string) => boolean = () => true): number {
   let total = 0;
   for (const name of readdirSync(dir)) {
     const path = join(dir, name);
     if (statSync(path).isDirectory()) {
-      total += gzippedSize(path);
-    } else {
+      total += gzippedSize(path, only);
+    } else if (only(name)) {
       total += gzipSync(readFileSync(path)).length;
     }
   }
@@ -54,6 +59,11 @@ function sizeBudget(): Plugin {
     apply: "build",
     closeBundle() {
       const size = gzippedSize(resolve(here, "dist"));
+      const neorc = gzippedSize(resolve(here, "dist"), (name) => name.startsWith("NeorcApp-"));
+      console.log(
+        `standalone neorc is ${size} bytes gzipped (budget ${SIZE_BUDGET_BYTES}); ` +
+          `neorc's own chunks, what a host gains, are ${neorc}`,
+      );
       if (size > SIZE_BUDGET_BYTES) {
         throw new Error(
           `the built assets are ${size} bytes gzipped, over the budget of ` +
@@ -94,6 +104,8 @@ export default defineConfig({
       plugins: [
         license({
           thirdParty: {
+            // @oneberth/ui is a private package, installed from a checkout.
+            includePrivate: true,
             allow: {
               test: (dependency) =>
                 ALLOWED_LICENSES.includes(dependency.license ?? ""),

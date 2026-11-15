@@ -18,6 +18,6 @@ describe("ErrorBoundary", () => {
     );
 
     expect(screen.getByRole("alert")).toHaveTextContent("no such thing");
-    expect(screen.getByRole("link", { name: "Runs" })).toHaveAttribute("href", "#/runs");
+    expect(screen.getByRole("link", { name: "Runs" })).toHaveAttribute("href", "#/neorc/runs");
   });
 });

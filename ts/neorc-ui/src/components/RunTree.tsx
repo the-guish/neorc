@@ -7,7 +7,7 @@ import {
   type StepNode,
 } from "../definition";
 import { formatDuration, shortId } from "../format";
-import { href } from "../router";
+import { useNav } from "../router";
 import { StatusDot } from "./StatusBadge";
 import { TaskDetails } from "./TaskDetails";
 
@@ -26,9 +26,9 @@ export function RunTree({
   done: Published;
 }) {
   return (
-    <ul className="tree">
+    <ul className="neorc-tree">
       {steps.map((step) => (
-        <li key={step.name} className={`step step-${step.kind}`}>
+        <li key={step.name} className={`neorc-step neorc-step-${step.kind}`}>
           <Step step={step} scope={scope} done={done} />
         </li>
       ))}
@@ -45,20 +45,21 @@ function Step({
   scope: Scope;
   done: Published;
 }) {
+  const { href } = useNav();
   switch (step.kind) {
     case "task": {
       const task = done.tasks.get(addressKey(step.name, scope));
       return (
-        <div className={`card step-card${task ? "" : " not-yet"}`}>
-          <div className="step-line">
+        <div className={`neorc-card neorc-step-card${task ? "" : " neorc-not-yet"}`}>
+          <div className="neorc-step-line">
             <StatusDot status={task?.status ?? "none"} />
-            <span className="step-text">
+            <span className="neorc-step-text">
               <strong>{step.name}</strong>
-              <span className="muted">
+              <span className="neorc-muted">
                 task · <code>{step.handler}</code>
               </span>
             </span>
-            <span className="mono muted step-when">
+            <span className="neorc-mono neorc-muted neorc-step-when">
               {task
                 ? when(task.status, formatDuration(task.started_at ?? task.created_at, task.finished_at))
                 : "not published"}
@@ -71,12 +72,12 @@ function Step({
     case "flow": {
       const run = done.subRuns.get(addressKey(step.name, scope));
       return (
-        <div className={`card step-card${run ? "" : " not-yet"}`}>
-          <div className="step-line">
+        <div className={`neorc-card neorc-step-card${run ? "" : " neorc-not-yet"}`}>
+          <div className="neorc-step-line">
             <StatusDot status={run?.status ?? "none"} />
-            <span className="step-text">
+            <span className="neorc-step-text">
               <strong>{step.name}</strong>
-              <span className="muted">
+              <span className="neorc-muted">
                 sub-flow <code>{step.flow}</code>
                 {run && (
                   <>
@@ -88,7 +89,7 @@ function Step({
                 )}
               </span>
             </span>
-            <span className="mono muted step-when">
+            <span className="neorc-mono neorc-muted neorc-step-when">
               {run ? when(run.status, formatDuration(run.created_at, run.finished_at)) : "not published"}
             </span>
           </div>
@@ -129,26 +130,26 @@ function Container({
       : undefined;
   return (
     <div
-      className={`card container-card${instances.length === 0 ? " not-yet" : ""}${outcome?.failed ? " loop-failed" : ""}`}
+      className={`neorc-card neorc-container-card${instances.length === 0 ? " neorc-not-yet" : ""}${outcome?.failed ? " neorc-loop-failed" : ""}`}
     >
-      <div className="step-line">
-        <span className="step-text">
-          <strong>{step.name}</strong> <span className="muted">{about}</span>
+      <div className="neorc-step-line">
+        <span className="neorc-step-text">
+          <strong>{step.name}</strong> <span className="neorc-muted">{about}</span>
         </span>
       </div>
       {outcome && (
-        <p className={`loop-outcome ${outcome.failed ? "loop-outcome-failed" : "muted"}`}>
+        <p className={`neorc-loop-outcome ${outcome.failed ? "neorc-loop-outcome-failed" : "neorc-muted"}`}>
           iteration {last}: {outcome.text}
         </p>
       )}
       {instances.length === 0 ? (
-        <section className="instance not-yet">
-          <h4 className="muted">not entered yet</h4>
+        <section className="neorc-instance neorc-not-yet">
+          <h4 className="neorc-muted">not entered yet</h4>
           <RunTree steps={step.children} scope={[...scope, [step.name, 0]]} done={done} />
         </section>
       ) : (
         instances.map((n) => (
-          <section key={n} className="instance" aria-label={`${step.name} ${what} ${n}`}>
+          <section key={n} className="neorc-instance" aria-label={`${step.name} ${what} ${n}`}>
             <h4>
               {what} {n}
             </h4>

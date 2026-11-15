@@ -1,8 +1,9 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { detailOf } from "@oneberth/ui";
 import { useMemo, useState, type FormEvent } from "react";
 
+import { useApi } from "../context";
 import {
-  completeTask,
   type Delivery,
   type QueueKind,
   type Run,
@@ -12,7 +13,7 @@ import { isExitCondition, rawStep } from "../definition";
 import { answered, FlowForm, formOf, type Answers, type Form } from "../forms";
 import { formatTime, formatValue, shortId } from "../format";
 import { refresh, useFlow, useRun, useTaskInputs } from "../queries";
-import { href } from "../router";
+import { useNav } from "../router";
 import { Failed, Loading } from "./Layout";
 import { StatusBadge } from "./StatusBadge";
 
@@ -33,8 +34,8 @@ export function TaskPanel({
 }) {
   const delivery = useTaskInputs(id);
   return (
-    <aside className="task-panel card" aria-label="Task">
-      <a className="task-panel-close" href={closeHref}>
+    <aside className="neorc-task-panel neorc-card" aria-label="Task">
+      <a className="neorc-task-panel-close" href={closeHref}>
         Close
       </a>
       {delivery.isPending && <Loading what="the task" />}
@@ -45,6 +46,7 @@ export function TaskPanel({
 }
 
 function Opened({ delivery, kind }: { delivery: Delivery; kind: QueueKind | undefined }) {
+  const { href } = useNav();
   const { task, inputs } = delivery;
   const names = Object.keys(inputs);
   return (
@@ -52,14 +54,14 @@ function Opened({ delivery, kind }: { delivery: Delivery; kind: QueueKind | unde
       <h2>
         {task.address.step} <StatusBadge status={task.status} />
       </h2>
-      <dl className="facts">
+      <dl className="neorc-facts">
         <dt>Asks for</dt>
         <dd>
           <code>{task.handler}</code>
         </dd>
         <dt>Run</dt>
         <dd>
-          <a className="mono" href={href({ name: "run", id: task.run_id })}>
+          <a className="neorc-mono" href={href({ name: "run", id: task.run_id })}>
             {shortId(task.run_id)}
           </a>
         </dd>
@@ -74,9 +76,9 @@ function Opened({ delivery, kind }: { delivery: Delivery; kind: QueueKind | unde
       </dl>
       <h3>Inputs</h3>
       {names.length === 0 ? (
-        <p className="muted">This task has no inputs.</p>
+        <p className="neorc-muted">This task has no inputs.</p>
       ) : (
-        <dl className="task-inputs">
+        <dl className="neorc-task-inputs">
           {names.map((name) => (
             <div key={name}>
               <dt>{name}</dt>
@@ -96,7 +98,7 @@ function Opened({ delivery, kind }: { delivery: Delivery; kind: QueueKind | unde
       {task.error && (
         <>
           <h3>Error</h3>
-          <pre className="error">{task.error}</pre>
+          <pre className="neorc-error">{task.error}</pre>
         </>
       )}
       {task.finished_at === null && (
@@ -125,16 +127,16 @@ function Unfinished({
   const { status, reason } = run.data;
   if (status !== "active") {
     return (
-      <p className="muted">
+      <p className="neorc-muted">
         Its run ended ({status}
         {reason ? `: ${reason}` : ""}). Nothing can complete this task.
       </p>
     );
   }
-  if (task.status !== "pending") return <p className="muted">A worker has this task.</p>;
+  if (task.status !== "pending") return <p className="neorc-muted">A worker has this task.</p>;
   if (kind === "external") return <Answer task={task} run={run.data} inputs={inputs} />;
   if (kind === "worker") {
-    return <p className="muted">This task waits for a worker of its queue.</p>;
+    return <p className="neorc-muted">This task waits for a worker of its queue.</p>;
   }
   return null;
 }
@@ -142,7 +144,7 @@ function Unfinished({
 /** A value as a person reads it: a text as it is, anything else as JSON. */
 function Value({ value }: { value: unknown }) {
   return typeof value === "string" ? (
-    <p className="task-text">{value}</p>
+    <p className="neorc-task-text">{value}</p>
   ) : (
     <pre>{formatValue(value)}</pre>
   );
@@ -206,6 +208,7 @@ export function AnswerForm({
   yesOrNo: boolean;
 }) {
   const client = useQueryClient();
+  const api = useApi();
   const [mode, setMode] = useState<Mode>("form");
   const start = useMemo(() => form?.start ?? {}, [form]);
   const [answers, setAnswers] = useState<Answers>(start);
@@ -216,7 +219,7 @@ export function AnswerForm({
   const [problem, setProblem] = useState<string | null>(null);
   const complete = useMutation({
     mutationFn: (body: { result: unknown } | { error: string }) =>
-      completeTask(taskId, body),
+      api.completeTask(taskId, body),
     onSettled: () => {
       // Completed, or refused because someone was first or the run ended:
       // read the task, its run and the list again.
@@ -267,9 +270,9 @@ export function AnswerForm({
     complete.reset();
   }
 
-  const refused = complete.error instanceof Error ? complete.error.message : null;
+  const refused = complete.error === null ? null : detailOf(complete.error);
   return (
-    <form className="start-run task-answer" onSubmit={submit} aria-label={`Complete ${step}`}>
+    <form className="neorc-start-run neorc-task-answer" onSubmit={submit} aria-label={`Complete ${step}`}>
       <h3>{mode === "fail" ? "Fail the task" : "Your answer"}</h3>
       {mode === "form" &&
         (form !== null ? (
@@ -281,9 +284,9 @@ export function AnswerForm({
             pressing={complete.isPending}
           />
         ) : yesOrNo ? (
-          <fieldset className="fields">
+          <fieldset className="neorc-fields">
             <legend>The loop ends on a yes.</legend>
-            <label className="flow-form-inline">
+            <label className="neorc-flow-form-inline">
               <input
                 type="radio"
                 name={`answer-${taskId}`}
@@ -292,7 +295,7 @@ export function AnswerForm({
               />
               Yes
             </label>
-            <label className="flow-form-inline">
+            <label className="neorc-flow-form-inline">
               <input
                 type="radio"
                 name={`answer-${taskId}`}
@@ -303,11 +306,11 @@ export function AnswerForm({
             </label>
           </fieldset>
         ) : (
-          <div className="fields">
+          <div className="neorc-fields">
             <label>
               Answer
               <textarea
-                className="plain"
+                className="neorc-plain"
                 rows={4}
                 value={text}
                 onChange={(event) => setText(event.target.value)}
@@ -316,7 +319,7 @@ export function AnswerForm({
           </div>
         ))}
       {mode === "json" && (
-        <label className="json">
+        <label className="neorc-json">
           Result as JSON
           <textarea
             rows={6}
@@ -327,39 +330,39 @@ export function AnswerForm({
         </label>
       )}
       {mode === "fail" && (
-        <div className="fields">
+        <div className="neorc-fields">
           <label>
             Reason
             <textarea
-              className="plain"
+              className="neorc-plain"
               rows={3}
               value={reason}
               onChange={(event) => setReason(event.target.value)}
             />
           </label>
-          <p className="muted">A failed task fails its run.</p>
+          <p className="neorc-muted">A failed task fails its run.</p>
         </div>
       )}
       {(problem ?? refused) && <p role="alert">{problem ?? refused}</p>}
-      <div className="task-answer-actions">
+      <div className="neorc-task-answer-actions">
         {/* A form with buttons of its own is completed by one of them. */}
         {!(mode === "form" && form?.buttons) && (
-          <button type="submit" className="primary" disabled={complete.isPending}>
+          <button type="submit" className="neorc-primary" disabled={complete.isPending}>
             {complete.isPending ? "Sending…" : mode === "fail" ? "Fail task" : "Complete"}
           </button>
         )}
         {mode !== "form" && (
-          <button type="button" className="link" onClick={() => show("form")}>
+          <button type="button" className="neorc-link" onClick={() => show("form")}>
             Back to the form
           </button>
         )}
         {mode !== "json" && (
-          <button type="button" className="link" onClick={() => show("json")}>
+          <button type="button" className="neorc-link" onClick={() => show("json")}>
             Edit as JSON
           </button>
         )}
         {mode !== "fail" && (
-          <button type="button" className="link" onClick={() => show("fail")}>
+          <button type="button" className="neorc-link" onClick={() => show("fail")}>
             Fail the task
           </button>
         )}

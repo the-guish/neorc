@@ -15,11 +15,11 @@ describe("FlowsPage", () => {
     expect(rows).toHaveLength(3);
     expect(screen.getByRole("link", { name: "hello" })).toHaveAttribute(
       "href",
-      "#/flows/hello",
+      "#/neorc/flows/hello",
     );
     expect(screen.getByRole("link", { name: "word_picker" })).toHaveAttribute(
       "href",
-      "#/flows/word_picker",
+      "#/neorc/flows/word_picker",
     );
     expect(screen.getByText("1.2.0")).toBeInTheDocument();
   });

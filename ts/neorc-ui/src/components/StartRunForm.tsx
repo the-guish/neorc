@@ -1,10 +1,12 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { detailOf } from "@oneberth/ui";
 import { useMemo, useState, type FormEvent } from "react";
 
-import { startRun, type Flow } from "../api";
-import { answered, FlowForm, formOf, type Answers } from "../forms";
+import type { Flow } from "../api";
+import { useApi, useFormSource, type FormMessages } from "../context";
+import { answered, FlowForm, formOf, type Answers, type Form } from "../forms";
 import { localToIso } from "../format";
-import { navigate } from "../router";
+import { useNav } from "../router";
 
 const INPUT_TYPES = ["string", "number", "boolean", "datetime"] as const;
 type InputType = (typeof INPUT_TYPES)[number];
@@ -78,22 +80,63 @@ export function jsonBodyOf(
 }
 
 /**
- * Start a run of a flow's latest version: the flow's own form when it gives
- * one (../forms), one field per declared input when it does not, or a JSON
- * editor for what neither can say. The manager's refusal is shown as it
- * came; a started run is opened.
+ * The host's form for a flow, when the host gives neorc a source of forms:
+ * `form` is null for a flow it has none for, and `failed` says why a form it
+ * gave cannot be drawn.
+ */
+function useHostForm(flow: Flow): { pending: boolean; form: Form | null; failed: string | null } {
+  const source = useFormSource();
+  const asked = useQuery({
+    queryKey: ["host-form", flow.name, flow.version],
+    queryFn: async (): Promise<FormMessages | null> =>
+      (await source?.({ name: flow.name, version: flow.version, content: flow.content })) ?? null,
+    enabled: source !== undefined,
+    retry: false,
+  });
+  return useMemo(() => {
+    if (source === undefined || asked.data === null) return { pending: false, form: null, failed: null };
+    if (asked.isPending) return { pending: true, form: null, failed: null };
+    if (asked.isError) return { pending: false, form: null, failed: detailOf(asked.error) };
+    const form = formOf({ form: asked.data });
+    return form === null
+      ? { pending: false, form: null, failed: "it is outside what neorc draws" }
+      : { pending: false, form, failed: null };
+  }, [source, asked.data, asked.isPending, asked.isError, asked.error]);
+}
+
+/**
+ * Start a run of a flow's latest version. The host's form comes first, when
+ * the host gives one for the flow (`forms` on the root component); then the
+ * flow's own form (../forms); then one field per declared input; and a JSON
+ * editor for what none can say. The manager's refusal is shown as it came;
+ * a started run is opened.
  */
 export function StartRunForm({ flow }: { flow: Flow }) {
+  const host = useHostForm(flow);
+  if (host.pending) return <p className="neorc-muted">Loading the form…</p>;
+  return (
+    <>
+      {host.failed !== null && (
+        <p role="alert">The host's form for {flow.name} could not be drawn: {host.failed}.</p>
+      )}
+      <StartRun key={host.form === null ? "own" : "host"} flow={flow} hostForm={host.form} />
+    </>
+  );
+}
+
+function StartRun({ flow, hostForm }: { flow: Flow; hostForm: Form | null }) {
+  const api = useApi();
+  const { navigate } = useNav();
   const inputs = inputsOf(flow.content);
   const names = Object.keys(inputs);
-  const [mode, setMode] = useState<"form" | "json">(names.length ? "form" : "json");
+  const form = useMemo(() => hostForm ?? formOf(flow.content), [hostForm, flow.content]);
+  const [mode, setMode] = useState<"form" | "json">(names.length || form ? "form" : "json");
   const [values, setValues] = useState<Values>({});
-  const form = useMemo(() => formOf(flow.content), [flow.content]);
   const [answers, setAnswers] = useState<Answers>(form?.start ?? {});
   const [json, setJson] = useState("{}");
   const [problem, setProblem] = useState<string | null>(null);
   const start = useMutation({
-    mutationFn: (body: Record<string, unknown>) => startRun(flow.name, body),
+    mutationFn: (body: Record<string, unknown>) => api.startRun(flow.name, body),
   });
 
   function submit(event: FormEvent) {
@@ -116,14 +159,14 @@ export function StartRunForm({ flow }: { flow: Flow }) {
     });
   }
 
-  const refused = start.error instanceof Error ? start.error.message : null;
+  const refused = start.error === null ? null : detailOf(start.error);
   return (
-    <form className="start-run" onSubmit={submit} aria-label={`Start ${flow.name}`}>
+    <form className="neorc-start-run" onSubmit={submit} aria-label={`Start ${flow.name}`}>
       <h2>Start a run</h2>
-      <p className="muted">
+      <p className="neorc-muted">
         Of {flow.name} {flow.version}, the latest version.{" "}
-        {names.length > 0 && (
-          <button type="button" className="link" onClick={() => setMode(mode === "form" ? "json" : "form")}>
+        {(names.length > 0 || form !== null) && (
+          <button type="button" className="neorc-link" onClick={() => setMode(mode === "form" ? "json" : "form")}>
             {mode === "form" ? "Edit as JSON" : "Back to the fields"}
           </button>
         )}
@@ -132,9 +175,9 @@ export function StartRunForm({ flow }: { flow: Flow }) {
         form ? (
           <FlowForm form={form} answers={answers} onChange={setAnswers} />
         ) : names.length === 0 ? (
-          <p className="muted">This flow declares no inputs.</p>
+          <p className="neorc-muted">This flow declares no inputs.</p>
         ) : (
-          <div className="fields">
+          <div className="neorc-fields">
             {names.map((name) => (
               <Field
                 key={name}
@@ -147,7 +190,7 @@ export function StartRunForm({ flow }: { flow: Flow }) {
           </div>
         )
       ) : (
-        <label className="json">
+        <label className="neorc-json">
           Inputs as JSON
           <textarea
             rows={6}
@@ -158,7 +201,7 @@ export function StartRunForm({ flow }: { flow: Flow }) {
         </label>
       )}
       {(problem ?? refused) && <p role="alert">{problem ?? refused}</p>}
-      <button type="submit" className="primary" disabled={start.isPending}>
+      <button type="submit" className="neorc-primary" disabled={start.isPending}>
         {start.isPending ? "Starting…" : "Start run"}
       </button>
     </form>
@@ -179,7 +222,7 @@ function Field({
   const id = `input-${name}`;
   return (
     <label htmlFor={id}>
-      {name} <small className="muted">{type}</small>
+      {name} <small className="neorc-muted">{type}</small>
       {type === "boolean" ? (
         <select id={id} value={value || "false"} onChange={(e) => onChange(e.target.value)}>
           <option value="false">false</option>

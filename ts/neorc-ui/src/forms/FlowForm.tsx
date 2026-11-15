@@ -57,9 +57,9 @@ export function FlowForm({
       case "row":
       case "list": {
         const look = {
-          column: "fields",
-          row: "flow-form-row",
-          list: "flow-form-list",
+          column: "neorc-fields",
+          row: "neorc-flow-form-row",
+          list: "neorc-flow-form-list",
         };
         return (
           <div className={look[control.kind]} key={control.id}>
@@ -69,13 +69,13 @@ export function FlowForm({
       }
       case "card":
         return (
-          <article className="flow-form-card" key={control.id}>
+          <article className="neorc-flow-form-card" key={control.id}>
             {draw(control.child, scope)}
           </article>
         );
       case "repeat":
         return (
-          <div className="flow-form-list" key={control.id}>
+          <div className="neorc-flow-form-list" key={control.id}>
             {control.items.map((item, index) => (
               <Fragment key={index}>{draw(control.template, { index, item })}</Fragment>
             ))}
@@ -84,7 +84,7 @@ export function FlowForm({
       case "text": {
         const text = textOf(control.text, scope?.item);
         if (control.variant === "body" || control.variant === "caption") {
-          const quiet = control.variant === "caption" ? "muted" : undefined;
+          const quiet = control.variant === "caption" ? "neorc-muted" : undefined;
           return (
             <p key={control.id} className={quiet}>
               {text}
@@ -101,9 +101,9 @@ export function FlowForm({
             type="button"
             className={
               control.variant === "primary"
-                ? "primary"
+                ? "neorc-primary"
                 : control.variant === "borderless"
-                  ? "link"
+                  ? "neorc-link"
                   : undefined
             }
             disabled={pressing}
@@ -139,7 +139,7 @@ export function FlowForm({
       }
       case "checkbox":
         return (
-          <label key={control.id} htmlFor={id} className="flow-form-inline">
+          <label key={control.id} htmlFor={id} className="neorc-flow-form-inline">
             <input
               id={id}
               type="checkbox"
@@ -155,7 +155,7 @@ export function FlowForm({
         if (control.display === "chips") {
           // A bar of buttons, one pressed at a time.
           return (
-            <fieldset key={control.id} className="flow-form-chips">
+            <fieldset key={control.id} className="neorc-flow-form-chips">
               <legend>{control.label}</legend>
               {control.options.map((option) => (
                 <button
@@ -189,7 +189,7 @@ export function FlowForm({
           <fieldset key={control.id}>
             <legend>{control.label}</legend>
             {control.options.map((option) => (
-              <label key={option.value} className="flow-form-inline">
+              <label key={option.value} className="neorc-flow-form-inline">
                 <input
                   type="radio"
                   name={id}
@@ -204,5 +204,5 @@ export function FlowForm({
       }
     }
   }
-  return <div className="flow-form">{draw(form.root)}</div>;
+  return <div className="neorc-flow-form">{draw(form.root)}</div>;
 }

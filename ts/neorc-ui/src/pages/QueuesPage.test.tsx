@@ -18,7 +18,7 @@ describe("QueuesPage", () => {
     expect(rows[2]).toHaveTextContent("external");
     expect(screen.getByRole("link", { name: "editors" })).toHaveAttribute(
       "href",
-      "#/queues/editors",
+      "#/neorc/queues/editors",
     );
     expect(screen.getByLabelText(/Kind/)).toHaveValue("");
   });
@@ -34,9 +34,9 @@ describe("QueuesPage", () => {
     expect(screen.getByText("1 external queue")).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText(/Kind/), { target: { value: "worker" } });
-    expect(location.hash).toBe("#/queues?kind=worker");
+    expect(location.hash).toBe("#/neorc/queues?kind=worker");
     fireEvent.change(screen.getByLabelText(/Kind/), { target: { value: "" } });
-    expect(location.hash).toBe("#/queues");
+    expect(location.hash).toBe("#/neorc/queues");
   });
 
   it("says so when no queue is declared", async () => {

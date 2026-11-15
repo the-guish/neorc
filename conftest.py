@@ -268,11 +268,17 @@ class Tokens:
     """A worker token per queue, bound to it."""
 
 
-async def role_tokens(composition: Composition, queues: Iterable[str]) -> Tokens:
-    """A token of each role on a started composition, and a worker token per queue."""
+async def role_tokens(
+    composition: Composition, queues: Iterable[str], *, user: str | None = None
+) -> Tokens:
+    """A token of each role on a started composition, and a worker token per queue.
+
+    ``user`` is the person's token, Ada's by default: in the local mode, the
+    local user's, made on the account page.
+    """
     ci = await service_token(composition, Role.CI)
     scheduler = await service_token(composition, Role.SCHEDULER)
-    user = await person_token(composition)
+    user = user or await person_token(composition)
     workers = {}
     for queue in queues:
         workers[queue] = await service_token(composition, Role.WORKER, queue)

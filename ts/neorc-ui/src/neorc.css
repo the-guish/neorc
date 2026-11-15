@@ -1,88 +1,60 @@
-:root {
-  color-scheme: light dark;
-  /* A warm off-white ground, white cards, ink and two greys. */
-  --ground: #f8f7f4;
-  --paper: #ffffff;
-  --panel: #f2f0eb;
-  --tint: #e7e4dc;
-  --hover: #edeae3;
-  --ink: #1c1b18;
-  --muted: #6f6c66;
-  --line: #e4e1da;
-  /* The one accent, for the primary button; links have their own blue. */
-  --accent: #1c1b18;
-  --on-accent: #ffffff;
-  --link: #1d4ed8;
-  --warn-bg: #fff4d6;
-  --warn-ink: #6b4b00;
+/* neorc's styles. The palette, the radii and the fonts are oneberth's
+   tokens (@oneberth/ui/tokens.css); neorc adds the colours of a status.
+   Every class starts with neorc-, and a rule on an element holds inside
+   neorc's root, .neorc-app. */
+
+.neorc-app {
   /* A status's colour: running blue, failed red, succeeded green, waiting grey. */
-  --going: #2563eb;
-  --bad: #dc2626;
-  --ok: #16a34a;
-  --wait: #8a877f;
-  --radius: 8px;
-  --radius-card: 10px;
-  --radius-pill: 999px;
-  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-  font-size: 15px;
-  line-height: 1.45;
+  --neorc-going: #2563eb;
+  --neorc-ok: #16a34a;
+  --neorc-wait: #8a877f;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  font-family: var(--sans);
   color: var(--ink);
   background: var(--ground);
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
-    --ground: #161512;
-    --paper: #1e1d1a;
-    --panel: #1b1a17;
-    --tint: #2d2b25;
-    --hover: #26241f;
-    --ink: #ecebe6;
-    --muted: #9c9991;
-    --line: #2f2d28;
-    --accent: #ecebe6;
-    --on-accent: #161512;
-    --link: #7fb0ff;
-    --warn-bg: #4a3a00;
-    --warn-ink: #ffe6a3;
-    --going: #5b8def;
-    --bad: #ef5350;
-    --ok: #3fb950;
-    --wait: #8a877f;
+  :root:not([data-theme="light"]) .neorc-app {
+    --neorc-going: #5b8def;
+    --neorc-ok: #3fb950;
   }
 }
 
-body {
-  margin: 0;
+:root[data-theme="dark"] .neorc-app {
+  --neorc-going: #5b8def;
+  --neorc-ok: #3fb950;
 }
 
-main {
+:where(.neorc-app) main {
   padding: 0 1.5rem 3rem;
   max-width: 72rem;
 }
 
-h1 {
+:where(.neorc-app) h1 {
   font-size: 1.5rem;
   margin: 1.5rem 0 1rem;
 }
 
-h2 {
+:where(.neorc-app) h2 {
   font-size: 1.1rem;
   margin: 1.5rem 0 0.5rem;
 }
 
-a {
+:where(.neorc-app) a {
   color: var(--link);
 }
 
-code,
-pre {
+:where(.neorc-app) code,
+:where(.neorc-app) pre {
   font-family: var(--mono);
   font-size: 0.9em;
 }
 
-pre {
+:where(.neorc-app) pre {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -92,8 +64,8 @@ pre {
 }
 
 /* The primary action: one per page, in the accent. */
-.primary,
-button.primary {
+.neorc-primary,
+:where(.neorc-app) button.neorc-primary {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
@@ -107,31 +79,31 @@ button.primary {
   cursor: pointer;
 }
 
-.primary:hover {
+.neorc-primary:hover {
   opacity: 0.9;
 }
 
-.muted {
+.neorc-muted {
   color: var(--muted);
 }
 
-.facts {
+.neorc-facts {
   display: grid;
   grid-template-columns: max-content 1fr;
   gap: 0.25rem 1rem;
   margin: 0;
 }
 
-.facts dt {
+.neorc-facts dt {
   color: var(--muted);
 }
 
-.facts dd {
+.neorc-facts dd {
   margin: 0;
 }
 
-select,
-input {
+:where(.neorc-app) select,
+:where(.neorc-app) input {
   font: inherit;
   padding: 0.25rem 0.4rem;
   border: 1px solid var(--line);
@@ -140,27 +112,27 @@ input {
   color: var(--ink);
 }
 
-.task-details summary {
+.neorc-task-details summary {
   cursor: pointer;
   color: var(--muted);
 }
 
-pre.error {
+:where(.neorc-app) pre.neorc-error {
   color: var(--bad);
 }
 
-.start-run .fields {
+.neorc-start-run .neorc-fields {
   display: grid;
   gap: 0.75rem;
   margin-bottom: 1rem;
 }
 
-.start-run label {
+.neorc-start-run label {
   display: grid;
   gap: 0.25rem;
 }
 
-.start-run textarea {
+.neorc-start-run textarea {
   font-family: var(--mono);
   font-size: 0.9em;
   width: 100%;
@@ -173,7 +145,7 @@ pre.error {
   padding: 0.5rem;
 }
 
-button.link {
+:where(.neorc-app) button.neorc-link {
   border: none;
   background: none;
   color: var(--accent);
@@ -181,17 +153,17 @@ button.link {
   text-decoration: underline;
 }
 
-.cancel-run {
+.neorc-cancel-run {
   margin: 0.5rem 0 1rem;
 }
 
-[role="alert"] {
+:where(.neorc-app) [role="alert"] {
   color: var(--bad);
 }
 
 /* The view switch on a run's page. */
 
-.segmented {
+.neorc-segmented {
   display: inline-flex;
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -199,30 +171,30 @@ button.link {
   margin: 0 0 0.75rem;
 }
 
-.segmented a {
+.neorc-segmented a {
   padding: 0.25rem 0.8rem;
   text-decoration: none;
   color: var(--ink);
 }
 
-.segmented a + a {
+.neorc-segmented a + a {
   border-left: 1px solid var(--line);
 }
 
-.segmented a[aria-current="true"] {
+.neorc-segmented a[aria-current="true"] {
   background: var(--accent);
   color: var(--on-accent);
 }
 
 /* The graph view. */
 
-.run-graph {
+.neorc-run-graph {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 1rem;
 }
 
-.run-graph-canvas {
+.neorc-run-graph-canvas {
   height: 70vh;
   min-height: 24rem;
   border: 1px solid var(--line);
@@ -231,17 +203,17 @@ button.link {
 }
 
 /* A definition's graph on a flow's page: as tall as its steps need, set on it. */
-.flow-graph .run-graph-canvas {
+.neorc-flow-graph .neorc-run-graph-canvas {
   height: 100%;
   min-height: 0;
 }
 
-.flow-graph .run-graph-panel {
+.neorc-flow-graph .neorc-run-graph-panel {
   box-sizing: border-box;
   max-height: 100%;
 }
 
-.run-graph-panel {
+.neorc-run-graph-panel {
   width: min(28rem, 40vw);
   overflow: auto;
   max-height: 70vh;
@@ -251,7 +223,7 @@ button.link {
   background: var(--paper);
 }
 
-.run-graph-panel-head {
+.neorc-run-graph-panel-head {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -259,16 +231,16 @@ button.link {
   margin-bottom: 0.5rem;
 }
 
-.run-graph-panel .task-details {
+.neorc-run-graph-panel .neorc-task-details {
   margin: 0;
 }
 
-.mono {
+.neorc-mono {
   font-family: var(--mono);
   font-size: 0.85em;
 }
 
-.graph-node {
+.neorc-graph-node {
   box-sizing: border-box;
   display: flex;
   align-items: center;
@@ -283,39 +255,39 @@ button.link {
   line-height: 1.3;
 }
 
-.react-flow__node.selected .graph-node {
+:where(.neorc-app) .react-flow__node.selected .neorc-graph-node {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent);
 }
 
-.graph-task {
+.neorc-graph-task {
   cursor: pointer;
 }
 
-.graph-none {
+.neorc-graph-none {
   opacity: 0.6;
   border-style: dashed;
 }
 
-.graph-node-text {
+.neorc-graph-node-text {
   display: flex;
   flex-direction: column;
   min-width: 0;
   flex: 1;
 }
 
-.graph-node-text > * {
+.neorc-graph-node-text > * {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.graph-node-when {
+.neorc-graph-node-when {
   color: var(--muted);
   white-space: nowrap;
 }
 
-.graph-container {
+.neorc-graph-container {
   box-sizing: border-box;
   border: 1px dashed var(--line);
   border-radius: 10px;
@@ -324,7 +296,7 @@ button.link {
   color: var(--ink);
 }
 
-.graph-container-title {
+.neorc-graph-container-title {
   padding: 0.4rem 0.75rem;
   white-space: nowrap;
   overflow: hidden;
@@ -332,13 +304,13 @@ button.link {
 }
 
 /* A loop that stopped without its exit condition met. */
-.graph-failed {
+.neorc-graph-failed {
   border-style: solid;
   border-color: var(--bad);
 }
 
 /* The row of a loop's title bar an iteration is picked on. */
-.graph-picker {
+.neorc-graph-picker {
   display: flex;
   align-items: center;
   gap: 0.4rem;
@@ -347,80 +319,78 @@ button.link {
   white-space: nowrap;
 }
 
-.graph-picker button {
+.neorc-graph-picker button {
   padding: 0 0.5rem;
   line-height: 1.5;
 }
 
-.graph-picker button:disabled {
+.neorc-graph-picker button:disabled {
   opacity: 0.4;
   cursor: default;
 }
 
-.graph-picker select {
+.neorc-graph-picker select {
   padding: 0 0.2rem;
 }
 
-.graph-outcome {
+.neorc-graph-outcome {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.graph-outcome-failed,
-.loop-outcome-failed {
+.neorc-graph-outcome-failed,
+.neorc-loop-outcome-failed {
   color: var(--bad);
 }
 
-.dot {
+.neorc-dot {
   flex: none;
   width: 0.6rem;
   height: 0.6rem;
   border-radius: 50%;
-  background: var(--wait);
+  background: var(--neorc-wait);
 }
 
-.dot-active,
-.dot-running {
-  background: var(--going);
+.neorc-dot-active,
+.neorc-dot-running {
+  background: var(--neorc-going);
 }
 
-.dot-succeeded {
-  background: var(--ok);
+.neorc-dot-succeeded {
+  background: var(--neorc-ok);
 }
 
-.dot-failed,
-.dot-cancelled {
+.neorc-dot-failed,
+.neorc-dot-cancelled {
   background: var(--bad);
 }
 
-.dot-none {
+.neorc-dot-none {
   background: transparent;
   border: 1px dashed var(--line);
 }
 
-.react-flow__handle {
+:where(.neorc-app) .react-flow__handle {
   opacity: 0;
 }
 
-.react-flow__attribution {
+:where(.neorc-app) .react-flow__attribution {
   background: transparent;
 }
 /* The shell: a sidebar, or a rail of icons, beside the page. */
 
-.shell {
+.neorc-shell {
   display: flex;
-  min-height: 100vh;
+  flex: 1;
+  min-height: 0;
 }
 
-.sidebar {
+.neorc-sidebar {
   --sidebar-width: 17.5rem;
   box-sizing: border-box;
   width: var(--sidebar-width);
   flex: none;
-  position: sticky;
-  top: 0;
-  height: 100vh;
   overflow: hidden auto;
   display: flex;
   flex-direction: column;
@@ -430,28 +400,28 @@ button.link {
   border-right: 1px solid var(--line);
 }
 
-.shell-rail .sidebar {
+.neorc-shell-rail .neorc-sidebar {
   --sidebar-width: 3.5rem;
   padding: 0.75rem 0.5rem;
   align-items: center;
 }
 
-.shell-rail .sidebar .label {
+.neorc-shell-rail .neorc-sidebar .neorc-label {
   display: none;
 }
 
-.sidebar-top {
+.neorc-sidebar-top {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   margin-bottom: 0.5rem;
 }
 
-.shell-rail .sidebar-top {
+.neorc-shell-rail .neorc-sidebar-top {
   flex-direction: column;
 }
 
-.sidebar a {
+.neorc-sidebar a {
   display: flex;
   align-items: center;
   gap: 0.6rem;
@@ -463,31 +433,31 @@ button.link {
   overflow: hidden;
 }
 
-.sidebar a .label {
+.neorc-sidebar a .neorc-label {
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.sidebar a:not(.primary):hover {
+.neorc-sidebar a:not(.neorc-primary):hover {
   background: var(--hover);
 }
 
-.sidebar a[aria-current="page"] {
+.neorc-sidebar a[aria-current="page"] {
   background: var(--tint);
   font-weight: 600;
 }
 
-.shell-rail .sidebar a {
+.neorc-shell-rail .neorc-sidebar a {
   padding: 0.5rem;
   justify-content: center;
 }
 
-.brand {
+.neorc-brand {
   font-weight: 700;
   font-size: 1.1rem;
 }
 
-.brand-mark {
+.neorc-brand-mark {
   flex: none;
   width: 1.1rem;
   height: 1.1rem;
@@ -495,11 +465,11 @@ button.link {
   background: var(--ink);
 }
 
-.icon {
+.neorc-icon {
   flex: none;
 }
 
-.icon-button {
+.neorc-icon-button {
   padding: 0.4rem;
   border: none;
   background: none;
@@ -508,12 +478,12 @@ button.link {
   line-height: 0;
 }
 
-.icon-button:hover {
+.neorc-icon-button:hover {
   background: var(--hover);
   color: var(--ink);
 }
 
-.sidebar a.new-run {
+.neorc-sidebar a.neorc-new-run {
   margin: 0.25rem 0 0.75rem;
   justify-content: center;
   color: var(--on-accent);
@@ -521,164 +491,85 @@ button.link {
 
 /* An entry of the navigation, its arrow, and its list below it. */
 
-.nav-entry {
+.neorc-nav-entry {
   display: flex;
   align-items: center;
   gap: 0.15rem;
 }
 
-.nav-entry > a {
+.neorc-nav-entry > a {
   flex: 1;
   min-width: 0;
 }
 
-.nav-toggle {
+.neorc-nav-toggle {
   flex: none;
   padding: 0.3rem;
 }
 
-.sidebar-section {
+.neorc-sidebar-section {
   margin-bottom: 0.4rem;
 }
 
-.sidebar-section a {
+.neorc-sidebar-section a {
   font-size: 0.9rem;
   padding-left: 1.7rem;
 }
 
-.shell-rail .sidebar-section a {
+.neorc-shell-rail .neorc-sidebar-section a {
   padding-left: 0.5rem;
 }
 
-.sidebar-section a .muted {
+.neorc-sidebar-section a .neorc-muted {
   margin-left: 0.25rem;
 }
 
-.dot-flow {
+.neorc-dot-flow {
   background: transparent;
   border: 1.5px solid var(--muted);
 }
 
-.profile {
-  margin-top: auto;
-  padding-top: 0.75rem;
-  border-top: 1px solid var(--line);
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  font-size: 0.9rem;
-}
 
-.profile .label {
-  display: flex;
-  flex-direction: column;
-  line-height: 1.3;
-}
 
-.profile .label .muted {
-  font-size: 0.8rem;
-}
 
-.avatar {
-  flex: none;
-  width: 2rem;
-  height: 2rem;
-  border-radius: 50%;
-  background: var(--line);
-  border: 1px dashed var(--muted);
-}
 
-.shell-rail .profile {
-  justify-content: center;
-}
 
-.profile .label {
-  min-width: 0;
-}
 
-.profile .label > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
-.avatar-signed-in {
-  display: grid;
-  place-items: center;
-  border-style: solid;
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--on-accent);
-  font-weight: 600;
-  font-size: 0.85rem;
-}
 
-.sign-out {
-  align-self: flex-start;
-  padding: 0;
-  font-size: 0.8rem;
-}
 
-.profile .label > .sign-out-refused {
-  white-space: normal;
-  color: var(--bad);
-  font-size: 0.8rem;
-}
+
+
+
+
+
+
+
+
+
+
 
 /* Signing in: a card alone in the middle of the page. */
 
-.sign-in {
-  max-width: 26rem;
-  margin: 12vh auto 0;
-  padding: 2rem;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-card);
-  background: var(--paper);
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.75rem;
-}
 
-.sign-in h1 {
-  margin: 0;
-  font-size: 1.4rem;
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-}
 
-.sign-in .providers {
-  list-style: none;
-  margin: 0.5rem 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  align-self: stretch;
-}
 
-.sign-in .providers a {
-  display: block;
-  text-align: center;
-}
 
-.content {
+
+
+
+
+.neorc-content {
   flex: 1;
   min-width: 0;
+  overflow: auto;
 }
 
-.banner {
-  margin: 0;
-  padding: 0.35rem 1.5rem;
-  background: var(--warn-bg);
-  color: var(--warn-ink);
-  font-size: 0.8rem;
-}
+
 
 /* Pages: a head with the title and what stands beside it. */
 
-.page-head {
+.neorc-page-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -687,46 +578,46 @@ button.link {
   margin: 1.5rem 0 1rem;
 }
 
-.page-head h1,
-.page-head .subtitle {
+.neorc-page-head h1,
+.neorc-page-head .neorc-subtitle {
   margin: 0;
 }
 
-.subtitle {
+.neorc-subtitle {
   font-size: 0.9rem;
   margin-top: 0.25rem;
 }
 
-.crumbs {
+.neorc-crumbs {
   font-size: 0.85rem;
   margin: 1.25rem 0 0;
   color: var(--muted);
 }
 
-.crumbs a {
+.neorc-crumbs a {
   color: var(--muted);
   text-decoration: none;
 }
 
-.crumbs a:hover {
+.neorc-crumbs a:hover {
   color: var(--ink);
   text-decoration: underline;
 }
 
-.title-with-pill {
+.neorc-title-with-pill {
   display: flex;
   align-items: center;
   gap: 0.75rem;
 }
 
-.actions {
+.neorc-actions {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   flex-wrap: wrap;
 }
 
-.filters {
+.neorc-filters {
   display: flex;
   gap: 1rem;
   margin: 0.25rem 0 0;
@@ -734,14 +625,14 @@ button.link {
 
 /* Stat tiles: a small uppercase caption over a large figure. */
 
-.tiles {
+.neorc-tiles {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
   gap: 0.75rem;
   margin-bottom: 1.25rem;
 }
 
-.tile {
+.neorc-tile {
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
@@ -751,9 +642,9 @@ button.link {
   border-radius: var(--radius-card);
 }
 
-.tile-label,
-.section-label,
-th {
+.neorc-tile-label,
+.neorc-section-label,
+:where(.neorc-app) th {
   font-size: 0.7rem;
   font-weight: 600;
   letter-spacing: 0.06em;
@@ -761,7 +652,7 @@ th {
   color: var(--muted);
 }
 
-.tile-figure {
+.neorc-tile-figure {
   font-size: 1.6rem;
   font-weight: 600;
   line-height: 1.1;
@@ -769,7 +660,7 @@ th {
 
 /* Tables: thin separators, small uppercase headers, numbers to the right. */
 
-table {
+:where(.neorc-app) table {
   border-collapse: collapse;
   width: 100%;
   background: var(--paper);
@@ -778,24 +669,24 @@ table {
   overflow: hidden;
 }
 
-th,
-td {
+:where(.neorc-app) th,
+:where(.neorc-app) td {
   text-align: left;
   padding: 0.55rem 0.8rem;
   border-bottom: 1px solid var(--line);
   vertical-align: middle;
 }
 
-tr:last-child td {
+:where(.neorc-app) tr:last-child td {
   border-bottom: none;
 }
 
-th.num,
-td.num {
+:where(.neorc-app) th.neorc-num,
+:where(.neorc-app) td.neorc-num {
   text-align: right;
 }
 
-.run-name {
+.neorc-run-name {
   display: flex;
   flex-direction: column;
   color: var(--ink);
@@ -803,46 +694,46 @@ td.num {
   line-height: 1.3;
 }
 
-.run-name:hover strong {
+.neorc-run-name:hover strong {
   text-decoration: underline;
 }
 
 /* Status pills: a tint of the status colour, its text in the colour. */
 
-.badge {
+.neorc-badge {
   display: inline-block;
   padding: 0.05rem 0.55rem;
   border-radius: var(--radius-pill);
   font-size: 0.75rem;
   font-weight: 600;
   line-height: 1.5;
-  color: var(--wait);
-  background: color-mix(in srgb, var(--wait) 14%, transparent);
-  border: 1px solid color-mix(in srgb, var(--wait) 35%, transparent);
+  color: var(--neorc-wait);
+  background: color-mix(in srgb, var(--neorc-wait) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--neorc-wait) 35%, transparent);
   white-space: nowrap;
 }
 
-.badge-active,
-.badge-running {
-  color: var(--going);
-  background: color-mix(in srgb, var(--going) 12%, transparent);
-  border-color: color-mix(in srgb, var(--going) 35%, transparent);
+.neorc-badge-active,
+.neorc-badge-running {
+  color: var(--neorc-going);
+  background: color-mix(in srgb, var(--neorc-going) 12%, transparent);
+  border-color: color-mix(in srgb, var(--neorc-going) 35%, transparent);
 }
 
-.badge-succeeded {
-  color: var(--ok);
-  background: color-mix(in srgb, var(--ok) 12%, transparent);
-  border-color: color-mix(in srgb, var(--ok) 35%, transparent);
+.neorc-badge-succeeded {
+  color: var(--neorc-ok);
+  background: color-mix(in srgb, var(--neorc-ok) 12%, transparent);
+  border-color: color-mix(in srgb, var(--neorc-ok) 35%, transparent);
 }
 
-.badge-failed,
-.badge-cancelled {
+.neorc-badge-failed,
+.neorc-badge-cancelled {
   color: var(--bad);
   background: color-mix(in srgb, var(--bad) 12%, transparent);
   border-color: color-mix(in srgb, var(--bad) 35%, transparent);
 }
 
-.badge-none {
+.neorc-badge-none {
   background: transparent;
   color: var(--muted);
   border: 1px dashed var(--line);
@@ -850,20 +741,20 @@ td.num {
 
 /* Cards: the run page's steps, and anything else in a box. */
 
-.card {
+.neorc-card {
   background: var(--paper);
   border: 1px solid var(--line);
   border-radius: var(--radius-card);
   padding: 0.6rem 0.9rem;
 }
 
-.step-line {
+.neorc-step-line {
   display: flex;
   align-items: center;
   gap: 0.6rem;
 }
 
-.step-text {
+.neorc-step-text {
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -871,20 +762,20 @@ td.num {
   line-height: 1.3;
 }
 
-.step-text .muted {
+.neorc-step-text .neorc-muted {
   font-size: 0.85rem;
 }
 
-.step-when {
+.neorc-step-when {
   font-size: 0.8rem;
   white-space: nowrap;
 }
 
-.container-card {
+.neorc-container-card {
   background: var(--panel);
 }
 
-.tree {
+.neorc-tree {
   list-style: none;
   padding-left: 0;
   margin: 0;
@@ -893,56 +784,56 @@ td.num {
   gap: 0.5rem;
 }
 
-.tree .tree {
+.neorc-tree .neorc-tree {
   border-left: none;
 }
 
-.step {
+.neorc-step {
   margin: 0;
 }
 
-.container-card.loop-failed {
+.neorc-container-card.neorc-loop-failed {
   border-color: var(--bad);
 }
 
-.loop-outcome {
+.neorc-loop-outcome {
   margin: 0.25rem 0 0;
   font-size: 0.85rem;
 }
 
-.instance {
+.neorc-instance {
   margin: 0.5rem 0 0;
 }
 
-.instance h4 {
+.neorc-instance h4 {
   margin: 0.4rem 0 0.35rem;
 }
 
-.instance.not-yet,
-.step-card.not-yet {
+.neorc-instance.neorc-not-yet,
+.neorc-step-card.neorc-not-yet {
   opacity: 0.7;
 }
 
-.step-card.not-yet {
+.neorc-step-card.neorc-not-yet {
   border-style: dashed;
 }
 
-.task-details {
+.neorc-task-details {
   margin: 0.4rem 0 0.25rem 1.2rem;
   font-size: 0.9rem;
 }
 
-.mono-line {
+.neorc-mono-line {
   font-family: var(--mono);
   font-size: 0.85rem;
   color: var(--muted);
 }
 
-.mono-line a {
+.neorc-mono-line a {
   color: inherit;
 }
 
-button {
+:where(.neorc-app) button {
   font: inherit;
   padding: 0.4rem 0.9rem;
   border: 1px solid var(--line);
@@ -952,11 +843,11 @@ button {
   cursor: pointer;
 }
 
-button:not(.primary):not(.link):hover:not(:disabled) {
+:where(.neorc-app) button:not(.neorc-primary):not(.neorc-link):hover:not(:disabled) {
   background: var(--hover);
 }
 
-.start-run {
+.neorc-start-run {
   margin-top: 1.5rem;
   padding: 1rem;
   background: var(--paper);
@@ -965,13 +856,13 @@ button:not(.primary):not(.link):hover:not(:disabled) {
   max-width: 40rem;
 }
 
-button:disabled {
+:where(.neorc-app) button:disabled {
   cursor: default;
   opacity: 0.6;
 }
 
-.instance h4,
-.task-details h4 {
+.neorc-instance h4,
+.neorc-task-details h4 {
   margin: 0.4rem 0 0.2rem;
   font-size: 0.85rem;
   font-weight: 600;
@@ -980,18 +871,18 @@ button:disabled {
 /* Queues: the sidebar's list with its filter by kind, a queue's tasks, and
    the task opened beside them. */
 
-.dot-queue-worker {
+.neorc-dot-queue-worker {
   background: transparent;
   border: 1.5px solid var(--muted);
   border-radius: 2px;
 }
 
-.dot-queue-external {
-  background: var(--going);
+.neorc-dot-queue-external {
+  background: var(--neorc-going);
   border-radius: 2px;
 }
 
-.segmented {
+.neorc-segmented {
   display: flex;
   margin: 0.25rem 0.6rem 0.4rem 1.7rem;
   border: 1px solid var(--line);
@@ -999,7 +890,7 @@ button:disabled {
   overflow: hidden;
 }
 
-.segmented button {
+.neorc-segmented button {
   flex: 1;
   border: 0;
   border-radius: 0;
@@ -1009,22 +900,22 @@ button:disabled {
   padding: 0.15rem 0.25rem;
 }
 
-.segmented button + button {
+.neorc-segmented button + button {
   border-left: 1px solid var(--line);
 }
 
-.segmented button[aria-pressed="true"] {
+.neorc-segmented button[aria-pressed="true"] {
   background: var(--tint);
   color: var(--ink);
   font-weight: 600;
 }
 
-.sidebar-note {
+.neorc-sidebar-note {
   margin: 0.25rem 0.6rem 0.25rem 1.7rem;
   font-size: 0.85rem;
 }
 
-.kind {
+.neorc-kind {
   display: inline-block;
   padding: 0.05rem 0.55rem;
   border: 1px solid var(--line);
@@ -1037,85 +928,85 @@ button:disabled {
   white-space: nowrap;
 }
 
-.kind-external {
-  color: var(--going);
-  border-color: color-mix(in srgb, var(--going) 35%, transparent);
-  background: color-mix(in srgb, var(--going) 10%, transparent);
+.neorc-kind-external {
+  color: var(--neorc-going);
+  border-color: color-mix(in srgb, var(--neorc-going) 35%, transparent);
+  background: color-mix(in srgb, var(--neorc-going) 10%, transparent);
 }
 
-.filters {
+.neorc-filters {
   flex-wrap: wrap;
 }
 
-.queue-body {
+.neorc-queue-body {
   display: grid;
   gap: 1rem;
   align-items: start;
 }
 
-.queue-body > * {
+.neorc-queue-body > * {
   min-width: 0;
 }
 
 @media (min-width: 1100px) {
-  .queue-body-open {
+  .neorc-queue-body-open {
     grid-template-columns: minmax(0, 1fr) minmax(22rem, 28rem);
   }
 }
 
-.queue-tasks tr[aria-selected="true"] {
+.neorc-queue-tasks tr[aria-selected="true"] {
   background: var(--hover);
 }
 
-.task-panel {
+.neorc-task-panel {
   position: relative;
   padding: 1rem;
 }
 
-.task-panel h2 {
+.neorc-task-panel h2 {
   margin: 0 3.5rem 0.75rem 0;
   font-size: 1.1rem;
 }
 
-.task-panel h3 {
+.neorc-task-panel h3 {
   margin: 1rem 0 0.35rem;
   font-size: 0.9rem;
 }
 
-.task-panel-close {
+.neorc-task-panel-close {
   position: absolute;
   top: 1rem;
   right: 1rem;
   font-size: 0.85rem;
 }
 
-.task-panel pre {
+.neorc-task-panel pre {
   margin: 0;
   overflow-x: auto;
 }
 
-.task-inputs {
+.neorc-task-inputs {
   display: grid;
   gap: 0.6rem;
   margin: 0;
 }
 
-.task-inputs dt {
+.neorc-task-inputs dt {
   color: var(--muted);
   font-size: 0.85rem;
 }
 
-.task-inputs dd {
+.neorc-task-inputs dd {
   margin: 0;
 }
 
-.task-text {
+.neorc-task-text {
   margin: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-.task-answer {
+.neorc-task-answer {
   margin-top: 1rem;
   padding: 0;
   border: 0;
@@ -1124,31 +1015,31 @@ button:disabled {
   max-width: none;
 }
 
-.task-answer fieldset {
+.neorc-task-answer fieldset {
   border: 0;
   margin: 0 0 1rem;
   padding: 0;
   min-width: 0;
 }
 
-.task-answer legend {
+.neorc-task-answer legend {
   padding: 0;
   margin-bottom: 0.25rem;
 }
 
-.task-answer label.flow-form-inline {
+.neorc-task-answer label.neorc-flow-form-inline {
   display: flex;
   align-items: center;
   gap: 0.5rem;
 }
 
-.task-answer textarea.plain {
+.neorc-task-answer textarea.neorc-plain {
   font-family: inherit;
   font-size: inherit;
   margin-bottom: 0;
 }
 
-.task-answer-actions {
+.neorc-task-answer-actions {
   display: flex;
   align-items: center;
   gap: 1rem;

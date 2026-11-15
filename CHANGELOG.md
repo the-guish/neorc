@@ -29,8 +29,24 @@ one version, cut from a single tag on `main`.
   `--database-file` too. On a SQLite file, oneberth's store is `oneberth.db`
   beside it. The clients reach the API under `/neorc/` at a backend's
   address, and the UI reads the session from oneberth's `/auth/session`.
+- `neorc-ui`: the interface is `@neorc/ui`, a node package with one root
+  component, `NeorcApp`, for oneberth's shell (`@oneberth/ui`). A host gives
+  it the address of neorc's API and what the shell gives every application;
+  `neorcApp({ api, forms })` registers neorc with the shell. Its routes are
+  under `#/neorc/`, through the shell. A hidden neorc stops its long poll and
+  its polls. The shell draws the rail, the sign-in page and the account; neorc
+  draws its own panel, which the shell puts in its drawer on a small screen.
+  Every class starts with `neorc-`, and the colours are oneberth's tokens. A
+  host may give `forms`, a source of A2UI forms that take the place of the
+  form to start a run of a flow. The built interface is standalone neorc: the
+  shell with one application, neorc. React is 19.3.1. `@oneberth/ui` comes
+  from the oneberth commit `pyproject.toml` pins, packed by
+  `scripts/oneberth-ui-from-source.sh`.
 
 ### Removed
+
+- `neorc-ui`: the `?embedded` switch, its own session, sign-in page and
+  profile with sign-out: they are the shell's.
 
 - `neorc`, `neorc-core`: neorc's own identity core, sign-in configuration,
   OpenID Connect client, cookies, `/auth` routes, credential stores and

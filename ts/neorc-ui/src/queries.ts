@@ -4,30 +4,19 @@ import {
   useQuery,
   useQueryClient,
   type InvalidateQueryFilters,
-  type Query,
   type QueryClient,
 } from "@tanstack/react-query";
 import { useEffect } from "react";
 
 import {
   ApiError,
-  flowVersions,
-  getFlow,
-  getRun,
-  latestSequence,
-  listFlows,
-  listQueues,
-  listRuns,
   PAGE_SIZE,
-  queueTasks,
-  runTasks,
-  subRuns,
-  taskInputs,
-  waitForEvents,
+  type Api,
   type ApiEvent,
   type QueueTaskFilters,
   type RunFilters,
 } from "./api";
+import { useApi, useVisible } from "./context";
 
 export const keys = {
   flows: ["flows"] as const,
@@ -52,34 +41,38 @@ export const keys = {
 export const FLOWS_STALE_MS = 30_000;
 
 export function useFlows() {
+  const api = useApi();
   return useQuery({
     queryKey: keys.flows,
-    queryFn: listFlows,
+    queryFn: api.listFlows,
     staleTime: FLOWS_STALE_MS,
   });
 }
 
 export function useFlow(name: string, version?: string) {
+  const api = useApi();
   return useQuery({
     queryKey: keys.flow(name, version),
-    queryFn: () => getFlow(name, version),
+    queryFn: () => api.getFlow(name, version),
     // A stored version never changes; the latest may be replaced.
     staleTime: version ? Infinity : FLOWS_STALE_MS,
   });
 }
 
 export function useFlowVersions(name: string) {
+  const api = useApi();
   return useQuery({
     queryKey: keys.versions(name),
-    queryFn: () => flowVersions(name),
+    queryFn: () => api.flowVersions(name),
     staleTime: FLOWS_STALE_MS,
   });
 }
 
 export function useRuns(filters: RunFilters) {
+  const api = useApi();
   return useInfiniteQuery({
     queryKey: keys.runs(filters),
-    queryFn: ({ pageParam }) => listRuns(filters, pageParam),
+    queryFn: ({ pageParam }) => api.listRuns(filters, pageParam),
     initialPageParam: undefined as string | undefined,
     // The cursor is the last run of the previous page; a short page is the end.
     getNextPageParam: (page) =>
@@ -93,14 +86,16 @@ export function useRuns(filters: RunFilters) {
  * which the sidebar would otherwise keep alive and refetched on every event.
  */
 export function useRecentRuns(count: number) {
+  const api = useApi();
   return useQuery({
     queryKey: keys.recentRuns(count),
-    queryFn: () => listRuns({}, undefined, count),
+    queryFn: () => api.listRuns({}, undefined, count),
   });
 }
 
 export function useRun(id: string) {
-  return useQuery({ queryKey: keys.run(id), queryFn: () => getRun(id) });
+  const api = useApi();
+  return useQuery({ queryKey: keys.run(id), queryFn: () => api.getRun(id) });
 }
 
 /** How often an active run's tasks and sub-runs are re-read. */
@@ -115,25 +110,30 @@ export interface LiveOptions {
 /**
  * The event log says when a task or run finished, and nothing else: a task
  * being published, received or claimed, or a sub-run starting, records no
- * event. So while a run is active its page asks again on its own.
+ * event. So while a run is active its page asks again on its own, while
+ * neorc is shown.
  */
-function whileActive({ active, everyMs = ACTIVE_POLL_MS }: LiveOptions) {
-  return active ? everyMs : false;
+function whileActive({ active, everyMs = ACTIVE_POLL_MS }: LiveOptions, visible: boolean) {
+  return active && visible ? everyMs : false;
 }
 
 export function useRunTasks(id: string, live: LiveOptions) {
+  const api = useApi();
+  const visible = useVisible();
   return useQuery({
     queryKey: keys.tasks(id),
-    queryFn: () => runTasks(id),
-    refetchInterval: whileActive(live),
+    queryFn: () => api.runTasks(id),
+    refetchInterval: whileActive(live, visible),
   });
 }
 
 export function useSubRuns(id: string, live: LiveOptions) {
+  const api = useApi();
+  const visible = useVisible();
   return useQuery({
     queryKey: keys.subRuns(id),
-    queryFn: () => subRuns(id),
-    refetchInterval: whileActive(live),
+    queryFn: () => api.subRuns(id),
+    refetchInterval: whileActive(live, visible),
   });
 }
 
@@ -144,9 +144,10 @@ export function useSubRuns(id: string, live: LiveOptions) {
 export const QUEUES_STALE_MS = 30_000;
 
 export function useQueues() {
+  const api = useApi();
   return useQuery({
     queryKey: keys.queues,
-    queryFn: listQueues,
+    queryFn: api.listQueues,
     staleTime: QUEUES_STALE_MS,
   });
 }
@@ -156,20 +157,24 @@ export const QUEUE_POLL_MS = 5000;
 
 /**
  * A queue's tasks. No event says a task was published or received, so the
- * page asks again on its own; an event refreshes it at once.
+ * page asks again on its own while neorc is shown; an event refreshes it at
+ * once.
  */
 export function useQueueTasks(queue: string, filters: QueueTaskFilters) {
+  const api = useApi();
+  const visible = useVisible();
   return useQuery({
     queryKey: keys.queueTasks(queue, filters),
-    queryFn: () => queueTasks(queue, filters),
-    refetchInterval: QUEUE_POLL_MS,
+    queryFn: () => api.queueTasks(queue, filters),
+    refetchInterval: visible ? QUEUE_POLL_MS : false,
   });
 }
 
 export function useTaskInputs(id: string) {
+  const api = useApi();
   return useQuery({
     queryKey: keys.taskInputs(id),
-    queryFn: () => taskInputs(id),
+    queryFn: () => api.taskInputs(id),
   });
 }
 
@@ -180,7 +185,8 @@ export const POLL_SECONDS = 20;
 export const RETRY_MS = 2000;
 
 /**
- * Follow the manager's event log for the life of the page.
+ * Follow the manager's event log while neorc is shown and the tab is not
+ * hidden.
  *
  * The poll starts after the log's latest sequence, asked for first, and then
  * refetches everything once: what a page loaded before that answer came may
@@ -194,10 +200,14 @@ export const REFUSED_RETRY_MS = 30_000;
 
 export function useLiveEvents(): void {
   const client = useQueryClient();
+  const api = useApi();
+  const visible = useVisible();
   useEffect(() => {
-    // A hidden tab polls nothing: a browser allows only a few connections to
-    // a host, shared by every tab, and a long poll holds one. A tab shown
-    // again starts over, which refetches everything it may have missed.
+    // A hidden tab, or neorc hidden by the shell, polls nothing: a browser
+    // allows only a few connections to a host, shared by every tab, and a
+    // long poll holds one. Shown again, the poll starts over, which
+    // refetches everything it may have missed.
+    if (!visible) return;
     let controller: AbortController | null = null;
     let retry: ReturnType<typeof setTimeout> | undefined;
     const start = () => {
@@ -209,7 +219,7 @@ export function useLiveEvents(): void {
         // page is still here, the session check found someone signed in
         // after all: try again, slowly, so a refusal that persists costs a
         // request a while, not a loop.
-        void follow(client, mine.signal).then(() => {
+        void follow(api, client, mine.signal).then(() => {
           if (controller !== mine) return;
           controller = null;
           if (!mine.signal.aborted) retry = setTimeout(start, REFUSED_RETRY_MS);
@@ -228,10 +238,11 @@ export function useLiveEvents(): void {
       document.removeEventListener("visibilitychange", onVisibility);
       stop();
     };
-  }, [client]);
+  }, [api, client, visible]);
 }
 
 export async function follow(
+  api: Api,
   client: QueryClient,
   signal: AbortSignal,
   sleep: (ms: number) => Promise<void> = pause,
@@ -240,13 +251,11 @@ export async function follow(
   while (!signal.aborted) {
     try {
       if (after === undefined) {
-        after = await latestSequence(signal);
-        // Everything but the session, which no event changes, and whose
-        // refetch restarts this poll.
-        void refresh(client, { predicate: isNotSession });
+        after = await api.latestSequence(signal);
+        void refresh(client, {});
         continue;
       }
-      const events = await waitForEvents(after, {
+      const events = await api.waitForEvents(after, {
         timeout: POLL_SECONDS,
         signal,
       });
@@ -290,10 +299,6 @@ export async function refresh(
   const inFlight = client.isFetching(filters) > 0;
   await client.invalidateQueries(filters, KEEP_GOING);
   if (inFlight) await client.invalidateQueries(filters, KEEP_GOING);
-}
-
-export function isNotSession(query: Query): boolean {
-  return query.queryKey[0] !== "session";
 }
 
 function invalidate(client: QueryClient, events: ApiEvent[]): void {

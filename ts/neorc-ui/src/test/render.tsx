@@ -27,7 +27,8 @@ export function mockApi(routes: Record<string, Reply>) {
   const calls: { url: URL; init: RequestInit | undefined }[] = [];
   const fetchMock = vi.fn(
     async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-      const url = new URL(input instanceof Request ? input.url : String(input));
+      // The request helper asks a path on this origin.
+      const url = new URL(input instanceof Request ? input.url : String(input), location.href);
       calls.push({ url, init });
       // The manager's API is under /neorc/; a stand-in names its routes
       // without it, as the manager's own router does.

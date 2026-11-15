@@ -30,7 +30,7 @@ describe("FlowPage", () => {
     );
     expect(screen.getByRole("link", { name: "Runs of this flow" })).toHaveAttribute(
       "href",
-      "#/runs?flow=word_picker",
+      "#/neorc/runs?flow=word_picker",
     );
     expect(screen.getByRole("form", { name: "Start word_picker" })).toBeInTheDocument();
   });
@@ -110,7 +110,7 @@ describe("FlowPage", () => {
     // A sub-flow leads to the flow it calls.
     expect(within(canvas).getByRole("link", { name: "word_picker" })).toHaveAttribute(
       "href",
-      "#/flows/word_picker",
+      "#/neorc/flows/word_picker",
     );
     fireEvent.click(within(canvas).getByText("picker"));
     const panel = await screen.findByRole("complementary", { name: "picker details" });
@@ -167,7 +167,7 @@ describe("FlowPage", () => {
       target: { value: "1.0.0" },
     });
 
-    expect(location.hash).toBe("#/flows/word_picker?version=1.0.0");
+    expect(location.hash).toBe("#/neorc/flows/word_picker?version=1.0.0");
   });
 
   it("reports a flow the manager does not have", async () => {

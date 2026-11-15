@@ -1,28 +1,47 @@
 {
-  "name": "neorc-ui",
-  "private": true,
+  "name": "@neorc/ui",
   "version": "0.0.0",
-  "description": "The neorc manager's web UI; built into the neorc-ui Python distribution",
+  "private": true,
+  "description": "neorc's interface: a root component for oneberth's shell, and standalone neorc, built into the neorc-ui Python distribution",
   "license": "Apache-2.0",
   "type": "module",
   "engines": {
     "node": ">=24"
   },
+  "sideEffects": [
+    "*.css"
+  ],
+  "exports": {
+    ".": "./src/index.tsx",
+    "./app": "./src/NeorcApp.tsx"
+  },
+  "files": [
+    "src",
+    "!src/**/*.test.ts",
+    "!src/**/*.test.tsx",
+    "!src/test",
+    "!src/standalone",
+    "LICENSE",
+    "README.md"
+  ],
   "scripts": {
     "generate": "openapi-typescript openapi.json -o src/api/schema.d.ts",
     "dev": "npm run generate && vite",
-    "build": "npm run generate && tsc -b && vite build",
+    "build": "npm run generate && tsc -b && vite build && node scripts/check-package.mjs",
     "typecheck": "npm run generate && tsc -b",
     "lint": "npm run generate && eslint .",
     "test": "npm run generate && vitest run",
     "preview": "vite preview"
   },
+  "peerDependencies": {
+    "@oneberth/ui": "0.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
   "dependencies": {
     "@dagrejs/dagre": "3.1.1",
     "@tanstack/react-query": "5.102.8",
-    "@xyflow/react": "12.11.6",
-    "react": "19.3.1",
-    "react-dom": "19.3.1"
+    "@xyflow/react": "12.11.6"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
@@ -39,6 +58,8 @@
     "globals": "17.12.0",
     "jsdom": "30.0.1",
     "openapi-typescript": "7.13.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
     "rollup-plugin-license": "3.7.1",
     "typescript": "5.9.3",
     "typescript-eslint": "8.69.0",

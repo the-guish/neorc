@@ -1,9 +1,10 @@
 import { Failed, Loading } from "../components/Layout";
 import { useFlows } from "../queries";
-import { href } from "../router";
+import { useNav } from "../router";
 
 /** The latest version of every flow the manager holds. */
 export function FlowsPage() {
+  const { href } = useNav();
   const flows = useFlows();
   if (flows.isPending) return <Loading what="flows" />;
   if (flows.isError) return <Failed what="flows" error={flows.error} />;
@@ -12,7 +13,7 @@ export function FlowsPage() {
     <>
       <h1>Flows</h1>
       {flows.data.length === 0 ? (
-        <p className="muted">
+        <p className="neorc-muted">
           No flows uploaded yet: <code>neorc flows upload</code> puts them here.
         </p>
       ) : (

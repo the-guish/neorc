@@ -1,58 +1,34 @@
 // Responses as the manager sends them, typed by the schema so a drift shows
 // here at compile time.
-import type {
-  ApiEvent,
-  Delivery,
-  Flow,
-  OneberthSession,
-  Queue,
-  QueueTask,
-  Run,
-  Session,
-  Task,
-} from "../api";
+import type { Session } from "@oneberth/ui";
+
+import type { ApiEvent, Delivery, Flow, Queue, QueueTask, Run, Task } from "../api";
 import reviewForm from "../forms/review_draft.form.json";
 import triageForm from "../forms/triage.form.json";
 
-/** A backend with sign-in, and nobody signed in, as the page shows it. */
+/** oneberth's `GET /auth/session` with nobody signed in, through providers. */
 export const SIGNED_OUT: Session = {
-  public_url: location.origin,
+  mode: "providers",
   providers: [
     { id: "google", title: "Google" },
     { id: "okta", title: "Okta" },
   ],
   principal: null,
+  roles: [],
 };
 
+/** oneberth's `GET /auth/session` with Ada signed in. */
 export const SIGNED_IN: Session = {
   ...SIGNED_OUT,
   principal: {
     kind: "user",
+    id: "0ddddddd-0000-4000-8000-00000000000a",
     name: "Ada Lovelace",
     email: "ada@example.com",
     provider: "google",
   },
+  roles: ["neorc/user"],
 };
-
-/** What oneberth's `GET /auth/session` answers for a session the page shows. */
-export function answered(session: Session): OneberthSession {
-  const principal = session.principal;
-  return {
-    mode: "providers",
-    providers: session.providers,
-    principal:
-      principal === null
-        ? null
-        : {
-            kind: "user",
-            id: "0ddddddd-0000-4000-8000-00000000000a",
-            name: principal.name,
-            email: principal.email,
-            provider: principal.provider ?? "google",
-          },
-    roles: principal === null ? [] : ["neorc/user"],
-  };
-}
 
 export const WORD_PICKER: Flow = {
   name: "word_picker",

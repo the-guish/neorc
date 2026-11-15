@@ -26,7 +26,7 @@ import {
   type NodeData,
   type Picked,
 } from "../graph";
-import { href } from "../router";
+import { useNav } from "../router";
 import { StatusDot } from "./StatusBadge";
 import { TaskDetails } from "./TaskDetails";
 
@@ -145,6 +145,7 @@ function Canvas({
  * Read-only: pan and zoom, click a step for what it is given.
  */
 export function FlowGraph({ steps }: { steps: StepNode[] }) {
+  const { href } = useNav();
   const graph = useMemo(() => runGraph(steps, NOTHING_DONE), [steps]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = graph.nodes.find((node) => node.id === selectedId)?.data;
@@ -152,8 +153,8 @@ export function FlowGraph({ steps }: { steps: StepNode[] }) {
   // As tall as the steps need, within reason: what follows stays in reach.
   const height = `clamp(15rem, ${Math.ceil(graph.height) + 96}px, 60vh)`;
   return (
-    <div className="run-graph flow-graph" style={{ height }}>
-      <div className="run-graph-canvas" aria-label="Flow graph">
+    <div className="neorc-run-graph neorc-flow-graph" style={{ height }}>
+      <div className="neorc-run-graph-canvas" aria-label="Flow graph">
         <DefinitionContext value={true}>
           <Canvas
             nodes={nodes}
@@ -164,14 +165,14 @@ export function FlowGraph({ steps }: { steps: StepNode[] }) {
         </DefinitionContext>
       </div>
       {selected && selected.kind !== "container" && (
-        <aside className="run-graph-panel" aria-label={`${selected.name} details`}>
-          <div className="run-graph-panel-head">
+        <aside className="neorc-run-graph-panel" aria-label={`${selected.name} details`}>
+          <div className="neorc-run-graph-panel-head">
             <strong>{selected.name}</strong>
             <button type="button" onClick={() => setSelectedId(null)}>
               Close
             </button>
           </div>
-          <dl className="facts">
+          <dl className="neorc-facts">
             {selected.kind === "task" ? (
               <>
                 <dt>Handler</dt>
@@ -244,8 +245,8 @@ export function RunGraph({ steps, done }: { steps: StepNode[]; done: Published }
   const { nodes, edges } = useElements(graph, selectedId);
 
   return (
-    <div className="run-graph">
-      <div className="run-graph-canvas" aria-label="Run graph">
+    <div className="neorc-run-graph">
+      <div className="neorc-run-graph-canvas" aria-label="Run graph">
         <PickContext value={pick}>
           <Canvas
             nodes={nodes}
@@ -262,12 +263,12 @@ export function RunGraph({ steps, done }: { steps: StepNode[]; done: Published }
         </PickContext>
       </div>
       {selected?.kind === "task" && selected.task && (
-        <aside className="run-graph-panel" aria-label={`${selected.name} details`}>
-          <div className="run-graph-panel-head">
+        <aside className="neorc-run-graph-panel" aria-label={`${selected.name} details`}>
+          <div className="neorc-run-graph-panel-head">
             <strong>
               {selected.name}
               {selected.task.address.scope.map(([name, n]) => (
-                <span key={name} className="muted">
+                <span key={name} className="neorc-muted">
                   {" "}
                   {name} {n}
                 </span>
@@ -293,15 +294,15 @@ const NODE_TYPES: NodeTypes = {
 function TaskNode({ data }: NodeProps<Node<Extract<NodeData, { kind: "task" }>>>) {
   const definition = useContext(DefinitionContext);
   return (
-    <div className={`graph-node graph-task${data.task || definition ? "" : " graph-none"}`}>
+    <div className={`neorc-graph-node neorc-graph-task${data.task || definition ? "" : " neorc-graph-none"}`}>
       <Handle type="target" position={Position.Top} isConnectable={false} />
       {!definition && <StatusDot status={data.status} />}
-      <div className="graph-node-text">
+      <div className="neorc-graph-node-text">
         <strong>{data.name}</strong>
-        <span className="muted">{data.handler}</span>
+        <span className="neorc-muted">{data.handler}</span>
       </div>
       {/* Of a run, how it went; of a definition, the queue it is published on. */}
-      <span className="graph-node-when mono">
+      <span className="neorc-graph-node-when neorc-mono">
         {definition ? data.queue : data.duration || data.status}
       </span>
       <Handle type="source" position={Position.Bottom} isConnectable={false} />
@@ -310,26 +311,27 @@ function TaskNode({ data }: NodeProps<Node<Extract<NodeData, { kind: "task" }>>>
 }
 
 function FlowNode({ data }: NodeProps<Node<Extract<NodeData, { kind: "flow" }>>>) {
+  const { href } = useNav();
   const definition = useContext(DefinitionContext);
   return (
-    <div className={`graph-node graph-flow${data.run || definition ? "" : " graph-none"}`}>
+    <div className={`neorc-graph-node neorc-graph-flow${data.run || definition ? "" : " neorc-graph-none"}`}>
       <Handle type="target" position={Position.Top} isConnectable={false} />
       {!definition && <StatusDot status={data.status} />}
-      <div className="graph-node-text">
+      <div className="neorc-graph-node-text">
         <strong>{data.name}</strong>
         {definition ? (
-          <span className="muted">
+          <span className="neorc-muted">
             sub-flow <a href={href({ name: "flow", flow: data.flow })}>{data.flow}</a>
           </span>
         ) : (
-          <span className="muted">sub-flow {data.flow}</span>
+          <span className="neorc-muted">sub-flow {data.flow}</span>
         )}
         {data.run && (
           <a href={href({ name: "run", id: data.run.id })}>run {shortId(data.run.id)}</a>
         )}
       </div>
       {!definition && (
-        <span className="graph-node-when mono">{data.duration || data.status}</span>
+        <span className="neorc-graph-node-when neorc-mono">{data.duration || data.status}</span>
       )}
       <Handle type="source" position={Position.Bottom} isConnectable={false} />
     </div>
@@ -345,15 +347,15 @@ function ContainerNode({
   const definition = useContext(DefinitionContext);
   return (
     <div
-      className={`graph-container${data.entered || definition ? "" : " graph-none"}${loop?.failed ? " graph-failed" : ""}`}
+      className={`neorc-graph-container${data.entered || definition ? "" : " neorc-graph-none"}${loop?.failed ? " neorc-graph-failed" : ""}`}
       style={{ width, height }}
     >
       <Handle type="target" position={Position.Top} isConnectable={false} />
-      <div className="graph-container-title">
+      <div className="neorc-graph-container-title">
         {/* A loop says which iteration it shows where one is picked, below. */}
         <strong>{data.name}</strong>{" "}
         {!loop && !definition && <span>{data.instance} </span>}
-        <span className="muted">{data.about}</span>
+        <span className="neorc-muted">{data.about}</span>
       </div>
       {loop && <IterationPicker name={data.name} loop={loop} />}
     </div>
@@ -374,7 +376,7 @@ function IterationPicker({ name, loop }: { name: string; loop: LoopShown }) {
     if (n !== undefined) pick(name, loop.scope, n, n === last);
   };
   return (
-    <div className="graph-picker nodrag nopan nowheel">
+    <div className="neorc-graph-picker neorc-nodrag neorc-nopan neorc-nowheel">
       <button
         type="button"
         aria-label={`${name}: previous iteration`}
@@ -408,7 +410,7 @@ function IterationPicker({ name, loop }: { name: string; loop: LoopShown }) {
       </button>
       {outcome && (
         <span
-          className={`graph-outcome ${outcome.failed ? "graph-outcome-failed" : "muted"}`}
+          className={`neorc-graph-outcome ${outcome.failed ? "neorc-graph-outcome-failed" : "neorc-muted"}`}
           title={outcome.text}
         >
           {outcome.text}

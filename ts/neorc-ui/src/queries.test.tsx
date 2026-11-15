@@ -2,10 +2,9 @@ import { QueryClient, QueryClientProvider, QueryObserver } from "@tanstack/react
 import { renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { ApiEvent } from "./api";
+import { createApi, type ApiEvent } from "./api";
 import {
   follow,
-  isNotSession,
   isSubRunsQuery,
   keys,
   REFUSED_RETRY_MS,
@@ -14,8 +13,10 @@ import {
   useRunTasks,
   useSubRuns,
 } from "./queries";
-import { ACTIVE, SIGNED_IN, SUCCEEDED, event } from "./test/fixtures";
+import { ACTIVE, SUCCEEDED, event } from "./test/fixtures";
 import { mockApi, neverAnswers, refusal } from "./test/render";
+
+const API = createApi("/neorc/");
 
 function pages(...pages: ApiEvent[][]) {
   let served = 0;
@@ -44,7 +45,7 @@ describe("follow", () => {
     const invalidated = vi.spyOn(client, "invalidateQueries");
     const controller = new AbortController();
 
-    void follow(client, controller.signal);
+    void follow(API, client, controller.signal);
     await vi.waitFor(() => expect(api.calls).toHaveLength(4));
 
     expect(asked(api)[0]).toEqual({ path: "/events/latest" });
@@ -53,7 +54,7 @@ describe("follow", () => {
     expect(asked(api)[3]).toMatchObject({ after: "43" });
     // Once for everything at the start, then the runs and each run concerned.
     const keep = { cancelRefetch: false };
-    expect(invalidated.mock.calls[0]).toEqual([{ predicate: isNotSession }, keep]);
+    expect(invalidated.mock.calls[0]).toEqual([{}, keep]);
     expect(invalidated).toHaveBeenCalledWith({ queryKey: ["runs"] }, keep);
     expect(invalidated).toHaveBeenCalledWith({ queryKey: keys.run(ACTIVE.id) }, keep);
     expect(invalidated).toHaveBeenCalledWith({ queryKey: keys.run(SUCCEEDED.id) }, keep);
@@ -73,7 +74,7 @@ describe("follow", () => {
     const invalidated = vi.spyOn(client, "invalidateQueries");
     const controller = new AbortController();
 
-    void follow(client, controller.signal);
+    void follow(API, client, controller.signal);
     await vi.waitFor(() => expect(api.calls).toHaveLength(3));
 
     expect(invalidated).toHaveBeenCalledWith(
@@ -97,7 +98,7 @@ describe("follow", () => {
     const slept: number[] = [];
     vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    const done = follow(new QueryClient(), controller.signal, async (ms) => {
+    const done = follow(API, new QueryClient(), controller.signal, async (ms) => {
       slept.push(ms);
     });
     await vi.waitFor(() => expect(api.calls).toHaveLength(4));
@@ -121,7 +122,7 @@ describe("follow", () => {
     });
     const slept: number[] = [];
 
-    await follow(new QueryClient(), new AbortController().signal, async (ms) => {
+    await follow(API, new QueryClient(), new AbortController().signal, async (ms) => {
       slept.push(ms);
     });
 
@@ -163,32 +164,6 @@ describe("useLiveEvents, after a refusal", () => {
     } finally {
       vi.useRealTimers();
     }
-  });
-
-  it("leaves the session out of what it refetches when it starts", async () => {
-    mockApi({ "/events/latest": { sequence: 1 }, "/events": () => neverAnswers() });
-    const client = new QueryClient();
-    const session = vi.fn(async () => SIGNED_IN);
-    const runs = vi.fn(async () => ({ runs: [] }));
-    client.setQueryData(["session"], SIGNED_IN);
-    client.setQueryData(["runs", {}], { runs: [] });
-    new QueryObserver(client, {
-      queryKey: ["session"],
-      queryFn: session,
-      staleTime: Infinity,
-    }).subscribe(() => {});
-    new QueryObserver(client, {
-      queryKey: ["runs", {}],
-      queryFn: runs,
-      staleTime: Infinity,
-    }).subscribe(() => {});
-    const controller = new AbortController();
-
-    void follow(client, controller.signal);
-    await vi.waitFor(() => expect(runs).toHaveBeenCalled());
-    controller.abort();
-
-    expect(session).not.toHaveBeenCalled();
   });
 });
 

@@ -28,7 +28,7 @@ describe("RunsPage", () => {
     expect(rows[2]).toHaveTextContent("2.5 s");
     expect(screen.getByRole("link", { name: "word_picker 5f3a1c2e" })).toHaveAttribute(
       "href",
-      `#/runs/${SUCCEEDED.id}`,
+      `#/neorc/runs/${SUCCEEDED.id}`,
     );
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
@@ -52,7 +52,7 @@ describe("RunsPage", () => {
     );
 
     fireEvent.change(screen.getByLabelText(/Status/), { target: { value: "" } });
-    expect(location.hash).toBe("#/runs?flow=hello");
+    expect(location.hash).toBe("#/neorc/runs?flow=hello");
   });
 
   it("pages with the last run as the cursor", async () => {
