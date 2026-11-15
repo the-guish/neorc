@@ -18,10 +18,11 @@ first, and one it refuses is refused the same way.
 Every route declares the one permission it needs, with oneberth's ``permit``,
 and ``compose_app`` refuses a route without one. A queue permission names the
 ``{queue}`` in its path as its resource. oneberth's gate finds who is asking
-and checks the permission before the route reads its body. A worker's request
-about a task names no queue: the route reads the queue the worker is bound to
-from its grant, and the manager answers as if a task on another queue did not
-exist.
+and checks the permission before the route reads its body. A route that names
+no queue serves every queue, and oneberth refuses it to a token bound to one
+queue. A worker's or a responder's request about a task names no queue either:
+its route declares ``bound=True``, reads the queue from the token's grant, and
+the manager answers as if a task on another queue did not exist.
 
 The router is shared; each component includes it with a dependency that gives
 the routes that component's manager (``_component.py``).
@@ -238,8 +239,9 @@ def _bound(
 ) -> str | None:
     """The queue a worker's or responder's request is confined to: its grant's.
 
-    ``None`` for a principal that holds ``permission`` on every queue, such as
-    a person completing a task.
+    For a route that declares ``permit(permission, bound=True)``. ``None`` for
+    a principal that holds ``permission`` on every queue, such as a person
+    completing a task.
     """
     access = request.app.state.oneberth.access
     queue: str | None = access.bound_resource(principal, permission)
@@ -654,7 +656,7 @@ async def claim_task(
     request: Request,
     manager: Managed,
     task_id: TaskId,
-    principal: Annotated[Principal, permit(Permission.TASKS_CLAIM)],
+    principal: Annotated[Principal, permit(Permission.TASKS_CLAIM, bound=True)],
 ) -> Response:
     """A worker claims a task it received; 409 if its run is no longer active."""
     await manager.claim_task(
@@ -672,7 +674,7 @@ async def extend_lease(
     request: Request,
     manager: Managed,
     task_id: TaskId,
-    principal: Annotated[Principal, permit(Permission.TASKS_HEARTBEAT)],
+    principal: Annotated[Principal, permit(Permission.TASKS_HEARTBEAT, bound=True)],
 ) -> dict[str, str]:
     """A worker keeping the task it holds; when its lease now lapses."""
     body = await read_body(request, HeartbeatRequest)
@@ -689,7 +691,7 @@ async def report_finished(
     request: Request,
     manager: Managed,
     task_id: TaskId,
-    principal: Annotated[Principal, permit(Permission.TASKS_FINISH)],
+    principal: Annotated[Principal, permit(Permission.TASKS_FINISH, bound=True)],
 ) -> Response:
     """A worker's result in its JSON form, or its failure."""
     body = await read_body(request, FinishedRequest)
@@ -732,7 +734,7 @@ async def complete_task(
     request: Request,
     manager: Managed,
     task_id: TaskId,
-    principal: Annotated[Principal, permit(Permission.TASKS_COMPLETE)],
+    principal: Annotated[Principal, permit(Permission.TASKS_COMPLETE, bound=True)],
 ) -> Response:
     """End a pending task with a result, or an error; 409 unless it is pending."""
     body = await read_body(request, CompleteRequest)

@@ -754,9 +754,9 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'http'", specifier = ">=0.28" },
     { name = "neorc-core", editable = "python/neorc-core" },
     { name = "neorc-ui", marker = "extra == 'manager'", editable = "python/neorc-ui" },
-    { name = "oneberth", git = "https://github.com/the-guish/oneberth?subdirectory=python%2Foneberth&rev=73313d9700af4987651d5bf67708554f64ce138e" },
-    { name = "oneberth", extras = ["postgres"], marker = "extra == 'postgres'", git = "https://github.com/the-guish/oneberth?subdirectory=python%2Foneberth&rev=73313d9700af4987651d5bf67708554f64ce138e" },
-    { name = "oneberth", extras = ["web"], marker = "extra == 'manager'", git = "https://github.com/the-guish/oneberth?subdirectory=python%2Foneberth&rev=73313d9700af4987651d5bf67708554f64ce138e" },
+    { name = "oneberth", git = "https://github.com/the-guish/oneberth?subdirectory=python%2Foneberth&rev=d8693a66f5ca3e78ab085d6e4bc77ff15126c764" },
+    { name = "oneberth", extras = ["postgres"], marker = "extra == 'postgres'", git = "https://github.com/the-guish/oneberth?subdirectory=python%2Foneberth&rev=d8693a66f5ca3e78ab085d6e4bc77ff15126c764" },
+    { name = "oneberth", extras = ["web"], marker = "extra == 'manager'", git = "https://github.com/the-guish/oneberth?subdirectory=python%2Foneberth&rev=d8693a66f5ca3e78ab085d6e4bc77ff15126c764" },
 ]
 provides-extras = ["http", "manager", "postgres"]
 
@@ -776,8 +776,8 @@ source = { editable = "python/neorc-ui" }
 
 [[package]]
 name = "oneberth"
-version = "0.1.dev4+g73313d970"
-source = { git = "https://github.com/the-guish/oneberth?subdirectory=python%2Foneberth&rev=73313d9700af4987651d5bf67708554f64ce138e#73313d9700af4987651d5bf67708554f64ce138e" }
+version = "0.1.dev5+gd8693a66f"
+source = { git = "https://github.com/the-guish/oneberth?subdirectory=python%2Foneberth&rev=d8693a66f5ca3e78ab085d6e4bc77ff15126c764#d8693a66f5ca3e78ab085d6e4bc77ff15126c764" }
 
 [package.optional-dependencies]
 postgres = [

@@ -326,6 +326,10 @@ ALLOWED = {
 QUEUE_RESOURCE = {"queue:definitions", "queue:receive", "queue:pending"}
 """The permissions whose routes name, in their path, the queue they act on."""
 
+BOUND = {"tasks:claim", "tasks:heartbeat", "tasks:finish", "tasks:complete"}
+"""The permissions whose routes act on a task of the queue the caller's grant
+is bound to. Every other route that names no queue serves every queue."""
+
 
 def permits_asked(dependant: Any) -> list[Permit]:
     """Every ``permit`` a route's dependencies declare, at any depth."""
@@ -348,7 +352,13 @@ async def test_every_route_asks_for_exactly_the_permission_it_needs(
     }
 
     assert asked == {
-        key: [Permit(f"neorc/{value}", "queue" if value in QUEUE_RESOURCE else None)]
+        key: [
+            Permit(
+                f"neorc/{value}",
+                "queue" if value in QUEUE_RESOURCE else None,
+                bound=value in BOUND,
+            )
+        ]
         for key, value in ROUTE_PERMISSIONS.items()
     }
 
@@ -384,9 +394,11 @@ async def test_a_role_reaches_its_routes_and_is_refused_the_rest(
             assert f"neorc/{permission}" in response.json()["detail"], where
 
 
-async def test_a_worker_is_refused_another_queue_and_does_not_see_its_tasks(
+async def test_a_worker_serves_its_own_queue_alone(
     guarded: httpx.AsyncClient, app: Composition
 ) -> None:
+    """Refused on another queue, on another queue's task, and on what serves
+    every queue; its own queue's routes and tasks pass."""
     ci = await token(app, Role.CI)
     user = await token(app, Role.USER)
     scheduler = await token(app, Role.SCHEDULER)
@@ -402,6 +414,9 @@ async def test_a_worker_is_refused_another_queue_and_does_not_see_its_tasks(
     )
     task_id = published.json()["id"]
 
+    for path in ("/runs", "/queues", "/events/latest", f"/tasks/{task_id}"):
+        everywhere = await guarded.get(path, headers=bearer(default))
+        assert (everywhere.status_code, _error(everywhere)) == (403, "Forbidden")
     for path in ("/queues/default/tasks", "/queues/default/tasks/receive"):
         method = "GET" if path.endswith("/tasks") else "POST"
         refused = await guarded.request(method, path, headers=bearer(other))
