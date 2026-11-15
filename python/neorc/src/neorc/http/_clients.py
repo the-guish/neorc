@@ -9,9 +9,11 @@ before it is sent, so a value fails here as it does on a direct client. An
 error body raises the core exception its ``error`` field names; a body that
 names none, and any transport failure, raise ``ManagerUnavailableError``.
 
-With a ``token``, every request carries it as ``Authorization: Bearer``. A
-token can do everything, so it is not sent over plain ``http`` to anything but
-a loopback address unless ``allow_insecure`` says so. Every ``POST`` is sent
+A client is given a backend's address, and reaches the manager's API under
+``/neorc/`` there. With a ``token``, oneberth's service token or a person's
+token, every request carries it as ``Authorization: Bearer``. A token is not
+sent over plain ``http`` to anything but a loopback address unless
+``allow_insecure`` says so. Every ``POST`` is sent
 as ``application/json``, body or not, as the manager takes writes.
 """
 
@@ -167,11 +169,21 @@ def _parsed(response: httpx.Response, parse: Callable[[Any], _T]) -> _T:
         ) from None
 
 
+API_PATH = "/neorc"
+"""Where a backend serves the manager's API: the ``neorc`` component's address."""
+
+
 def _base_url(manager_address: str) -> str:
-    """Accept a bare host, a host:port, or a full URL."""
+    """The manager's API at a backend's address: a bare host, a host:port, or a URL.
+
+    The address is the backend's origin, as standalone neorc and Robinauts
+    alike serve neorc's API under ``/neorc/``.
+    """
     if "://" in manager_address:
-        return manager_address.rstrip("/")
-    return f"http://{manager_address.rstrip('/')}"
+        return manager_address.rstrip("/") + API_PATH
+    # A bare address is a local manager; _ensure_private refuses to send a
+    # token over plain http to anything but loopback.
+    return f"http://{manager_address.rstrip('/')}{API_PATH}"  # NOSONAR
 
 
 def _ensure_private(base_url: str) -> None:

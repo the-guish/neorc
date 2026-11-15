@@ -6,6 +6,10 @@
 They live at the root because pytest and mypy see the whole repository as one
 run, and two directories cannot both hold a module called ``conftest``.
 
+A manager is served as oneberth composes it: the ``neorc`` component, its
+routes under ``/neorc/``, and oneberth's store of people and tokens. Tests
+sign in and make tokens through ``oneberth.web.testing``.
+
 The Postgres fixtures run against a real server. Point
 ``NEORC_TEST_DATABASE_URL`` at one to use your own; otherwise a private server
 is started for the session with ``pgserver``, so a plain ``uv sync && uv run
@@ -16,35 +20,36 @@ those tests skip.
 from __future__ import annotations
 
 import asyncio
-import base64
 import contextlib
-import hashlib
-import json
 import os
+import re
 import sys
-import time
 import uuid
 from collections.abc import AsyncIterator, Iterable, Iterator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from urllib.parse import parse_qs, unquote
 
 import pytest
 
-# At module level: FastAPI resolves the stand-in provider's annotations here.
-from starlette.requests import Request
-
-from neorc_core import Access, Manager, ManagerClient, QueueKind, Role
+from neorc_core import (
+    InvalidValueError,
+    Manager,
+    ManagerClient,
+    QueueKind,
+    Role,
+    TaskNotFoundError,
+    check_token_queue,
+)
 from neorc_core.local import MemoryStore, MemoryTaskNotifier
 
 if TYPE_CHECKING:
-    from neorc.postgres import (
-        PostgresCredentialStore,
-        PostgresStore,
-        PostgresTaskNotifier,
-    )
+    import httpx
+    from oneberth.identity import Identity, IdentityStore
+    from oneberth.web import Composition
+
+    from neorc.postgres import PostgresStore, PostgresTaskNotifier
 
 # Before a test module imports the contract suites, so their asserts explain a
 # failure the way asserts in test modules do.
@@ -96,7 +101,11 @@ def database_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
 
 @pytest.fixture
 async def pg_schema(database_url: str) -> str:
-    """The database URL, its neorc tables created and emptied."""
+    """The database URL, its neorc tables created and emptied, and no oneberth store.
+
+    A manager composed on it sets oneberth's store up afresh with
+    ``create_schema``.
+    """
     from neorc.postgres import create_schema
     from neorc.postgres._driver import connected
     from neorc.postgres._schema import TABLES
@@ -104,6 +113,7 @@ async def pg_schema(database_url: str) -> str:
     await create_schema(database_url)
     async with connected(database_url) as conn:
         await conn.execute(f"TRUNCATE {', '.join(TABLES)}")
+        await conn.execute("DROP SCHEMA IF EXISTS oneberth CASCADE")
     return database_url
 
 
@@ -125,15 +135,6 @@ async def pg_store(pg_schema: str) -> AsyncIterator[PostgresStore]:
 
     async with PostgresStore(pg_schema) as store:
         yield store
-
-
-@pytest.fixture
-async def pg_credentials(pg_schema: str) -> AsyncIterator[PostgresCredentialStore]:
-    """An open credential store on empty credential tables."""
-    from neorc.postgres import PostgresCredentialStore
-
-    async with PostgresCredentialStore(pg_schema) as credentials:
-        yield credentials
 
 
 @pytest.fixture
@@ -194,6 +195,99 @@ def own_tasks_module(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     sys.modules.pop("tasks", None)
 
 
+# A manager composed by oneberth, and the credentials its callers send.
+
+PUBLIC_URL = "http://127.0.0.1:8000"
+"""The public URL of a manager composed in process."""
+
+
+async def identity_store() -> IdentityStore:
+    """oneberth's store in memory, set up."""
+    from oneberth.identity.memory import MemoryIdentityStore
+
+    store = MemoryIdentityStore()
+    await store.setup()
+    return store
+
+
+async def composed(
+    manager: Manager,
+    *,
+    public_url: str = PUBLIC_URL,
+    long_poll_timeout: float = 2,
+    interface: Path | None = None,
+) -> Composition:
+    """``manager``'s component, composed alone on oneberth's store in memory.
+
+    Start it with ``composition.lifespan()``, or ``oneberth.web.testing.running``.
+    """
+    from oneberth.web import compose_app
+    from oneberth.web.testing import config_for
+
+    from neorc.manager import new_manager_webapp
+
+    return compose_app(
+        [new_manager_webapp(manager=manager, long_poll_timeout=long_poll_timeout)],
+        config=config_for("neorc", public_url=public_url),
+        store=await identity_store(),
+        interface=interface,
+    )
+
+
+async def person_token(
+    composition: Composition, identity: Identity | None = None
+) -> str:
+    """A personal token of a person signed in, Ada by default, as a script sends it."""
+    from oneberth.web.testing import ADA
+
+    done = await composition.access.sign_in(identity or ADA)
+    secret, _ = await composition.access.mint_personal_token(done.principal, "script")
+    return secret
+
+
+async def service_token(
+    composition: Composition, role: Role, queue: str | None = None
+) -> str:
+    """A service token of ``role``, bound to ``queue``, as the operator makes one."""
+    from oneberth.web.testing import service_token as made
+
+    name = (
+        f"{role.value.removeprefix('neorc/')}-{queue or 'any'}-{uuid.uuid4().hex[:6]}"
+    )
+    return await made(composition, role.value, queue, name=name)
+
+
+async def kept_service_token(composition: Composition, role: Role, queue: str) -> str:
+    """A service token of ``role``, bound to ``queue``, kept from before the queue
+    changed.
+
+    oneberth refuses a new token for a queue nobody declared, and a new worker
+    token for an external queue. A token made earlier is still in its store:
+    neorc's records were reset beside oneberth's, or a declaration changed
+    while the token was made. Such a token meets the manager's own refusal.
+    """
+    from oneberth.identity import (
+        CredentialKind,
+        Grant,
+        ServiceToken,
+        new_secret,
+        secret_hash,
+    )
+
+    secret = new_secret(CredentialKind.SERVICE_TOKEN)
+    access = composition.access
+    await access.store.add_service_token(
+        ServiceToken(
+            id=uuid.uuid4(),
+            name=f"kept-{role.value.removeprefix('neorc/')}-{uuid.uuid4().hex[:6]}",
+            grant=Grant(role.value, queue),
+            secret_hash=secret_hash(secret),
+            created_at=access.now(),
+        )
+    )
+    return secret
+
+
 @dataclass(frozen=True)
 class Tokens:
     """A token for each process of a deployment, of its role, as roles.md has it."""
@@ -202,22 +296,119 @@ class Tokens:
     """Uploads flows."""
     scheduler: str
     user: str
-    """Starts runs and watches them, as a person's script would."""
+    """Starts runs and watches them: a person's own token, as their script sends."""
     workers: Mapping[str, str]
     """A worker token per queue, bound to it."""
 
 
-async def role_tokens(access: Access, queues: Iterable[str]) -> Tokens:
-    """A token of each role on ``access``, and a worker token for each queue."""
-    ci, _ = await access.create_token("ci", Role.CI)
-    scheduler, _ = await access.create_token("scheduler", Role.SCHEDULER)
-    user, _ = await access.create_token("user", Role.USER)
+async def role_tokens(
+    composition: Composition, queues: Iterable[str], *, user: str | None = None
+) -> Tokens:
+    """A token of each role on a started composition, and a worker token per queue.
+
+    ``user`` is the person's token, Ada's by default: in the local mode, the
+    local user's, made on the account page.
+    """
+    ci = await service_token(composition, Role.CI)
+    scheduler = await service_token(composition, Role.SCHEDULER)
+    user = user or await person_token(composition)
     workers = {}
     for queue in queues:
-        workers[queue], _ = await access.create_token(
-            f"worker-{queue}", Role.WORKER, queue=queue
-        )
+        workers[queue] = await service_token(composition, Role.WORKER, queue)
     return Tokens(ci, scheduler, user, workers)
+
+
+_WORKER_PATHS = re.compile(r"/(?:queues/(?P<queue>[^/]+)|tasks/(?P<task>[^/]+))/")
+
+
+def role_tokens_transport(
+    composition: Composition,
+    manager: Manager | None = None,
+    *,
+    expect: str | None = None,
+) -> httpx.AsyncBaseTransport:
+    """A transport onto ``composition`` that sends each request with a token of a
+    role that may make it; see ``RoleTokens``.
+
+    ``manager`` says which queue a task named by id is on; without it, a
+    worker's request about a task is sent with a token of ``default``. With
+    it, a request on a queue that oneberth would refuse a new token for is sent
+    with a token kept from before (``kept_service_token``), so that the request
+    meets the manager's own refusal.
+    """
+    import httpx
+
+    class RoleTokens(httpx.AsyncBaseTransport):
+        """Sends each request on with a token of the role that may make it.
+
+        A deployment gives each process a token of its own role; a test drives
+        every request through one client, so here the role is picked per
+        request, as the manager's routes say: a worker's bound to the queue in
+        the path, or the queue of the task named. With ``expect``, every request
+        must arrive carrying that one token, which is swapped.
+        """
+
+        def __init__(self) -> None:
+            self._inner = httpx.ASGITransport(app=composition)
+            self._tokens: dict[tuple[Role, str | None], str] = {}
+
+        async def _token(self, role: Role, queue: str | None = None) -> str:
+            if (role, queue) not in self._tokens:
+                if role is Role.USER:
+                    self._tokens[role, queue] = await person_token(composition)
+                elif queue is not None and await self._refused(role, queue):
+                    self._tokens[role, queue] = await kept_service_token(
+                        composition, role, queue
+                    )
+                else:
+                    self._tokens[role, queue] = await service_token(
+                        composition, role, queue
+                    )
+            return self._tokens[role, queue]
+
+        async def _refused(self, role: Role, queue: str) -> bool:
+            if manager is None:
+                return False
+            try:
+                await check_token_queue(role, queue, manager.queue_kind)
+            except InvalidValueError:
+                return True
+            return False
+
+        async def _role_token(self, request: httpx.Request) -> str:
+            path, method = request.url.path.removeprefix("/neorc"), request.method
+            worker = _WORKER_PATHS.match(path + "/")
+            if worker and worker["queue"] and not path.endswith("/recent"):
+                if path.endswith("/pending"):
+                    return await self._token(Role.RESPONDER, worker["queue"])
+                return await self._token(Role.WORKER, worker["queue"])
+            if worker and worker["task"] and method == "POST":
+                if path.endswith("/complete"):
+                    return await self._token(Role.USER)
+                queue = "default"
+                with contextlib.suppress(ValueError, TaskNotFoundError):
+                    if manager is not None:
+                        task = await manager.get_task(uuid.UUID(worker["task"]))
+                        queue = task.queue
+                return await self._token(Role.WORKER, queue)
+            if path == "/flows" and method == "POST":
+                return await self._token(Role.CI)
+            if (
+                path.startswith("/runs/")
+                and method == "POST"
+                and not path.endswith("/cancel")
+            ):
+                return await self._token(Role.SCHEDULER)
+            return await self._token(Role.USER)
+
+        async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+            if expect is not None:
+                assert request.headers.get("authorization") == f"Bearer {expect}"
+            token = await self._role_token(request)
+            request.headers["authorization"] = f"Bearer {token}"
+            return await self._inner.handle_async_request(request)
+
+    return RoleTokens()
 
 
 @asynccontextmanager
@@ -298,140 +489,3 @@ async def deployed_example(
             await asyncio.wait_for(
                 asyncio.gather(*running, return_exceptions=True), timeout=30
             )
-
-
-# A stand-in OpenID Connect provider, for signing in without a real one.
-
-
-class StandInProvider:
-    """An OpenID Connect provider in an ASGI app, issuing unsigned ID tokens.
-
-    ``person`` is who signs in next: the claims the ID token carries, beside
-    the ones the flow sets. ``tamper`` overrides any claim, to make an ID token
-    the manager must refuse. What the provider was asked is recorded, so a
-    test can check the manager sent what it should.
-    """
-
-    def __init__(
-        self,
-        issuer: str,
-        *,
-        client_id: str = "neorc-client",
-        client_secret: str = "stand-in-secret",
-    ) -> None:
-        from fastapi import FastAPI
-        from fastapi.responses import JSONResponse, RedirectResponse
-
-        self.issuer = issuer
-        base = issuer.rstrip("/")
-        self.client_id = client_id
-        self.client_secret = client_secret
-        self.person: dict[str, Any] = {
-            "sub": "248289761001",
-            "name": "Ada Lovelace",
-            "email": "ada@example.com",
-            "email_verified": True,
-        }
-        self.tamper: dict[str, Any] = {}
-        self.discovery: dict[str, Any] = {}
-        self.unavailable = 0
-        """How many discovery requests to fail before answering."""
-        self.authorized: list[dict[str, str]] = []
-        self.exchanged: list[dict[str, str]] = []
-        self._codes: dict[str, dict[str, str]] = {}
-
-        app = FastAPI()
-        self.app = app
-
-        @app.get("/.well-known/openid-configuration")
-        async def discovery() -> JSONResponse:
-            if self.unavailable > 0:
-                self.unavailable -= 1
-                return JSONResponse({"error": "down"}, status_code=503)
-            return JSONResponse(
-                {
-                    "issuer": self.issuer,
-                    "authorization_endpoint": f"{base}/authorize",
-                    "token_endpoint": f"{base}/token",
-                    "response_types_supported": ["code"],
-                    **self.discovery,
-                }
-            )
-
-        @app.get("/authorize")
-        async def authorize(request: Request) -> RedirectResponse:
-            asked = dict(request.query_params)
-            self.authorized.append(asked)
-            code = uuid.uuid4().hex
-            self._codes[code] = asked
-            return RedirectResponse(
-                f"{asked['redirect_uri']}?code={code}&state={asked['state']}",
-                status_code=303,
-            )
-
-        @app.post("/token")
-        async def token(request: Request) -> JSONResponse:
-            # Parsed here: Starlette's form parsing needs python-multipart.
-            form = parse_qs((await request.body()).decode())
-            asked = {key: values[0] for key, values in form.items()}
-            asked["authorization"] = request.headers.get("authorization", "")
-            self.exchanged.append(asked)
-            authorized = self._codes.pop(asked.get("code", ""), None)
-            if authorized is None:
-                return JSONResponse({"error": "invalid_grant"}, status_code=400)
-            if not self._client_authenticated(asked):
-                return JSONResponse({"error": "invalid_client"}, status_code=401)
-            challenge = (
-                base64.urlsafe_b64encode(
-                    hashlib.sha256(asked.get("code_verifier", "").encode()).digest()
-                )
-                .rstrip(b"=")
-                .decode()
-            )
-            if (
-                challenge != authorized["code_challenge"]
-                or asked.get("redirect_uri") != authorized["redirect_uri"]
-            ):
-                return JSONResponse({"error": "invalid_grant"}, status_code=400)
-            now = int(time.time())
-            claims = {
-                "iss": self.issuer,
-                "aud": self.client_id,
-                "iat": now,
-                "exp": now + 300,
-                "nonce": authorized["nonce"],
-                **self.person,
-                **self.tamper,
-            }
-            claims = {key: value for key, value in claims.items() if value is not None}
-            return JSONResponse(
-                {
-                    "access_token": "stand-in-access-token",
-                    "token_type": "Bearer",
-                    "id_token": unsigned_jwt(claims),
-                }
-            )
-
-    def _client_authenticated(self, asked: Mapping[str, str]) -> bool:
-        if asked["authorization"].startswith("Basic "):
-            pair = base64.b64decode(asked["authorization"][6:]).decode()
-            client_id, _, secret = pair.partition(":")
-            return (unquote(client_id), unquote(secret)) == (
-                self.client_id,
-                self.client_secret,
-            )
-        return (asked.get("client_id"), asked.get("client_secret")) == (
-            self.client_id,
-            self.client_secret,
-        )
-
-
-def unsigned_jwt(claims: Mapping[str, Any]) -> str:
-    """A JWT with ``claims`` and no signature, as the stand-in issues them."""
-
-    def part(value: Mapping[str, Any]) -> str:
-        return (
-            base64.urlsafe_b64encode(json.dumps(value).encode()).rstrip(b"=").decode()
-        )
-
-    return f"{part({'alg': 'none', 'typ': 'JWT'})}.{part(claims)}."

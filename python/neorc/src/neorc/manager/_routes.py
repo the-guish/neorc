@@ -15,24 +15,34 @@ The models check the shape of the envelope alone; values inside it are checked
 by core, so a request the in-memory manager accepts is not refused by HTTP
 first, and one it refuses is refused the same way.
 
-Every route declares the one permission it needs, with ``permit``; a test
-walks the routes to hold that. No route declares a body parameter: FastAPI
-would read that body before the router's guard in ``_access.py`` runs, and a
-request with no token, or a cross-site write, must be refused before its body
-is read.
+Every route declares the one permission it needs, with oneberth's ``permit``,
+and ``compose_app`` refuses a route without one. A queue permission names the
+``{queue}`` in its path as its resource. oneberth's gate finds who is asking
+and checks the permission before the route reads its body. A worker's request
+about a task names no queue: the route reads the queue the worker is bound to
+from its grant, and the manager answers as if a task on another queue did not
+exist.
+
+The router is shared; each component includes it with a dependency that gives
+the routes that component's manager (``_component.py``).
 """
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Any, TypeVar
 
 from fastapi import APIRouter, Depends, Query, Request, Response, status
 from fastapi.responses import JSONResponse
+from oneberth.identity import Principal
+from oneberth.web import permit, while_connected
 from pydantic import BaseModel, ValidationError
 
-from neorc.manager._access import bound_queue, permit
 from neorc.manager._schemas import (
     DeliveryResponse,
     EventListResponse,
@@ -58,9 +68,10 @@ from neorc_core import (
     Manager,
     PayloadTooLargeError,
     Permission,
-    Principal,
     RunId,
+    RunStarter,
     RunStatus,
+    StarterKind,
     TaskId,
     TaskStatus,
 )
@@ -81,16 +92,51 @@ MAX_PAGE = 500
 """The most runs, or tasks of a queue, one page of a listing may ask for."""
 
 
+STATE_KEY = "neorc"
+"""Where a component's dependency leaves its ``ManagerState`` in a request."""
+
+
+@dataclass(frozen=True)
+class ManagerState:
+    """What the routes read of the component that serves them."""
+
+    manager: Callable[[], Manager]
+    """The running manager; a 503 before it starts."""
+    long_poll_timeout: float
+    stopping: Callable[[], asyncio.Event]
+    """Set when the backend begins to stop, while its listeners still serve."""
+
+
+def _state(request: Request) -> ManagerState:
+    state: ManagerState = getattr(request.state, STATE_KEY)
+    return state
+
+
+def routes_for(state: ManagerState) -> APIRouter:
+    """The routes, served for one component: each gives its handler ``state``.
+
+    The router includes the shared routes with a dependency that leaves
+    ``state`` in the request before each handler's own dependencies run.
+    """
+
+    def serving(request: Request) -> None:
+        setattr(request.state, STATE_KEY, state)
+
+    served = APIRouter()
+    served.include_router(router, dependencies=[Depends(serving)])
+    return served
+
+
 def _get_manager(request: Request) -> Manager:
-    """The manager this application was built around."""
-    manager: Manager = request.app.state.manager
-    return manager
+    """The manager of the component this route is served for."""
+    return _state(request).manager()
 
 
 Managed = Annotated[Manager, Depends(_get_manager)]
 """The manager, injected into a route; a module-level name, for FastAPI."""
 
 _M = TypeVar("_M", bound=BaseModel)
+_T = TypeVar("_T")
 
 
 async def read_body(request: Request, model: type[_M]) -> _M:
@@ -187,6 +233,28 @@ router = APIRouter(
 )
 
 
+def bound_queue(permission: Permission) -> Any:
+    """A dependency that permits a task route and gives the queue it is confined to.
+
+    The route names no queue in its path, so it declares ``permit(...,
+    bound=True)``: a worker's or responder's grant, bound to one queue, passes,
+    and the value is that queue. ``None`` for a principal that holds
+    ``permission`` on every queue, such as a person completing a task.
+    """
+
+    permitted = permit(permission, bound=True)
+
+    async def confined(
+        request: Request, principal: Principal = permitted
+    ) -> str | None:
+        queue: str | None = request.app.state.oneberth.access.bound_resource(
+            principal, permission
+        )
+        return queue
+
+    return Depends(confined)
+
+
 def _flow_response(flow: Any) -> dict[str, Any]:
     return {"name": flow.name, "version": str(flow.version), "content": flow.content}
 
@@ -251,16 +319,30 @@ async def get_flow_version(manager: Managed, name: str, version: str) -> dict[st
     return _flow_response(await manager.get_flow(name, parsed))
 
 
+def starter_of(principal: Principal) -> RunStarter:
+    """Who a run is started by: the person, whatever credential they sent, or
+    the service whose token asks. A person's id and name are oneberth's."""
+    if principal.user is None:
+        token = principal.credential
+        return RunStarter(StarterKind.SERVICE, str(token.id), principal.name)
+    user = principal.user
+    return RunStarter(StarterKind.USER, str(user.id), user.name)
+
+
 @router.post(
     "/flows/{name}/runs",
-    dependencies=[permit(Permission.RUNS_START)],
     status_code=status.HTTP_201_CREATED,
     responses=documented(RunResponse, status.HTTP_201_CREATED),
 )
-async def start_run(request: Request, manager: Managed, name: str) -> JSONResponse:
-    """Start a run of the flow's latest version."""
+async def start_run(
+    request: Request,
+    manager: Managed,
+    principal: Annotated[Principal, permit(Permission.RUNS_START)],
+    name: str,
+) -> JSONResponse:
+    """Start a run of the flow's latest version, for whoever asks."""
     body = await read_body(request, StartRunRequest)
-    run = await manager.start_run(name, body.inputs)
+    run = await manager.start_run(name, body.inputs, started_by=starter_of(principal))
     return JSONResponse(wire.run_to(run), status_code=status.HTTP_201_CREATED)
 
 
@@ -381,8 +463,35 @@ def _waited(request: Request, timeout: float | None) -> float:
     The deadline stays under the idle timeout of any proxy in front of the
     service; a caller that hits it simply asks again.
     """
-    limit: float = request.app.state.long_poll_timeout
+    limit = _state(request).long_poll_timeout
     return limit if timeout is None else min(timeout, limit)
+
+
+async def _long_poll(request: Request, wait: Awaitable[_T]) -> _T | None:
+    """``wait``'s result, or ``None`` once its client leaves or the backend stops.
+
+    The caller then answers "nothing yet". A server waits for a handler in
+    progress before it stops, so a wait left running would hold up the stop.
+    """
+    return await while_connected(request, _unless(_state(request).stopping(), wait))
+
+
+async def _unless(stopping: asyncio.Event, wait: Awaitable[_T]) -> _T | None:
+    """``wait``'s result, or ``None`` once ``stopping`` is set; ``wait`` is then
+    cancelled."""
+    waiting = asyncio.ensure_future(wait)
+    stopped = asyncio.ensure_future(stopping.wait())
+    try:
+        await asyncio.wait({waiting, stopped}, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        for pending in (waiting, stopped):
+            if not pending.done():
+                pending.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await pending
+    if waiting.cancelled():
+        return None
+    return waiting.result()
 
 
 @router.get(
@@ -399,10 +508,11 @@ async def wait_for_events(
     timeout: Annotated[float | None, Query(ge=0)] = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """Events after a sequence, long-polled; an empty list when the wait ends."""
-    events = await manager.wait_for_events(
-        after, timeout=_waited(request, timeout), limit=limit
+    events = await _long_poll(
+        request,
+        manager.wait_for_events(after, timeout=_waited(request, timeout), limit=limit),
     )
-    return {"events": [wire.event_to(event) for event in events]}
+    return {"events": [wire.event_to(event) for event in events or []]}
 
 
 @router.get(
@@ -492,7 +602,7 @@ class FinishedRequest(BaseModel):
 
 @router.get(
     "/queues/{queue}/tasks",
-    dependencies=[permit(Permission.QUEUE_DEFINITIONS)],
+    dependencies=[permit(Permission.QUEUE_DEFINITIONS, "queue")],
     response_model=None,
     responses=documented(TaskDefinitionsResponse),
 )
@@ -506,7 +616,7 @@ async def task_definitions(
 
 @router.post(
     "/queues/{queue}/tasks/receive",
-    dependencies=[permit(Permission.QUEUE_RECEIVE)],
+    dependencies=[permit(Permission.QUEUE_RECEIVE, "queue")],
     responses={
         **documented(DeliveryResponse),
         status.HTTP_204_NO_CONTENT: {"description": "The wait ended with no task"},
@@ -521,12 +631,16 @@ async def receive_task(
 ) -> Response:
     """Long-poll for a task on a queue. 204 when the wait ends empty."""
     # A worker that left mid-poll must not be leased a task: the wait asks
-    # whether the client is still there before every receive.
-    delivery = await manager.receive_task(
-        queue,
-        timeout=_waited(request, timeout),
-        lease_seconds=lease_seconds,
-        abandoned=request.is_disconnected,
+    # whether the client is still there before every receive. A worker that
+    # leaves while the lease is taken keeps it until it lapses.
+    delivery = await _long_poll(
+        request,
+        manager.receive_task(
+            queue,
+            timeout=_waited(request, timeout),
+            lease_seconds=lease_seconds,
+            abandoned=request.is_disconnected,
+        ),
     )
     if delivery is None:
         return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -548,10 +662,10 @@ async def get_task(manager: Managed, task_id: TaskId) -> dict[str, Any]:
 async def claim_task(
     manager: Managed,
     task_id: TaskId,
-    principal: Annotated[Principal | None, permit(Permission.TASKS_CLAIM)],
+    queue: Annotated[str | None, bound_queue(Permission.TASKS_CLAIM)],
 ) -> Response:
     """A worker claims a task it received; 409 if its run is no longer active."""
-    await manager.claim_task(task_id, queue=bound_queue(principal))
+    await manager.claim_task(task_id, queue=queue)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -564,12 +678,14 @@ async def extend_lease(
     request: Request,
     manager: Managed,
     task_id: TaskId,
-    principal: Annotated[Principal | None, permit(Permission.TASKS_HEARTBEAT)],
+    queue: Annotated[str | None, bound_queue(Permission.TASKS_HEARTBEAT)],
 ) -> dict[str, str]:
     """A worker keeping the task it holds; when its lease now lapses."""
     body = await read_body(request, HeartbeatRequest)
     expires_at = await manager.extend_lease(
-        task_id, lease_seconds=body.lease_seconds, queue=bound_queue(principal)
+        task_id,
+        lease_seconds=body.lease_seconds,
+        queue=queue,
     )
     return {"lease_expires_at": expires_at.isoformat()}
 
@@ -579,12 +695,15 @@ async def report_finished(
     request: Request,
     manager: Managed,
     task_id: TaskId,
-    principal: Annotated[Principal | None, permit(Permission.TASKS_FINISH)],
+    queue: Annotated[str | None, bound_queue(Permission.TASKS_FINISH)],
 ) -> Response:
     """A worker's result in its JSON form, or its failure."""
     body = await read_body(request, FinishedRequest)
     await manager.report_finished(
-        task_id, result=body.result, error=body.error, queue=bound_queue(principal)
+        task_id,
+        result=body.result,
+        error=body.error,
+        queue=queue,
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -600,7 +719,7 @@ class CompleteRequest(BaseModel):
 
 @router.get(
     "/queues/{queue}/tasks/pending",
-    dependencies=[permit(Permission.QUEUE_PENDING)],
+    dependencies=[permit(Permission.QUEUE_PENDING, "queue")],
     response_model=None,
     responses=documented(PendingTasksResponse),
 )
@@ -619,12 +738,15 @@ async def complete_task(
     request: Request,
     manager: Managed,
     task_id: TaskId,
-    principal: Annotated[Principal | None, permit(Permission.TASKS_COMPLETE)],
+    queue: Annotated[str | None, bound_queue(Permission.TASKS_COMPLETE)],
 ) -> Response:
     """End a pending task with a result, or an error; 409 unless it is pending."""
     body = await read_body(request, CompleteRequest)
     await manager.complete_task(
-        task_id, result=body.result, error=body.error, queue=bound_queue(principal)
+        task_id,
+        result=body.result,
+        error=body.error,
+        queue=queue,
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

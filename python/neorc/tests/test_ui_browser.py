@@ -3,22 +3,28 @@
 
 """The built UI in a real browser, against the whole deployment.
 
-A manager on uvicorn and Postgres serves the assets ``ts/neorc-ui`` built, with
-authentication on: a scheduler and workers run ``examples/wordplay`` over HTTP
-with a token, and Chromium, driven by Playwright, signs in through a stand-in
-OpenID provider, sees a flow's steps as a graph, starts a run from the form,
-watches it succeed, looks at it as a graph, cancels another, and signs out.
-A second journey is a person's on ``examples/approval``: the queues, a queue's
-tasks, and the two answers its run waits for. A third is a person's on
-``examples/review_loop``: a list of issues triaged on a queue's page, two
-rounds of it, and the run ending with the result.
+Standalone neorc, composed by oneberth, on uvicorn and Postgres, serves the
+assets ``ts/neorc-ui`` built: oneberth's shell with one application, neorc. A
+scheduler and workers run ``examples/wordplay`` over HTTP with service tokens,
+and Chromium, driven by Playwright, signs in on the shell's sign-in page
+through oneberth's stand-in OpenID provider, finds neorc chosen on the rail,
+sees a flow's steps as a graph, starts a run from the form, watches it
+succeed, looks at it as a graph, cancels another, and signs out from the
+shell's account button.
+A second journey is a person's on ``examples/approval``, in oneberth's local
+mode, signed in with a ticket: the queues, a queue's tasks, and the two
+answers its run waits for. A third is a person's on ``examples/review_loop``,
+in the local mode too: a list of issues triaged on a queue's page, two rounds
+of it, and the run ending with the result.
 Skipped without a built UI or a browser: CI builds and installs both for one
 Python, and contributing/dev-environment.md says how to locally.
+``NEORC_TEST_CHROMIUM`` names a Chromium to launch instead of Playwright's own.
 """
 
 from __future__ import annotations
 
 import contextlib
+import os
 import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -28,13 +34,22 @@ from typing import TYPE_CHECKING
 import pytest
 from conftest import (
     EXAMPLES,
-    StandInProvider,
     Tokens,
     declare_queues,
     deployed_example,
     free_port,
     role_tokens,
     serve_app,
+)
+from oneberth.config import local_config
+from oneberth.identity import CredentialKind, new_secret
+from oneberth.web import Composition
+from oneberth.web.testing import (
+    StandInProvider,
+    client_of,
+    config_for,
+    launcher,
+    signed_in,
 )
 
 from neorc.manager import build_app
@@ -67,6 +82,7 @@ class Deployed:
     address: str
     tokens: Tokens
     """What the scheduler, workers and uploads send; people sign in instead."""
+    app: Composition
 
 
 @contextlib.asynccontextmanager
@@ -78,55 +94,69 @@ async def _deployment(
     queues: list[str],
     served: list[str],
     external: list[str] | None = None,
+    local: bool = False,
 ) -> AsyncIterator[tuple[Deployed, ManagerClient]]:
     """The manager serving the built UI, an example uploaded, some queues served.
 
-    Authentication is on, as a deployment has it: people sign in with a
-    stand-in OpenID provider on a port of its own, and the scheduler and
-    workers send a token. ``queues`` are declared worker queues, with a worker
-    token each, and ``external`` external ones; ``served`` get a worker.
+    People sign in with oneberth's stand-in OpenID provider on a port of its
+    own, or, ``local``, the local user signs in with a ticket. The scheduler
+    and workers send a service token. ``queues`` are declared worker queues,
+    with a worker token each, and ``external`` external ones; ``served`` get
+    a worker.
     """
-    from neorc.auth import parse_auth_config
-    from neorc.postgres import PostgresCredentialStore, create_schema
-    from neorc_core import Access, QueueKind
+    from neorc.postgres import create_schema
+    from neorc_core import QueueKind
 
     monkeypatch.setattr("neorc_ui.STATIC", _built_ui())
     manager_port, provider_port = free_port(), free_port()
     stand_in = StandInProvider(f"http://127.0.0.1:{provider_port}")
-    config = parse_auth_config(
-        {
-            "public_url": f"http://127.0.0.1:{manager_port}",
-            "providers": {
-                "stand-in": {
-                    "title": "Stand-in",
-                    "issuer": stand_in.issuer,
-                    "client_id": stand_in.client_id,
-                    "client_secret_env": "STAND_IN_SECRET",
-                }
-            },
-            "allow": [{"provider": "stand-in", "email": "ada@example.com"}],
-        },
-        {"STAND_IN_SECRET": stand_in.client_secret},
+    config = (
+        local_config("neorc", port=manager_port)
+        if local
+        else config_for(
+            "neorc",
+            public_url=f"http://127.0.0.1:{manager_port}",
+            providers={stand_in.provider_id: stand_in.config},
+        )
     )
     await create_schema(pg_schema)
     await declare_queues(pg_schema, *queues)
     await declare_queues(pg_schema, *(external or []), kind=QueueKind.EXTERNAL)
-    async with PostgresCredentialStore(pg_schema) as credentials:
-        tokens = await role_tokens(Access(credentials), queues)
     app = build_app(
-        pg_schema,
-        auth=True,
-        auth_config=config,
-        create_schema=True,
-        long_poll_timeout=2,
+        pg_schema, config=config, create_schema=True, long_poll_timeout=2, local=local
     )
+    if local:
+        app.launch_secret = new_secret(CredentialKind.LAUNCH)
     async with (
         serve_app(stand_in.app, port=provider_port),
         serve_app(app, port=manager_port) as address,
-        deployed_example(address, example, served, tokens=tokens) as client,
     ):
-        await client.upload_flows(read_flows(EXAMPLES / example / "flows"))
-        yield Deployed(address, tokens), client
+        user = await _local_person_token(app) if local else None
+        tokens = await role_tokens(app, queues, user=user)
+        async with deployed_example(address, example, served, tokens=tokens) as client:
+            await client.upload_flows(read_flows(EXAMPLES / example / "flows"))
+            yield Deployed(address, tokens, app), client
+
+
+async def _local_person_token(app: Composition) -> str:
+    """The local user's personal token, made on the account page, for a script."""
+    async with client_of(app) as client:
+        await signed_in(app, client)
+        made = await client.post("/auth/tokens", json={"name": "script"})
+    assert made.status_code == 201, made.text
+    secret: str = made.json()["secret"]
+    return secret
+
+
+async def _open_signed_in(page: Page, deployed: Deployed, hash_: str) -> None:
+    """Open ``hash_`` signed in as the local user, as the launcher opens the window."""
+    async with client_of(deployed.app) as client:
+        asked = await client.post(
+            "/auth/tickets", json={}, headers=launcher(deployed.app)
+        )
+    assert asked.status_code == 201, asked.text
+    await page.goto(asked.json()["url"])
+    await page.goto(f"{deployed.address}/ui/{hash_}")
 
 
 @pytest.fixture
@@ -165,6 +195,7 @@ async def approving(
         queues=["default"],
         served=["default"],
         external=["editors"],
+        local=True,
     ) as deployment:
         yield deployment
 
@@ -185,6 +216,7 @@ async def triaging(
         queues=["default"],
         served=["default"],
         external=["editors"],
+        local=True,
     ) as deployment:
         yield deployment
 
@@ -195,7 +227,9 @@ async def browsing() -> AsyncIterator[tuple[Page, list[str]]]:
     playwright = pytest.importorskip("playwright.async_api")
     async with playwright.async_playwright() as driver:
         try:
-            browser = await driver.chromium.launch()
+            browser = await driver.chromium.launch(
+                executable_path=os.environ.get("NEORC_TEST_CHROMIUM") or None
+            )
         except playwright.Error as exc:  # no browser downloaded
             pytest.skip(f"no Chromium for Playwright: {str(exc).splitlines()[0]}")
         page = await browser.new_page()
@@ -217,7 +251,7 @@ async def browsing() -> AsyncIterator[tuple[Page, list[str]]]:
 async def _start_word_picker_rounds(page: Page, ui_address: str) -> None:
     from playwright.async_api import expect
 
-    await page.goto(f"{ui_address}/ui/#/flows/word_picker_rounds")
+    await page.goto(f"{ui_address}/ui/#/neorc/flows/word_picker_rounds")
     # The flow's steps as a graph, before any run: each loop and fan-out once.
     steps = page.get_by_label("Flow graph")
     await expect(steps.locator(".react-flow__node")).to_have_count(9)
@@ -226,7 +260,7 @@ async def _start_word_picker_rounds(page: Page, ui_address: str) -> None:
     await page.get_by_label("preferred_letter").fill("t")
     await page.get_by_label("requested_at").fill("2026-09-13T10:00")
     await page.get_by_role("button", name="Start run").click()
-    await page.wait_for_url(re.compile(r"#/runs/[0-9a-f-]{36}$"))
+    await page.wait_for_url(re.compile(r"#/neorc/runs/[0-9a-f-]{36}$"))
 
 
 @pytest.mark.usefixtures("own_tasks_module")
@@ -240,13 +274,20 @@ async def test_a_run_is_started_watched_and_another_cancelled_in_the_browser(
     expect.set_options(timeout=10_000)
     heading = page.get_by_role("heading", level=1)
 
-    # Signed out, the sign-in page stands in for the flows asked for; signing
-    # in with the provider comes back to them, with no banner.
-    await page.goto(f"{ui_address}/ui/#/flows")
+    # Signed out, the shell's sign-in page stands in for the flows asked for;
+    # signing in with the provider comes back to them, with no banner, and
+    # the rail has neorc chosen, alone.
+    await page.goto(f"{ui_address}/ui/#/neorc/flows")
     await page.get_by_role("link", name="Sign in with Stand-in").click()
-    await expect(page.get_by_label("Profile")).to_contain_text("Ada Lovelace")
-    await expect(page).to_have_url(re.compile(r"/ui/#/flows$"))
+    account = page.get_by_role("button", name="Account")
+    await expect(account).to_have_attribute("title", "Ada Lovelace")
+    await expect(page).to_have_url(re.compile(r"/ui/#/neorc/flows$"))
     await expect(page.get_by_role("note")).to_have_count(0)
+    rail = page.get_by_role("navigation", name="Applications")
+    await expect(rail.get_by_role("link")).to_have_count(1)
+    await expect(rail.get_by_role("link", name="neorc")).to_have_attribute(
+        "aria-current", "page"
+    )
     main_nav = page.get_by_role("navigation", name="Main")
     await main_nav.get_by_role("link", name="Flows", exact=True).click()
     table = page.get_by_role("table")
@@ -262,7 +303,7 @@ async def test_a_run_is_started_watched_and_another_cancelled_in_the_browser(
 
     # The fan-out ran a branch per word, and the results are shown.
     await expect(page.get_by_role("region", name="decorate branch 2")).to_be_visible()
-    report = page.locator("li.step-task", has_text="report")
+    report = page.locator("li.neorc-step-task", has_text="report")
     await report.get_by_text("details").click()
     await expect(report).to_contain_text("potato**")
     await expect(report).to_contain_text("tomate**")
@@ -320,16 +361,18 @@ async def test_a_run_is_started_watched_and_another_cancelled_in_the_browser(
     await expect(rows.nth(1)).to_contain_text("cancelled")
     await expect(rows.nth(2)).to_contain_text("succeeded")
 
-    # Signing out ends the session: the pages give way to the sign-in again,
-    # and the API refuses the cookie even sent again by hand, as a copy kept
-    # elsewhere would be.
-    (session,) = [
-        c for c in await page.context.cookies() if c["name"] == "neorc_session"
-    ]
-    await page.get_by_role("button", name="Sign out").click()
+    # Signing out from the account button ends the session: the pages give way
+    # to the sign-in again, and the API refuses the cookie even sent again by
+    # hand, as a copy kept elsewhere would be.
+    cookie = deployed.app.cookies.session
+    (session,) = [c for c in await page.context.cookies() if c["name"] == cookie]
+    await account.click()
+    menu = page.get_by_role("group", name="Account")
+    await expect(menu).to_contain_text("ada@example.com")
+    await menu.get_by_role("button", name="Sign out").click()
     await expect(page.get_by_role("link", name="Sign in with Stand-in")).to_be_visible()
     refused = await page.request.get(
-        f"{ui_address}/runs", headers={"cookie": f"neorc_session={session['value']}"}
+        f"{ui_address}/neorc/runs", headers={"cookie": f"{cookie}={session['value']}"}
     )
     assert refused.status == 401
 
@@ -353,11 +396,14 @@ async def test_a_person_answers_the_tasks_of_an_external_queue_in_the_browser(
     expect.set_options(timeout=10_000)
     run = await client.start_run("approval", {"topic": "tea"})
 
-    # Signed in, a person sees every queue, with its kind.
-    await page.goto(f"{ui_address}/ui/#/queues")
-    await page.get_by_role("link", name="Sign in with Stand-in").click()
-    await expect(page.get_by_label("Profile")).to_contain_text("Ada Lovelace")
-    await expect(page).to_have_url(re.compile(r"/ui/#/queues$"))
+    # Signed in as the person at the machine, with no sign-in page, a person
+    # sees every queue, with its kind.
+    await _open_signed_in(page, deployed, "#/neorc/queues")
+    await expect(page.get_by_role("button", name="Account")).to_be_visible()
+    await expect(page.get_by_role("link", name="Sign in with Stand-in")).to_have_count(
+        0
+    )
+    await expect(page).to_have_url(re.compile(r"/ui/#/neorc/queues$"))
     rows = page.get_by_role("row")
     filters = page.get_by_role("form", name="Filters")
     await expect(rows).to_have_count(3)
@@ -451,7 +497,7 @@ async def test_a_person_answers_the_tasks_of_an_external_queue_in_the_browser(
     )
 
     # Every state, and further back: the two answers, the latest first.
-    await page.goto(f"{ui_address}/ui/#/queues/editors")
+    await page.goto(f"{ui_address}/ui/#/neorc/queues/editors")
     await filters.get_by_label("State").select_option("all")
     await expect(rows).to_have_count(3)
     await expect(rows.nth(1)).to_contain_text("suggest_title")
@@ -474,7 +520,7 @@ async def test_a_person_answers_the_tasks_of_an_external_queue_in_the_browser(
     # A run that ends takes its waiting tasks with it: the list drops them,
     # and the task that was open loses its form.
     ended = await client.start_run("approval", {"topic": "coffee"})
-    await page.goto(f"{ui_address}/ui/#/queues/editors")
+    await page.goto(f"{ui_address}/ui/#/neorc/queues/editors")
     await expect(rows).to_have_count(3, timeout=RUN_TIMEOUT_MS)
     await page.get_by_role("link", name=re.compile("review_draft")).click()
     await expect(panel.get_by_role("form")).to_be_visible()
@@ -503,9 +549,8 @@ async def test_a_person_triages_a_list_of_issues_in_the_browser(
     expect.set_options(timeout=10_000)
     run = await client.start_run("review_loop", {"change": "Add a retry"})
 
-    await page.goto(f"{ui_address}/ui/#/queues/editors")
-    await page.get_by_role("link", name="Sign in with Stand-in").click()
-    await expect(page.get_by_label("Profile")).to_contain_text("Ada Lovelace")
+    await _open_signed_in(page, deployed, "#/neorc/queues/editors")
+    await expect(page.get_by_role("button", name="Account")).to_be_visible()
     rows = page.get_by_role("row")
     panel = page.get_by_role("complementary", name="Task")
     await expect(rows).to_have_count(2, timeout=RUN_TIMEOUT_MS)
@@ -564,7 +609,7 @@ async def test_a_person_triages_a_list_of_issues_in_the_browser(
 
     # Ready ends the loop, and the run goes on with the triage. The task was
     # a round's, a sub-flow's run; the run started is the loop's.
-    await page.goto(f"{ui_address}/ui/#/runs/{run.id}")
+    await page.goto(f"{ui_address}/ui/#/neorc/runs/{run.id}")
     heading = page.get_by_role("heading", level=1)
     await expect(heading).to_contain_text("succeeded", timeout=RUN_TIMEOUT_MS)
     finished = await client.get_run(run.id)

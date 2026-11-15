@@ -83,38 +83,38 @@ async def test_a_request_without_a_token_is_refused_and_told_how(
 ) -> None:
     response = await guarded.get("/runs")
 
-    assert (response.status_code, _error(response)) == (401, "AuthenticationError")
+    assert (response.status_code, _error(response)) == (401, "Unauthorized")
     assert response.headers["www-authenticate"] == "Bearer"
-    assert "Authorization: Bearer" in response.json()["detail"]
+    assert "send a bearer, or sign in at /ui/" in response.json()["detail"]
 
 
 @pytest.mark.parametrize(
     "authorization",
     [
-        "Bearer neorc_not-a-token-this-manager-issued",
+        "Bearer ob_svc_not-a-token-this-backend-issued",
         "Bearer not-even-shaped-like-one",
         "Basic dXNlcjpwYXNz",
-        "neorc_without-a-scheme",
+        "ob_svc_without-a-scheme",
     ],
 )
 async def test_a_request_with_a_token_not_accepted_is_refused(
-    guarded: httpx.AsyncClient, access: Access, authorization: str
+    guarded: httpx.AsyncClient, app: Composition, authorization: str
 ) -> None:
-    await access.create_token("ci", Role.CI)
+    await token(app, Role.CI)
 
     response = await guarded.get("/runs", headers={"authorization": authorization})
 
-    assert (response.status_code, _error(response)) == (401, "AuthenticationError")
+    assert (response.status_code, _error(response)) == (401, "Unauthorized")
     secret = authorization.partition(" ")[2]
     assert not secret or secret not in response.text
 
 
 async def test_a_token_is_accepted_on_the_routes_its_role_may_use(
-    guarded: httpx.AsyncClient, access: Access
+    guarded: httpx.AsyncClient, app: Composition
 ) -> None:
-    ci, _ = await access.create_token("ci", Role.CI)
-    user, _ = await access.create_token("person", Role.USER)
-    worker, _ = await access.create_token("worker-1", Role.WORKER, queue="default")
+    ci = await token(app, Role.CI)
+    user = await token(app, Role.USER)
+    worker = await token(app, Role.WORKER, "default")
 
     uploaded = await guarded.post("/flows", json={"flows": [FLOW]}, headers=bearer(ci))
     run = await guarded.post("/flows/f/runs", json={"inputs": {}}, headers=bearer(user))
@@ -131,17 +131,68 @@ async def test_a_token_is_accepted_on_the_routes_its_role_may_use(
     assert events.status_code == 200
 
 
-async def test_a_revoked_or_expired_token_is_refused(
-    guarded: httpx.AsyncClient, access: Access
+async def test_a_revoked_token_is_refused(
+    guarded: httpx.AsyncClient, app: Composition
 ) -> None:
-    revoked, _ = await access.create_token("revoked", Role.CI)
-    brief, _ = await access.create_token("brief", Role.CI, expires_seconds=0.1)
-    await access.revoke_token("revoked")
-    await asyncio.sleep(0.2)
+    revoked = await token(app, Role.SCHEDULER)
+    assert (await guarded.get("/runs", headers=bearer(revoked))).status_code == 200
+    (listed,) = await app.access.service_tokens(by=OPERATOR)
+    await app.access.revoke_service_token(listed.id, by=OPERATOR)
 
-    for secret in (revoked, brief):
-        response = await guarded.get("/runs", headers=bearer(secret))
-        assert response.status_code == 401
+    response = await guarded.get("/runs", headers=bearer(revoked))
+    assert (response.status_code, _error(response)) == (401, "Unauthorized")
+
+
+async def test_a_token_for_a_queue_it_cannot_serve_is_not_created(
+    manager: Manager,
+) -> None:
+    """An admin in the interface meets the check ``neorc tokens create`` meets."""
+    from oneberth.web import compose_app
+    from oneberth.web.testing import config_for, running, signed_in
+
+    from neorc.manager import new_manager_webapp
+
+    await manager.declare_queue("editors", QueueKind.EXTERNAL)
+    composition = compose_app(
+        [new_manager_webapp(manager=manager)],
+        config=config_for("neorc", public_url=PUBLIC_URL, admins=["ada"]),
+        store=await identity_store(),
+    )
+    async with running(composition) as client:
+        await signed_in(composition, client)
+
+        async def create(name: str, role: Role, queue: str) -> httpx.Response:
+            return await client.post(
+                "/auth/services",
+                json={"name": name, "role": role.value, "resource": queue},
+            )
+
+        undeclared = await create("w1", Role.WORKER, "typo")
+        unanswered = await create("r1", Role.RESPONDER, "typo")
+        external = await create("w2", Role.WORKER, "editors")
+        responder = await create("r2", Role.RESPONDER, "editors")
+        worker = await create("w3", Role.WORKER, "default")
+        listed = (await client.get("/auth/services")).json()["items"]
+
+    for refused in (undeclared, unanswered):
+        assert (refused.status_code, refused.json()) == (
+            422,
+            {
+                "error": "InvalidValue",
+                "detail": "queue 'typo' is not declared: declare it before a "
+                "token is bound to it",
+            },
+        )
+    assert (external.status_code, external.json()) == (
+        422,
+        {
+            "error": "InvalidValue",
+            "detail": "queue 'editors' is external: a worker token is bound to a "
+            "worker queue",
+        },
+    )
+    assert (responder.status_code, worker.status_code) == (201, 201)
+    assert sorted(item["name"] for item in listed) == ["r2", "w3"]
 
 
 async def test_the_token_is_checked_before_the_request_is_read(
@@ -323,10 +374,10 @@ def sample_url(path: str, queue: str = "default") -> str:
 
 @pytest.mark.parametrize("role", list(Role))
 async def test_a_role_reaches_its_routes_and_is_refused_the_rest(
-    guarded: httpx.AsyncClient, access: Access, role: Role
+    guarded: httpx.AsyncClient, app: Composition, role: Role
 ) -> None:
     queue = "default" if role in (Role.WORKER, Role.RESPONDER) else None
-    secret, _ = await access.create_token("t", role, queue=queue)
+    secret = await token(app, role, queue)
 
     for (method, path), permission in ROUTE_PERMISSIONS.items():
         response = await guarded.request(
@@ -337,18 +388,18 @@ async def test_a_role_reaches_its_routes_and_is_refused_the_rest(
             assert response.status_code not in (401, 403), where
         else:
             assert response.status_code == 403, where
-            assert _error(response) == "PermissionDeniedError", where
-            assert permission in response.json()["detail"], where
+            assert _error(response) == "Forbidden", where
+            assert f"neorc/{permission}" in response.json()["detail"], where
 
 
 async def test_a_worker_is_refused_another_queue_and_does_not_see_its_tasks(
-    guarded: httpx.AsyncClient, access: Access
+    guarded: httpx.AsyncClient, app: Composition
 ) -> None:
-    ci, _ = await access.create_token("ci", Role.CI)
-    user, _ = await access.create_token("person", Role.USER)
-    scheduler, _ = await access.create_token("scheduler", Role.SCHEDULER)
-    default, _ = await access.create_token("w1", Role.WORKER, queue="default")
-    other, _ = await access.create_token("w2", Role.WORKER, queue="other")
+    ci = await token(app, Role.CI)
+    user = await token(app, Role.USER)
+    scheduler = await token(app, Role.SCHEDULER)
+    default = await token(app, Role.WORKER, "default")
+    other = await token(app, Role.WORKER, "other")
     flow = {"name": "f", "version": "1.0.0", "steps": {"work": {"handler": "m:w"}}}
     await guarded.post("/flows", json={"flows": [flow]}, headers=bearer(ci))
     run = await guarded.post("/flows/f/runs", json={"inputs": {}}, headers=bearer(user))
@@ -362,8 +413,8 @@ async def test_a_worker_is_refused_another_queue_and_does_not_see_its_tasks(
     for path in ("/queues/default/tasks", "/queues/default/tasks/receive"):
         method = "GET" if path.endswith("/tasks") else "POST"
         refused = await guarded.request(method, path, headers=bearer(other))
-        assert (refused.status_code, _error(refused)) == (403, "PermissionDeniedError")
-        assert "bound to queue 'other'" in refused.json()["detail"]
+        assert (refused.status_code, _error(refused)) == (403, "Forbidden")
+        assert "on 'default'" in refused.json()["detail"]
     received = await guarded.post(
         "/queues/default/tasks/receive", params={"timeout": 0}, headers=bearer(default)
     )
@@ -391,14 +442,14 @@ async def test_a_worker_is_refused_another_queue_and_does_not_see_its_tasks(
 
 
 async def test_a_responder_is_confined_to_its_queue_and_a_worker_cannot_complete(
-    guarded: httpx.AsyncClient, access: Access
+    guarded: httpx.AsyncClient, app: Composition
 ) -> None:
-    ci, _ = await access.create_token("ci", Role.CI)
-    user, _ = await access.create_token("person", Role.USER)
-    scheduler, _ = await access.create_token("scheduler", Role.SCHEDULER)
-    worker, _ = await access.create_token("w", Role.WORKER, queue="default")
-    responder, _ = await access.create_token("r1", Role.RESPONDER, queue="default")
-    other, _ = await access.create_token("r2", Role.RESPONDER, queue="other")
+    ci = await token(app, Role.CI)
+    user = await token(app, Role.USER)
+    scheduler = await token(app, Role.SCHEDULER)
+    worker = await token(app, Role.WORKER, "default")
+    responder = await token(app, Role.RESPONDER, "default")
+    other = await token(app, Role.RESPONDER, "other")
     flow = {"name": "f", "version": "1.0.0", "steps": {"work": {"handler": "m:w"}}}
     await guarded.post("/flows", json={"flows": [flow]}, headers=bearer(ci))
     run = await guarded.post("/flows/f/runs", json={"inputs": {}}, headers=bearer(user))
@@ -413,22 +464,22 @@ async def test_a_responder_is_confined_to_its_queue_and_a_worker_cannot_complete
     elsewhere = await guarded.get(
         "/queues/default/tasks/pending", headers=bearer(other)
     )
-    assert (elsewhere.status_code, _error(elsewhere)) == (403, "PermissionDeniedError")
-    assert "bound to queue 'other'" in elsewhere.json()["detail"]
+    assert (elsewhere.status_code, _error(elsewhere)) == (403, "Forbidden")
+    assert "on 'default'" in elsewhere.json()["detail"]
     hidden = await guarded.post(
         f"/tasks/{task_id}/complete", json=done, headers=bearer(other)
     )
     assert (hidden.status_code, _error(hidden)) == (404, "TaskNotFoundError")
-    for secret, role in ((worker, "worker"), (ci, "ci"), (scheduler, "scheduler")):
+    for secret in (worker, ci, scheduler):
         refused = await guarded.post(
             f"/tasks/{task_id}/complete", json=done, headers=bearer(secret)
         )
-        assert (refused.status_code, _error(refused)) == (403, "PermissionDeniedError")
-        assert f"a {role} token may not tasks:complete" in refused.json()["detail"]
+        assert (refused.status_code, _error(refused)) == (403, "Forbidden")
+        assert "may not neorc/tasks:complete" in refused.json()["detail"]
     for path in ("/queues/default/tasks", "/queues/default/tasks/receive"):
         method = "GET" if path.endswith("/tasks") else "POST"
         refused = await guarded.request(method, path, headers=bearer(responder))
-        assert (refused.status_code, _error(refused)) == (403, "PermissionDeniedError")
+        assert (refused.status_code, _error(refused)) == (403, "Forbidden")
 
     listed = await guarded.get(
         "/queues/default/tasks/pending", headers=bearer(responder)
@@ -442,90 +493,77 @@ async def test_a_responder_is_confined_to_its_queue_and_a_worker_cannot_complete
     assert (task.json()["status"], task.json()["result"]) == ("succeeded", "done")
 
 
-async def test_with_authentication_off_every_route_is_open(
-    open_app: httpx.AsyncClient,
-) -> None:
-    for method, path in ROUTE_PERMISSIONS:
-        response = await open_app.request(
-            method, sample_url(path), params={"timeout": 0}, headers=JSON
-        )
-        assert response.status_code not in (401, 403), f"{method} {path}"
+# oneberth's checks on a write, on the manager's routes.
 
 
-# Writes from other sites, with authentication off.
+async def started_run(guarded: httpx.AsyncClient, app: Composition) -> str:
+    """A run of ``FLOW``, uploaded and started; its id."""
+    ci, user = await token(app, Role.CI), await token(app, Role.USER)
+    await guarded.post("/flows", json={"flows": [FLOW]}, headers=bearer(ci))
+    run = await guarded.post("/flows/f/runs", json={"inputs": {}}, headers=bearer(user))
+    run_id: str = run.json()["id"]
+    return run_id
 
 
 @pytest.mark.parametrize("site", ["cross-site", "same-site", "Cross-Site"])
 async def test_a_write_a_page_on_another_site_sent_is_refused(
-    open_app: httpx.AsyncClient, site: str
+    guarded: httpx.AsyncClient, app: Composition, site: str
 ) -> None:
-    await open_app.post("/flows", json={"flows": [FLOW]})
-    run = await open_app.post("/flows/f/runs", json={"inputs": {}})
+    run_id = await started_run(guarded, app)
+    user = await token(app, Role.USER)
 
-    cancelled = await open_app.post(
-        f"/runs/{run.json()['id']}/cancel",
-        headers={"sec-fetch-site": site, **JSON},
+    cancelled = await guarded.post(
+        f"/runs/{run_id}/cancel", headers={"sec-fetch-site": site, **bearer(user)}
     )
 
-    assert (cancelled.status_code, _error(cancelled)) == (403, "CrossSiteRequestError")
-    status = (await open_app.get(f"/runs/{run.json()['id']}")).json()["status"]
-    assert status == "active"
-
-
-@pytest.mark.parametrize("site", ["same-origin", "none"])
-async def test_a_write_from_the_page_itself_or_typed_in_is_taken(
-    open_app: httpx.AsyncClient, site: str
-) -> None:
-    response = await open_app.post(
-        "/flows", json={"flows": [FLOW]}, headers={"sec-fetch-site": site}
-    )
-
-    assert response.status_code == 200
-
-
-async def test_a_read_is_not_refused_for_where_it_came_from(
-    open_app: httpx.AsyncClient,
-) -> None:
-    response = await open_app.get("/runs", headers={"sec-fetch-site": "cross-site"})
-
-    assert response.status_code == 200
+    assert (cancelled.status_code, _error(cancelled)) == (403, "CrossSite")
+    status = (await guarded.get(f"/runs/{run_id}", headers=bearer(user))).json()
+    assert status["status"] == "active"
 
 
 @pytest.mark.parametrize(
     "content_type",
     [None, "text/plain", "application/x-www-form-urlencoded", "multipart/form-data"],
 )
-async def test_a_write_a_form_could_send_is_refused_with_no_body_or_fetch_metadata(
-    open_app: httpx.AsyncClient, content_type: str | None
+async def test_a_write_a_form_could_send_is_refused(
+    guarded: httpx.AsyncClient, app: Composition, content_type: str | None
 ) -> None:
-    """What a browser that sends no Sec-Fetch-Site lets any page send."""
-    await open_app.post("/flows", json={"flows": [FLOW]})
-    run = await open_app.post("/flows/f/runs", json={"inputs": {}})
+    run_id = await started_run(guarded, app)
+    user = await token(app, Role.USER)
+    worker = await token(app, Role.WORKER, "default")
     headers = {} if content_type is None else {"content-type": content_type}
 
-    cancelled = await open_app.post(f"/runs/{run.json()['id']}/cancel", headers=headers)
-    received = await open_app.post(
+    cancelled = await guarded.post(
+        f"/runs/{run_id}/cancel",
+        headers={**headers, "authorization": f"Bearer {user}"},
+    )
+    received = await guarded.post(
         "/queues/default/tasks/receive",
         params={"timeout": 0, "lease_seconds": 1e9},
-        headers=headers,
+        headers={**headers, "authorization": f"Bearer {worker}"},
     )
-    claimed = await open_app.post(f"/tasks/{uuid.uuid4()}/claim", headers=headers)
-    uploaded = await open_app.post("/flows", content=b'{"flows": []}', headers=headers)
 
-    for response in (cancelled, received, claimed, uploaded):
+    for response in (cancelled, received):
         assert (response.status_code, _error(response)) == (
             415,
-            "UnsupportedMediaTypeError",
+            "UnsupportedMediaType",
         )
-    status = (await open_app.get(f"/runs/{run.json()['id']}")).json()["status"]
-    assert status == "active"
+    status = (await guarded.get(f"/runs/{run_id}", headers=bearer(user))).json()
+    assert status["status"] == "active"
 
 
-async def test_json_with_parameters_is_json(open_app: httpx.AsyncClient) -> None:
-    response = await open_app.post(
+async def test_json_with_parameters_is_json(
+    guarded: httpx.AsyncClient, app: Composition
+) -> None:
+    ci = await token(app, Role.CI)
+
+    response = await guarded.post(
         "/flows",
         content=b'{"flows": []}',
-        headers={"content-type": "Application/JSON; charset=utf-8"},
+        headers={
+            "content-type": "Application/JSON; charset=utf-8",
+            "authorization": f"Bearer {ci}",
+        },
     )
 
     assert response.status_code == 200
@@ -538,16 +576,16 @@ async def test_a_cross_site_write_is_refused_before_its_token_is_looked_at(
         "/flows", json={"flows": []}, headers={"sec-fetch-site": "cross-site"}
     )
 
-    assert (response.status_code, _error(response)) == (403, "CrossSiteRequestError")
+    assert (response.status_code, _error(response)) == (403, "CrossSite")
 
 
 async def test_a_person_sees_every_queue_and_completes_a_task_of_any(
-    guarded: httpx.AsyncClient, access: Access
+    guarded: httpx.AsyncClient, app: Composition
 ) -> None:
-    ci, _ = await access.create_token("ci", Role.CI)
-    user, _ = await access.create_token("person", Role.USER)
-    scheduler, _ = await access.create_token("scheduler", Role.SCHEDULER)
-    responder, _ = await access.create_token("r", Role.RESPONDER, queue="default")
+    ci = await token(app, Role.CI)
+    user = await token(app, Role.USER)
+    scheduler = await token(app, Role.SCHEDULER)
+    responder = await token(app, Role.RESPONDER, "default")
     flow = {"name": "f", "version": "1.0.0", "steps": {"work": {"handler": "m:w"}}}
     await guarded.post("/flows", json={"flows": [flow]}, headers=bearer(ci))
     run = await guarded.post("/flows/f/runs", json={"inputs": {}}, headers=bearer(user))
@@ -563,7 +601,7 @@ async def test_a_person_sees_every_queue_and_completes_a_task_of_any(
     inputs = await guarded.get(f"/tasks/{task_id}/inputs", headers=bearer(user))
     for path in ("/queues", "/queues/default/tasks/recent"):
         refused = await guarded.get(path, headers=bearer(responder))
-        assert (refused.status_code, _error(refused)) == (403, "PermissionDeniedError")
+        assert (refused.status_code, _error(refused)) == (403, "Forbidden")
     completed = await guarded.post(
         f"/tasks/{task_id}/complete", json={"result": "done"}, headers=bearer(user)
     )
@@ -574,3 +612,139 @@ async def test_a_person_sees_every_queue_and_completes_a_task_of_any(
     assert inputs.json()["inputs"] == {}
     assert completed.status_code == 204
     assert (task.json()["status"], task.json()["result"]) == ("succeeded", "done")
+
+
+async def test_the_worker_listener_serves_the_routes_a_queue_role_may_call(
+    app: Composition,
+) -> None:
+    """oneberth derives it: a route is there when a worker or responder role holds
+    its permission."""
+    from oneberth.web.testing import client_of
+
+    worker = await token(app, Role.WORKER, "default")
+    user = await token(app, Role.USER)
+    async with client_of(app, worker=True) as listener:
+        definitions = await listener.get(
+            "/neorc/queues/default/tasks", headers=bearer(worker)
+        )
+        pending = await listener.get(
+            "/neorc/queues/default/tasks/pending", headers=bearer(user)
+        )
+        flows = await listener.get("/neorc/flows", headers=bearer(user))
+        runs = await listener.get("/neorc/runs", headers=bearer(user))
+
+    assert definitions.status_code == 200
+    assert (pending.status_code, _error(pending)) == (403, "Forbidden")
+    assert flows.status_code == 404
+    assert runs.status_code == 404
+
+
+# Who started a run.
+
+WHO = {
+    "name": "who",
+    "version": "1.0.0",
+    "steps": {
+        "by": {"handler": "m:by", "params": {"by": "neorc.started_by"}},
+        "call": {"flow": "f", "params": {}},
+    },
+}
+
+
+async def _ada(app: Composition) -> dict[str, Any]:
+    from oneberth.web.testing import TEST_PROVIDER
+
+    ada = await app.access.store.user_of(TEST_PROVIDER, "ada")
+    assert ada is not None
+    return {"kind": "user", "id": str(ada.id), "name": "Ada Lovelace"}
+
+
+async def _started(
+    guarded: httpx.AsyncClient, app: Composition, headers: dict[str, str]
+) -> httpx.Response:
+    ci = await token(app, Role.CI)
+    await guarded.post("/flows", json={"flows": [FLOW, WHO]}, headers=bearer(ci))
+    return await guarded.post("/flows/who/runs", json={"inputs": {}}, headers=headers)
+
+
+async def _read(guarded: httpx.AsyncClient, app: Composition, run_id: str) -> Any:
+    user = await token(app, Role.USER)
+    return (await guarded.get(f"/runs/{run_id}", headers=bearer(user))).json()
+
+
+async def test_a_run_a_person_starts_in_the_browser_is_theirs(
+    guarded: httpx.AsyncClient, app: Composition
+) -> None:
+    from oneberth.web.testing import client_of, signed_in
+
+    ci = await token(app, Role.CI)
+    await guarded.post("/flows", json={"flows": [FLOW, WHO]}, headers=bearer(ci))
+    async with client_of(app) as browser:
+        await signed_in(app, browser)
+        started = await browser.post("/neorc/flows/who/runs", json={"inputs": {}})
+        listed = await browser.get("/neorc/runs")
+
+    assert started.status_code == 201
+    assert started.json()["started_by"] == await _ada(app)
+    assert listed.json()["runs"][0]["started_by"] == await _ada(app)
+
+
+async def test_a_run_a_persons_own_token_starts_is_that_persons(
+    guarded: httpx.AsyncClient, app: Composition
+) -> None:
+    started = await _started(guarded, app, bearer(await token(app, Role.USER)))
+
+    assert started.json()["started_by"] == await _ada(app)
+    assert (await _read(guarded, app, started.json()["id"]))["started_by"] == (
+        await _ada(app)
+    )
+
+
+async def test_a_run_a_service_token_starts_is_that_services(
+    guarded: httpx.AsyncClient, app: Composition
+) -> None:
+    trigger = await token(app, Role.EXTERNAL_TRIGGER)
+    (made,) = [
+        t
+        for t in await app.access.store.service_tokens()
+        if t.grant.role == Role.EXTERNAL_TRIGGER.value
+    ]
+
+    started = await _started(guarded, app, bearer(trigger))
+
+    expected = {"kind": "service", "id": str(made.id), "name": made.name}
+    assert started.json()["started_by"] == expected
+    assert (await _read(guarded, app, started.json()["id"]))["started_by"] == expected
+
+
+async def test_what_the_scheduler_starts_and_a_handler_receives_are_the_starters(
+    guarded: httpx.AsyncClient, app: Composition
+) -> None:
+    """The scheduler starts no top-level run; a sub-flow run it starts, and the
+    tasks it publishes, are of the person who started the tree."""
+    scheduler = await token(app, Role.SCHEDULER)
+    worker = await token(app, Role.WORKER, "default")
+    run_id = (await _started(guarded, app, bearer(await token(app, Role.USER)))).json()[
+        "id"
+    ]
+
+    refused = await guarded.post(
+        "/flows/who/runs", json={"inputs": {}}, headers=bearer(scheduler)
+    )
+    sub_run = await guarded.post(
+        f"/runs/{run_id}/sub-runs",
+        json={"address": {"step": "call", "scope": []}},
+        headers=bearer(scheduler),
+    )
+    await guarded.post(
+        f"/runs/{run_id}/tasks",
+        json={"address": {"step": "by", "scope": []}},
+        headers=bearer(scheduler),
+    )
+    received = await guarded.post(
+        "/queues/default/tasks/receive", params={"timeout": 0}, headers=bearer(worker)
+    )
+
+    assert (refused.status_code, _error(refused)) == (403, "Forbidden")
+    assert sub_run.json()["started_by"] == await _ada(app)
+    assert received.json()["inputs"] == {"by": await _ada(app)}

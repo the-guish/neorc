@@ -26,17 +26,42 @@ from neorc_core import (
 )
 from neorc_core.flows import Version
 
+CONFIG = """
+[apps.neorc]
+public_url = "https://neorc.example.com"
+"""
 
+
+@pytest.fixture
+def config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """oneberth's sign-in configuration, named by ``ONEBERTH_CONFIG``."""
+    path = tmp_path / "oneberth.toml"
+    path.write_text(CONFIG)
+    monkeypatch.setenv("ONEBERTH_CONFIG", str(path))
+    return path
+
+
+@pytest.fixture
+def started(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    """What ``manager start`` composes and serves, recorded instead."""
+    calls: list[dict[str, Any]] = []
+
+    def build_app(database_url: str | None, **kwargs: Any) -> str:
+        calls.append({"database_url": database_url, **kwargs})
+        return "the app"
+
+    def run(app: str, host: str, port: int) -> None:
+        calls[-1].update(app=app, host=host, port=port)
+
+    monkeypatch.setattr("neorc.manager.build_app", build_app)
+    monkeypatch.setattr("neorc.manager.run", run)
+    return calls
+
+
+@pytest.mark.usefixtures("config")
 def test_manager_start_takes_its_settings_from_the_command_line(
-    monkeypatch: pytest.MonkeyPatch,
+    started: list[dict[str, Any]],
 ) -> None:
-    calls: list[tuple[Any, ...]] = []
-
-    def fake_run(host: str, port: int, **kwargs: Any) -> None:
-        calls.append((host, port, kwargs))
-
-    monkeypatch.setattr("neorc.manager.run", fake_run)
-
     exit_code = _cli.main(
         [
             "manager",
@@ -52,49 +77,188 @@ def test_manager_start_takes_its_settings_from_the_command_line(
     )
 
     assert exit_code == 0
-    assert calls == [
-        (
-            "127.0.0.1",
-            9000,
-            {
-                "auth": True,
-                "auth_config": None,
-                "database_url": "postgresql:///neorc",
-                "create_schema": True,
-                "ui": True,
-                "ssl_certfile": None,
-                "ssl_keyfile": None,
-            },
-        )
-    ]
+    (call,) = started
+    assert call.pop("config").apps["neorc"].public_url == "https://neorc.example.com"
+    assert call == {
+        "database_url": "postgresql:///neorc",
+        "create_schema": True,
+        "database_file": None,
+        "ui": True,
+        "local": False,
+        "app": "the app",
+        "host": "127.0.0.1",
+        "port": 9000,
+    }
 
 
-def test_manager_start_serves_the_api_alone_with_no_ui(
-    monkeypatch: pytest.MonkeyPatch,
+def test_manager_start_reads_the_configuration_named_on_the_command_line(
+    started: list[dict[str, Any]], tmp_path: Path
 ) -> None:
-    calls: list[dict[str, Any]] = []
+    named = tmp_path / "elsewhere.toml"
+    named.write_text(CONFIG.replace("neorc.example.com", "orc.example.org"))
 
-    def fake_run(host: str, port: int, **kwargs: Any) -> None:
-        calls.append(kwargs)
+    assert _cli.main(["manager", "start", "--config", str(named)]) == 0
 
-    monkeypatch.setattr("neorc.manager.run", fake_run)
+    assert started[0]["config"].apps["neorc"].public_url == "https://orc.example.org"
 
+
+def test_manager_start_needs_a_sign_in_configuration(
+    started: list[dict[str, Any]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("ONEBERTH_CONFIG", raising=False)
+    no_neorc = tmp_path / "other.toml"
+    no_neorc.write_text('[apps.robinauts]\npublic_url = "https://r.example.com"\n')
+    broken = tmp_path / "broken.toml"
+    broken.write_text('[apps.neorc]\npublic_url = "ftp://x"\nunknown = 1\n')
+
+    with pytest.raises(SystemExit, match=r"no sign-in configuration.*ONEBERTH_CONFIG"):
+        _cli.main(["manager", "start"])
+    with pytest.raises(SystemExit, match=r"no public URL.*\[apps\.neorc\]"):
+        _cli.main(["manager", "start", "--config", str(no_neorc)])
+    with pytest.raises(
+        SystemExit, match=r"cannot be used:\n.*unknown key\n.*public_url"
+    ):
+        _cli.main(["manager", "start", "--config", str(broken)])
+    assert started == []
+
+
+def test_manager_start_in_the_local_mode_needs_no_configuration(
+    started: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("ONEBERTH_CONFIG", raising=False)
+
+    assert _cli.main(["manager", "start", "--local", "--port", "8433"]) == 0
+    assert _cli.main(["manager", "start", "--local", "--host", "::1"]) == 0
+
+    first, second = started
+    assert (first["local"], first["host"], first["port"]) == (True, "127.0.0.1", 8433)
+    assert first["config"].apps["neorc"].public_url == "http://127.0.0.1:8433"
+    assert not first["config"].providers
+    assert second["config"].apps["neorc"].public_url == "http://[::1]:8420"
+
+
+def test_the_local_mode_listens_on_a_loopback_address_alone(
+    started: list[dict[str, Any]], config: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit, match="--local listens on a loopback address"):
+        _cli.main(["manager", "start", "--local", "--host", "0.0.0.0"])
+    with pytest.raises(SystemExit):
+        _cli.main(["manager", "start", "--local", "--config", str(config)])
+
+    assert "not allowed with argument" in capsys.readouterr().err
+    assert started == []
+
+
+@pytest.mark.usefixtures("config")
+def test_manager_start_serves_the_api_alone_with_no_ui(
+    started: list[dict[str, Any]],
+) -> None:
     exit_code = _cli.main(["manager", "start", "--no-ui"])
 
     assert exit_code == 0
-    assert calls[0]["ui"] is False
+    assert started[0]["ui"] is False
 
 
+@pytest.mark.usefixtures("config")
 def test_manager_start_names_the_fix_when_there_is_no_built_ui(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def fake_run(host: str, port: int, **kwargs: Any) -> None:
+    def build_app(*args: Any, **kwargs: Any) -> None:
         raise FileNotFoundError("static holds no built UI: run npm")
 
-    monkeypatch.setattr("neorc.manager.run", fake_run)
+    monkeypatch.setattr("neorc.manager.build_app", build_app)
 
     with pytest.raises(SystemExit, match=r"no built UI.*--no-ui"):
         _cli.main(["manager", "start"])
+
+
+@pytest.mark.usefixtures("config")
+def test_manager_start_on_a_sqlite_file(
+    tmp_path: Path, started: list[dict[str, Any]]
+) -> None:
+    path = tmp_path / "neorc.db"
+    asked = ["manager", "start", "--no-ui", "--database-file", str(path)]
+
+    with pytest.raises(SystemExit):  # one database: a file or a URL
+        _cli.main([*asked, "--database-url", "postgresql:///neorc"])
+    assert _cli.main(asked) == 0
+
+    assert started[0]["database_file"] == path
+    assert started[0]["database_url"] is None
+
+
+@pytest.mark.usefixtures("config")
+def test_manager_start_refuses_a_file_of_another_application(tmp_path: Path) -> None:
+    import sqlite3
+
+    path = tmp_path / "notes.db"
+    with sqlite3.connect(path) as conn:
+        conn.execute("CREATE TABLE notes (body TEXT)")
+    conn.close()
+
+    with pytest.raises(SystemExit, match="not a neorc database"):
+        _cli.main(["manager", "start", "--no-ui", "--database-file", str(path)])
+
+
+def test_queues_are_declared_and_listed_on_a_sqlite_file(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import asyncio
+
+    from oneberth.web.testing import config_for
+
+    from neorc.manager import build_app
+
+    path = tmp_path / "neorc.db"
+    on_file = ["--database-file", str(path)]
+    with pytest.raises(SystemExit, match="no database file"):
+        _cli.main(["queues", "list", *on_file])
+
+    async def first_start() -> None:
+        app = build_app(database_file=path, config=config_for("neorc"), ui=False)
+        async with app.lifespan():
+            pass
+
+    asyncio.run(first_start())  # it leaves neorc.db, and oneberth.db beside it
+    declared = _cli.main(["queues", "declare", "default", "--kind", "worker", *on_file])
+    with pytest.raises(SystemExit, match="not a queue name"):
+        _cli.main(["queues", "declare", "no way", "--kind", "worker", *on_file])
+    capsys.readouterr()
+    listed = _cli.main(["queues", "list", *on_file])
+
+    assert (declared, listed) == (0, 0)
+    assert capsys.readouterr().out == "default\tworker\n"
+
+
+def test_tokens_are_made_on_a_sqlite_file_for_its_declared_queues(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import asyncio
+
+    from oneberth.web.testing import config_for
+
+    from neorc.manager import build_app
+
+    path = tmp_path / "neorc.db"
+    on_file = ["--database-file", str(path)]
+
+    async def first_start() -> None:
+        app = build_app(database_file=path, config=config_for("neorc"), ui=False)
+        async with app.lifespan():
+            pass
+
+    asyncio.run(first_start())
+    create = ["tokens", "create", "w", "--role", "neorc/worker", *on_file]
+    refused = _cli.main([*create, "--resource", "default"])
+    _cli.main(["queues", "declare", "default", "--kind", "worker", *on_file])
+    capsys.readouterr()
+    created = _cli.main([*create, "--resource", "default"])
+    secret = capsys.readouterr().out.strip()
+    listed = _cli.main(["tokens", "list", *on_file])
+
+    assert (refused, created, listed) == (1, 0, 0)
+    assert secret.startswith("ob_svc_")
+    assert capsys.readouterr().out.startswith("w\tneorc/worker on default\t")
 
 
 def test_an_unknown_command_exits_with_usage(

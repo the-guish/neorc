@@ -4,8 +4,9 @@
 """The ``neorc`` command.
 
     neorc run examples/hello --flow a
-    neorc manager start
-    neorc tokens create worker-1 --role worker --queue default
+    neorc manager start --config oneberth.toml
+    neorc manager start --local --database-file neorc.db
+    neorc tokens create worker-1 --role neorc/worker --resource default
     neorc flows upload examples/hello/flows --manager-address 127.0.0.1:8420
     neorc scheduler start --manager-address 127.0.0.1:8420
     neorc worker start --manager-address 127.0.0.1:8420 --code-location examples/hello
@@ -13,8 +14,13 @@
 Adapters are imported inside the handlers, so a host that installed only the
 extras it needs can still run the CLI.
 
-The commands that reach a manager send the API token in ``NEORC_API_TOKEN``,
-never taken from the command line, which every user of the host can read.
+The commands that reach a manager send the token in ``NEORC_API_TOKEN``,
+never taken from the command line, which every user of the host can read. The
+token is oneberth's: a service token from ``neorc tokens create``, or a
+person's own token from the UI.
+
+``store``, ``tokens``, ``sessions`` and ``devices`` are oneberth's admin
+scripts, shown here with neorc's roles (``neorc._admin``).
 """
 
 from __future__ import annotations
@@ -26,7 +32,6 @@ import json
 import logging
 import os
 import signal
-import ssl
 import sys
 import threading
 import uuid
@@ -36,16 +41,15 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager, context
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar
 
+from neorc._admin import add_database_options
 from neorc_core import (
     AccessError,
-    ApiToken,
     FlowDefinitionError,
     HandlerError,
     InvalidValueError,
     ManagerUnavailableError,
     NeorcError,
     QueueKind,
-    Role,
     RunStatus,
     Scheduler,
     Worker,
@@ -58,16 +62,15 @@ MANAGER_ADDRESS_ENV = "NEORC_MANAGER_ADDRESS"
 API_TOKEN_ENV = "NEORC_API_TOKEN"
 ALLOW_INSECURE_HTTP_ENV = "NEORC_ALLOW_INSECURE_HTTP"
 DATABASE_URL_ENV = "NEORC_DATABASE_URL"
-AUTH_CONFIG_ENV = "NEORC_AUTH_CONFIG"
+CONFIG_ENV = "ONEBERTH_CONFIG"
 
-ROLES = tuple(role.value for role in Role)
 QUEUE_KINDS = tuple(kind.value for kind in QueueKind)
 
 DEFAULT_HOST = "0.0.0.0"  # a manager serves workers on other hosts
 DEFAULT_PORT = 8420
 
 if TYPE_CHECKING:
-    from neorc.auth import AuthConfig
+    from oneberth.config import Config
 
 _log = logging.getLogger("neorc")
 
@@ -85,80 +88,59 @@ def build_parser() -> argparse.ArgumentParser:
     manager = commands.add_parser("manager", help="run the manager service")
     manager_commands = manager.add_subparsers(dest="subcommand", required=True)
     manager_start = manager_commands.add_parser("start", help="serve the manager")
-    manager_start.add_argument("--host", default=DEFAULT_HOST)
-    manager_start.add_argument("--port", type=int, default=DEFAULT_PORT)
     manager_start.add_argument(
+        "--host",
+        default=None,
+        help=f"{DEFAULT_HOST} by default; 127.0.0.1 with --local, which takes a "
+        "loopback address alone",
+    )
+    manager_start.add_argument("--port", type=int, default=DEFAULT_PORT)
+    database = manager_start.add_mutually_exclusive_group()
+    database.add_argument(
         "--database-url",
         default=None,
-        help="defaults to $NEORC_DATABASE_URL",
+        help="a PostgreSQL database; defaults to $NEORC_DATABASE_URL",
+    )
+    database.add_argument(
+        "--database-file",
+        type=Path,
+        default=None,
+        help="a SQLite file instead, created if it is not there; oneberth.db, "
+        "the store of sign-ins and tokens, is created beside it. One manager "
+        "process serves a file: another one's long polls would not be woken",
     )
     manager_start.add_argument(
         "--create-schema",
         action="store_true",
-        help="create the tables at startup if they are not there yet",
+        help="create the tables at startup if they are not there yet, oneberth's "
+        "included",
     )
     manager_start.add_argument(
         "--no-ui",
         action="store_true",
         help="serve the API alone, without the web UI at /ui/",
     )
-    manager_start.add_argument(
-        "--no-auth",
-        action="store_true",
-        help="serve anyone who reaches the manager, with no API token: "
-        "for trying it on a machine nobody else reaches",
-    )
-    manager_start.add_argument(
-        "--auth-config",
+    signing_in = manager_start.add_mutually_exclusive_group()
+    signing_in.add_argument(
+        "--config",
         type=Path,
         default=None,
-        help="sign-in to the UI: providers and who may sign in; defaults to "
-        f"${AUTH_CONFIG_ENV}",
+        help="the deployment's sign-in configuration, oneberth's TOML file, with "
+        f"the manager's public URL under [apps.neorc]; defaults to ${CONFIG_ENV}",
     )
-    manager_start.add_argument(
-        "--ssl-certfile", default=None, help="serve HTTPS with this certificate"
-    )
-    manager_start.add_argument(
-        "--ssl-keyfile", default=None, help="and this private key"
+    signing_in.add_argument(
+        "--local",
+        action="store_true",
+        help="oneberth's local mode, for one person at this machine: no sign-in "
+        "configuration; it prints the address that signs that person in",
     )
     manager_start.set_defaults(handler=manager_start_command)
 
-    tokens = commands.add_parser(
-        "tokens", help="manage the API tokens a manager accepts, on its database"
-    )
-    tokens_commands = tokens.add_subparsers(dest="subcommand", required=True)
-    tokens_create = tokens_commands.add_parser(
-        "create", help="create a token and print its secret, which is shown once"
-    )
-    tokens_create.add_argument("name", help="letters, digits, _, . and -")
-    tokens_create.add_argument(
-        "--role",
-        required=True,
-        choices=ROLES,
-        help="what the token is for; each role may do a fixed set of things",
-    )
-    tokens_create.add_argument(
-        "--queue",
-        default=None,
-        help="the queue a worker or responder token is bound to",
-    )
-    tokens_create.add_argument(
-        "--expires-days",
-        type=float,
-        default=None,
-        help="stop accepting it after this many days; never by default",
-    )
-    _database_url_option(tokens_create)
-    tokens_create.set_defaults(handler=tokens_create_command)
-    tokens_list = tokens_commands.add_parser("list", help="list the tokens")
-    _database_url_option(tokens_list)
-    tokens_list.set_defaults(handler=tokens_list_command)
-    tokens_revoke = tokens_commands.add_parser(
-        "revoke", help="stop accepting a token, at once"
-    )
-    tokens_revoke.add_argument("name")
-    _database_url_option(tokens_revoke)
-    tokens_revoke.set_defaults(handler=tokens_revoke_command)
+    from oneberth.admin import add_admin_commands
+
+    from neorc._admin import NeorcConnector
+
+    add_admin_commands(commands, NeorcConnector())
 
     queues = commands.add_parser(
         "queues", help="declare what kind the queues are, on the manager's database"
@@ -176,19 +158,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="worker: workers receive its tasks; external: its tasks wait for a "
         "responder to complete them",
     )
-    _database_url_option(queues_declare)
+    add_database_options(queues_declare)
     queues_declare.set_defaults(handler=queues_declare_command)
     queues_list = queues_commands.add_parser("list", help="list the declared queues")
-    _database_url_option(queues_list)
+    add_database_options(queues_list)
     queues_list.set_defaults(handler=queues_list_command)
-
-    sessions = commands.add_parser(
-        "sessions", help="manage the sessions of people signed in to the UI"
-    )
-    sessions_commands = sessions.add_subparsers(dest="subcommand", required=True)
-    sessions_clear = sessions_commands.add_parser("clear", help="sign everyone out")
-    _database_url_option(sessions_clear)
-    sessions_clear.set_defaults(handler=sessions_clear_command)
 
     flows = commands.add_parser("flows", help="manage the flows a manager holds")
     flows_commands = flows.add_subparsers(dest="subcommand", required=True)
@@ -257,14 +231,6 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _database_url_option(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--database-url",
-        default=None,
-        help=f"the manager's database; defaults to ${DATABASE_URL_ENV}",
-    )
-
-
 def _manager_address_option(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--manager-address",
@@ -286,9 +252,9 @@ def _client_options() -> dict[str, object]:
 
 def _refused(exc: AccessError) -> str:
     where = (
-        f"the API token in ${API_TOKEN_ENV}"
+        f"the token in ${API_TOKEN_ENV}"
         if os.environ.get(API_TOKEN_ENV)
-        else f"a request with no API token (set ${API_TOKEN_ENV})"
+        else f"a request with no token (set ${API_TOKEN_ENV})"
     )
     return f"the manager refused {where}: {exc}"
 
@@ -393,243 +359,168 @@ def _exit_now(exit_code: int) -> None:
 
 
 def manager_start_command(args: argparse.Namespace) -> int:
-    """Run the manager service. Needs the ``manager`` extra."""
-    with _needs("manager", "postgres"):
-        from neorc.manager import run
-        from neorc.postgres._driver import CONNECTION_ERRORS
+    """Compose standalone neorc and serve it. Needs the ``manager`` extra."""
+    database_errors: tuple[type[BaseException], ...]
+    if args.database_file is not None:
+        import sqlite3
 
-    if (args.ssl_certfile is None) != (args.ssl_keyfile is None):
-        raise SystemExit(
-            "neorc manager start: pass both --ssl-certfile and --ssl-keyfile"
-        )
-    if args.ssl_certfile is not None:
-        # Loaded here once, so a missing, unreadable or malformed file is said
-        # to be that, not left to fail inside the server's startup.
-        try:
-            ssl.create_default_context(ssl.Purpose.CLIENT_AUTH).load_cert_chain(
-                args.ssl_certfile, args.ssl_keyfile
-            )
-        except (OSError, ssl.SSLError) as exc:
-            raise SystemExit(
-                "neorc manager start: cannot serve HTTPS with "
-                f"{args.ssl_certfile!r} and {args.ssl_keyfile!r}: {exc}"
-            ) from None
-    auth_config = _auth_config(args)
-    if args.no_auth:
-        where = f"{args.host}:{args.port}"
-        if args.host == DEFAULT_HOST:
-            where += ", every interface of this host"
-        _log.warning(
-            "no authentication: anyone who reaches %s can do everything, and so "
-            "can any web page this machine's browser opens, through DNS rebinding",
-            where,
-        )
+        with _needs("manager"):
+            from neorc.manager import build_app, run
+        database_errors = (sqlite3.Error,)
+    else:
+        with _needs("manager", "postgres"):
+            from neorc.manager import build_app, run
+            from neorc.postgres._driver import CONNECTION_ERRORS
+        database_errors = CONNECTION_ERRORS
+
+    local = args.local
+    host = args.host or (LOCAL_HOST if local else DEFAULT_HOST)
+    config = _local_config(host, args.port) if local else _config(args)
     try:
-        run(
-            args.host,
-            args.port,
-            auth=not args.no_auth,
-            auth_config=auth_config,
-            database_url=args.database_url,
+        if args.database_file is not None:
+            # Checked again when the backend starts; here, so the command can
+            # say so and exit rather than leave it to the server's startup.
+            from neorc.sqlite import check_database
+
+            check_database(args.database_file)
+        app = build_app(
+            args.database_url,
+            config=config,
             create_schema=args.create_schema,
+            database_file=args.database_file,
             ui=not args.no_ui,
-            ssl_certfile=args.ssl_certfile,
-            ssl_keyfile=args.ssl_keyfile,
+            local=local,
         )
     except FileNotFoundError as exc:  # no built UI to serve: say how to get one
         raise SystemExit(f"neorc manager start: {exc}, or pass --no-ui") from None
-    except RuntimeError as exc:  # no database, or no credential tables in it
+    except (RuntimeError, ValueError) as exc:  # no database, a wrong file or config
         raise SystemExit(f"neorc manager start: {exc}") from None
-    except CONNECTION_ERRORS as exc:  # checked before serving
+    except database_errors as exc:
         raise SystemExit(
             f"neorc manager start: cannot reach the database: {exc}"
         ) from None
+    run(app, host, args.port)
     return 0
 
 
-def _auth_config(args: argparse.Namespace) -> AuthConfig | None:
-    """The sign-in configuration named, read and checked; ``None`` if none is."""
-    path: Path | None = args.auth_config
-    if path is None and os.environ.get(AUTH_CONFIG_ENV):
-        path = Path(os.environ[AUTH_CONFIG_ENV])
-    if path is None:
-        if not args.no_auth:
-            _log.warning(
-                "no --auth-config: API tokens only, and nobody can sign in to the UI"
-            )
-        return None
-    if args.no_auth:
-        raise SystemExit(
-            "neorc manager start: --no-auth asks for no identity, so there is no "
-            f"signing in to configure: drop --auth-config or ${AUTH_CONFIG_ENV}"
-        )
+LOCAL_HOST = "127.0.0.1"
+"""Where the local mode listens by default: its one person is at this machine."""
+
+
+def _local_config(host: str, port: int) -> Config:
+    """The configuration of oneberth's local mode: the manager on a loopback address."""
     with _needs("manager"):
-        from neorc.auth import AuthConfigError, load_auth_config
+        from oneberth.config import ConfigError, local_config
     try:
-        config = load_auth_config(path)
-    except AuthConfigError as exc:
+        return local_config("neorc", port=port, host=host)
+    except ConfigError as exc:
         raise SystemExit(
-            f"neorc manager start: {path} cannot be used:\n"
+            "neorc manager start: --local listens on a loopback address alone: "
+            + "; ".join(exc.problems)
+        ) from None
+
+
+def _config(args: argparse.Namespace) -> Config:
+    """The sign-in configuration named, read and checked."""
+    with _needs("manager"):
+        from oneberth.config import ConfigError, load_config
+    path: Path | None = args.config
+    if path is None and not os.environ.get(CONFIG_ENV):
+        raise SystemExit(
+            "neorc manager start: no sign-in configuration: pass --config or set "
+            f"${CONFIG_ENV} to oneberth's TOML file, which names the manager's "
+            "public URL under [apps.neorc]; or pass --local, for one person at "
+            "this machine"
+        )
+    try:
+        config = load_config(path)
+    except ConfigError as exc:
+        raise SystemExit(
+            "neorc manager start: the sign-in configuration cannot be used:\n"
             + "\n".join(f"  {problem}" for problem in exc.problems)
         ) from None
-    except OSError as exc:
-        raise SystemExit(f"neorc manager start: cannot read {path}: {exc}") from None
-    if not config.secure:
+    if "neorc" not in config.apps:
+        raise SystemExit(
+            "neorc manager start: the sign-in configuration names no public URL "
+            "for the manager: add [apps.neorc] with public_url"
+        )
+    if not config.apps["neorc"].secure:
         _log.warning(
             "the public URL %s is http: browsers share its cookies with every other "
             "server on this machine, so sign in here only where those are trusted",
-            config.public_url,
+            config.apps["neorc"].public_url,
         )
     return config
 
 
-def tokens_create_command(args: argparse.Namespace) -> int:
-    """Create a token; its secret alone on stdout, what it is on stderr."""
-    from neorc_core import Access
-
-    expires = None if args.expires_days is None else args.expires_days * 86400
-
-    async def create(access: Access) -> int:
-        try:
-            secret, token = await access.create_token(
-                args.name, Role(args.role), queue=args.queue, expires_seconds=expires
-            )
-        except InvalidValueError as exc:
-            raise SystemExit(f"cannot create the token: {exc}") from None
-        until = token.expires_at.isoformat() if token.expires_at else "never"
-        print(
-            f"created {_described(token)} token {token.name!r}, expiring {until}; "
-            "this is the only time its secret is shown:",
-            file=sys.stderr,
-        )
-        print(secret)
-        return 0
-
-    return _on_credentials(args, create)
-
-
-def tokens_list_command(args: argparse.Namespace) -> int:
-    """One line per token: name, role, created, expiry. Never a secret."""
-    from datetime import UTC, datetime
-
-    from neorc_core import Access
-
-    async def listing(access: Access) -> int:
-        now = datetime.now(UTC)
-        for token in await access.tokens():
-            if token.expires_at is None:
-                expiry = "never expires"
-            elif token.expires_at <= now:
-                expiry = f"expired {token.expires_at.isoformat()}"
-            else:
-                expiry = f"expires {token.expires_at.isoformat()}"
-            print(
-                f"{token.name}\t{_described(token)}"
-                f"\tcreated {token.created_at.isoformat()}\t{expiry}"
-            )
-        return 0
-
-    return _on_credentials(args, listing)
-
-
-def _described(token: ApiToken) -> str:
-    """A token's role, with the queue a worker or responder token is bound to."""
-    if token.queue is None:
-        return token.role.value
-    return f"{token.role.value} on queue {token.queue!r}"
-
-
-def tokens_revoke_command(args: argparse.Namespace) -> int:
-    """Revoke a token by name; exits 1 if there is none."""
-    from neorc_core import Access
-
-    async def revoke(access: Access) -> int:
-        if await access.revoke_token(args.name):
-            print(f"revoked token {args.name!r}")
-            return 0
-        print(f"no token called {args.name!r}", file=sys.stderr)
-        return 1
-
-    return _on_credentials(args, revoke)
-
-
 def queues_declare_command(args: argparse.Namespace) -> int:
     """Declare a queue's kind; exits 1, saying why, when it is refused."""
-    from neorc_core import Access
+    from neorc_core import QueueDeclarations
 
-    async def declare(access: Access) -> int:
+    async def declare(declarations: QueueDeclarations) -> int:
         try:
-            await access.declare_queue(args.name, QueueKind(args.kind))
+            await declarations.declare(args.name, QueueKind(args.kind))
         except InvalidValueError as exc:
             raise SystemExit(f"cannot declare the queue: {exc}") from None
         print(f"declared queue {args.name!r} as {args.kind}")
         return 0
 
-    return _on_credentials(args, declare)
+    return _on_queues(args, declare)
 
 
 def queues_list_command(args: argparse.Namespace) -> int:
     """One line per declared queue: name, kind."""
-    from neorc_core import Access
+    from neorc_core import QueueDeclarations
 
-    async def listing(access: Access) -> int:
-        for queue in await access.queues():
+    async def listing(declarations: QueueDeclarations) -> int:
+        for queue in await declarations.queues():
             print(f"{queue.name}\t{queue.kind.value}")
         return 0
 
-    return _on_credentials(args, listing)
+    return _on_queues(args, listing)
 
 
-def sessions_clear_command(args: argparse.Namespace) -> int:
-    """End every session: everyone signed in signs in again."""
-    from neorc_core import Access
+def _on_queues(args: argparse.Namespace, act: Callable[..., Awaitable[int]]) -> int:
+    """Run ``act`` on the queue declarations of the manager's database.
 
-    async def clear(access: Access) -> int:
-        count = await access.end_sessions()
-        print(f"ended {count} session{'' if count == 1 else 's'}")
-        return 0
-
-    return _on_credentials(args, clear)
-
-
-def _on_credentials(
-    args: argparse.Namespace, act: Callable[..., Awaitable[int]]
-) -> int:
-    """Run ``act`` on an ``Access`` over the manager's database.
-
-    The tables of credentials and of queue declarations must be there already:
-    these commands create none, so a mistyped database URL is not given a set
-    of empty tables.
+    The tokens bound to a queue are oneberth's, in its store beside the
+    manager's records: the schema ``oneberth`` of the PostgreSQL database, or
+    ``oneberth.db`` beside the SQLite file. These commands create no tables,
+    so a mistyped database is not given a set of empty ones.
     """
-    with _needs("postgres"):
-        from neorc.postgres import PostgresCredentialStore, PostgresStore
-        from neorc.postgres._driver import CONNECTION_ERRORS
-        from neorc.postgres._schema import (
-            CREDENTIAL_TABLES,
-            QUEUES_TABLE,
-            MissingTablesError,
-            ensure_tables,
-        )
+    import sqlite3
 
-    from neorc_core import Access
+    from oneberth.admin import ConnectError, StoreAdmin
+    from oneberth.identity import IdentityError
 
-    dsn: str | None = args.database_url or os.environ.get(DATABASE_URL_ENV)
-    if not dsn:
-        raise SystemExit(f"no database: pass --database-url or set ${DATABASE_URL_ENV}")
+    from neorc._admin import AdminTokenGrants, opened_stores
+    from neorc._roles import registry
+    from neorc.sqlite import SchemaVersionError
+    from neorc_core import QueueDeclarations
+
+    database_errors: tuple[type[BaseException], ...] = (sqlite3.Error,)
+    if args.database_file is None:
+        with _needs("postgres"):
+            from neorc.postgres._driver import CONNECTION_ERRORS
+            from neorc.postgres._schema import QUEUES_TABLE, ensure_tables
+        database_errors = CONNECTION_ERRORS
 
     async def main() -> int:
-        await ensure_tables(dsn, (*CREDENTIAL_TABLES, QUEUES_TABLE))
-        async with (
-            PostgresCredentialStore(dsn, max_size=1) as credentials,
-            PostgresStore(dsn, max_size=1) as store,
-        ):
-            return await act(Access(credentials, queues=store))
+        if args.database_file is None:
+            dsn = args.database_url or os.environ.get(DATABASE_URL_ENV)
+            if dsn:
+                await ensure_tables(dsn, (QUEUES_TABLE,))
+        async with opened_stores(args) as (identity, store):
+            grants = AdminTokenGrants(StoreAdmin(identity, registry()))
+            return await act(QueueDeclarations(store, grants))
 
     try:
         return asyncio.run(main())
-    except MissingTablesError as exc:
+    except (ConnectError, IdentityError, SchemaVersionError) as exc:
         raise SystemExit(str(exc)) from None
-    except CONNECTION_ERRORS as exc:
+    except RuntimeError as exc:  # the tables are missing: the message says how
+        raise SystemExit(str(exc)) from None
+    except database_errors as exc:
         raise SystemExit(f"cannot reach the database: {exc}") from None
 
 

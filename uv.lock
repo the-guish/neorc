@@ -732,6 +732,7 @@ name = "neorc"
 source = { editable = "python/neorc" }
 dependencies = [
     { name = "neorc-core" },
+    { name = "oneberth" },
 ]
 
 [package.optional-dependencies]
@@ -739,24 +740,23 @@ http = [
     { name = "httpx" },
 ]
 manager = [
-    { name = "fastapi" },
-    { name = "httpx" },
     { name = "neorc-ui" },
-    { name = "uvicorn" },
+    { name = "oneberth", extra = ["web"] },
 ]
 postgres = [
     { name = "asyncpg" },
+    { name = "oneberth", extra = ["postgres"] },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "asyncpg", marker = "extra == 'postgres'", specifier = ">=0.32.0" },
-    { name = "fastapi", marker = "extra == 'manager'", specifier = ">=0.120" },
     { name = "httpx", marker = "extra == 'http'", specifier = ">=0.28" },
-    { name = "httpx", marker = "extra == 'manager'", specifier = ">=0.28" },
     { name = "neorc-core", editable = "python/neorc-core" },
     { name = "neorc-ui", marker = "extra == 'manager'", editable = "python/neorc-ui" },
-    { name = "uvicorn", marker = "extra == 'manager'", specifier = ">=0.38" },
+    { name = "oneberth", git = "https://github.com/the-guish/oneberth?subdirectory=python%2Foneberth&rev=d8693a66f5ca3e78ab085d6e4bc77ff15126c764" },
+    { name = "oneberth", extras = ["postgres"], marker = "extra == 'postgres'", git = "https://github.com/the-guish/oneberth?subdirectory=python%2Foneberth&rev=d8693a66f5ca3e78ab085d6e4bc77ff15126c764" },
+    { name = "oneberth", extras = ["web"], marker = "extra == 'manager'", git = "https://github.com/the-guish/oneberth?subdirectory=python%2Foneberth&rev=d8693a66f5ca3e78ab085d6e4bc77ff15126c764" },
 ]
 provides-extras = ["http", "manager", "postgres"]
 
@@ -773,6 +773,22 @@ requires-dist = [{ name = "pyyaml", specifier = ">=6.0" }]
 [[package]]
 name = "neorc-ui"
 source = { editable = "python/neorc-ui" }
+
+[[package]]
+name = "oneberth"
+version = "0.1.dev5+gd8693a66f"
+source = { git = "https://github.com/the-guish/oneberth?subdirectory=python%2Foneberth&rev=d8693a66f5ca3e78ab085d6e4bc77ff15126c764#d8693a66f5ca3e78ab085d6e4bc77ff15126c764" }
+
+[package.optional-dependencies]
+postgres = [
+    { name = "asyncpg" },
+]
+web = [
+    { name = "fastapi" },
+    { name = "httpx" },
+    { name = "starlette" },
+    { name = "uvicorn" },
+]
 
 [[package]]
 name = "packaging"

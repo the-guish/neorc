@@ -52,6 +52,25 @@
         "title": "DeliveryResponse",
         "type": "object"
       },
+      "ErrorBody": {
+        "description": "Every refusal, as the OpenAPI documents describe it.",
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "error": {
+            "title": "Error",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error",
+          "detail"
+        ],
+        "title": "ErrorBody",
+        "type": "object"
+      },
       "ErrorResponse": {
         "description": "What a refused request answers, whatever its status; see ``neorc._errors``.\n\n``error`` names the core exception, so a client raises the same one;\n``problems`` lists each fault of an invalid flow set.",
         "properties": {
@@ -247,68 +266,6 @@
         "title": "PendingTasksResponse",
         "type": "object"
       },
-      "PrincipalResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "email": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Email"
-          },
-          "kind": {
-            "title": "Kind",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "provider": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Provider"
-          }
-        },
-        "required": [
-          "kind",
-          "name",
-          "email",
-          "provider"
-        ],
-        "title": "PrincipalResponse",
-        "type": "object"
-      },
-      "ProviderResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "title": {
-            "title": "Title",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "title"
-        ],
-        "title": "ProviderResponse",
-        "type": "object"
-      },
       "QueueKind": {
         "description": "Who takes the tasks of a queue.",
         "enum": [
@@ -487,6 +444,16 @@
             "title": "Root Id",
             "type": "string"
           },
+          "started_by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StarterResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "status": {
             "$ref": "#/components/schemas/RunStatus"
           },
@@ -507,7 +474,8 @@
           "output",
           "reason",
           "created_at",
-          "finished_at"
+          "finished_at",
+          "started_by"
         ],
         "title": "RunResponse",
         "type": "object"
@@ -546,31 +514,26 @@
         "title": "RunStatus",
         "type": "string"
       },
-      "SessionResponse": {
+      "StarterKind": {
+        "description": "What started a run: a person, or a program with a token of its own.",
+        "enum": [
+          "user",
+          "service"
+        ],
+        "title": "StarterKind",
+        "type": "string"
+      },
+      "StarterResponse": {
         "additionalProperties": false,
         "properties": {
-          "authentication": {
-            "title": "Authentication",
-            "type": "boolean"
+          "id": {
+            "title": "Id",
+            "type": "string"
           },
-          "principal": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PrincipalResponse"
-              },
-              {
-                "type": "null"
-              }
-            ]
+          "kind": {
+            "$ref": "#/components/schemas/StarterKind"
           },
-          "providers": {
-            "items": {
-              "$ref": "#/components/schemas/ProviderResponse"
-            },
-            "title": "Providers",
-            "type": "array"
-          },
-          "public_url": {
+          "name": {
             "anyOf": [
               {
                 "type": "string"
@@ -579,16 +542,15 @@
                 "type": "null"
               }
             ],
-            "title": "Public Url"
+            "title": "Name"
           }
         },
         "required": [
-          "authentication",
-          "public_url",
-          "providers",
-          "principal"
+          "kind",
+          "id",
+          "name"
         ],
-        "title": "SessionResponse",
+        "title": "StarterResponse",
         "type": "object"
       },
       "StepResponse": {
@@ -833,13 +795,6 @@
         "title": "UploadResponse",
         "type": "object"
       }
-    },
-    "securitySchemes": {
-      "HTTPBearer": {
-        "description": "An API token, from `neorc tokens create`.",
-        "scheme": "bearer",
-        "type": "http"
-      }
     }
   },
   "info": {
@@ -848,47 +803,10 @@
   },
   "openapi": "3.1.0",
   "paths": {
-    "/auth/logout": {
-      "post": {
-        "description": "End the session, if any, and clear its cookie.",
-        "operationId": "logout_auth_logout_post",
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Logout",
-        "tags": [
-          "auth"
-        ]
-      }
-    },
-    "/auth/session": {
-      "get": {
-        "description": "Whether authentication is on, the providers to sign in with, and who is in.",
-        "operationId": "session_auth_session_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SessionResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Session",
-        "tags": [
-          "auth"
-        ]
-      }
-    },
-    "/events": {
+    "/neorc/events": {
       "get": {
         "description": "Events after a sequence, long-polled; an empty list when the wait ends.",
-        "operationId": "wait_for_events_events_get",
+        "operationId": "wait_for_events_neorc_events_get",
         "parameters": [
           {
             "in": "query",
@@ -1011,20 +929,25 @@
               }
             },
             "description": "The exception the manager raised"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "A refusal"
           }
         },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "summary": "Wait For Events"
       }
     },
-    "/events/latest": {
+    "/neorc/events/latest": {
       "get": {
         "description": "The latest event's sequence, or 0: a reader wanting only news starts after it.",
-        "operationId": "latest_event_events_latest_get",
+        "operationId": "latest_event_neorc_events_latest_get",
         "responses": {
           "200": {
             "content": {
@@ -1105,20 +1028,25 @@
               }
             },
             "description": "The exception the manager raised"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "A refusal"
           }
         },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "summary": "Latest Event"
       }
     },
-    "/flows": {
+    "/neorc/flows": {
       "get": {
         "description": "The latest version of every flow, by name.",
-        "operationId": "list_flows_flows_get",
+        "operationId": "list_flows_neorc_flows_get",
         "responses": {
           "200": {
             "content": {
@@ -1199,18 +1127,23 @@
               }
             },
             "description": "The exception the manager raised"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "A refusal"
           }
         },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "summary": "List Flows"
       },
       "post": {
         "description": "Upload flows deployed together; per flow, whether a version was stored.",
-        "operationId": "upload_flows_flows_post",
+        "operationId": "upload_flows_neorc_flows_post",
         "responses": {
           "200": {
             "content": {
@@ -1291,20 +1224,25 @@
               }
             },
             "description": "The exception the manager raised"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "A refusal"
           }
         },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "summary": "Upload Flows"
       }
     },
-    "/flows/{name}": {
+    "/neorc/flows/{name}": {
       "get": {
         "description": "A flow's latest version, with its content as uploaded.",
-        "operationId": "get_latest_flow_flows__name__get",
+        "operationId": "get_latest_flow_neorc_flows__name__get",
         "parameters": [
           {
             "in": "path",
@@ -1396,20 +1334,25 @@
               }
             },
             "description": "The exception the manager raised"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "A refusal"
           }
         },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "summary": "Get Latest Flow"
       }
     },
-    "/flows/{name}/runs": {
+    "/neorc/flows/{name}/runs": {
       "post": {
-        "description": "Start a run of the flow's latest version.",
-        "operationId": "start_run_flows__name__runs_post",
+        "description": "Start a run of the flow's latest version, for whoever asks.",
+        "operationId": "start_run_neorc_flows__name__runs_post",
         "parameters": [
           {
             "in": "path",
@@ -1501,20 +1444,25 @@
               }
             },
             "description": "The exception the manager raised"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "A refusal"
           }
         },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "summary": "Start Run"
       }
     },
-    "/flows/{name}/versions": {
+    "/neorc/flows/{name}/versions": {
       "get": {
         "description": "Every stored version of a flow, newest first.",
-        "operationId": "flow_versions_flows__name__versions_get",
+        "operationId": "flow_versions_neorc_flows__name__versions_get",
         "parameters": [
           {
             "in": "path",
@@ -1606,20 +1554,25 @@
               }
             },
             "description": "The exception the manager raised"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "A refusal"
           }
         },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "summary": "Flow Versions"
       }
     },
-    "/flows/{name}/versions/{version}": {
+    "/neorc/flows/{name}/versions/{version}": {
       "get": {
         "description": "One version of a flow.",
-        "operationId": "get_flow_version_flows__name__versions__version__get",
+        "operationId": "get_flow_version_neorc_flows__name__versions__version__get",
         "parameters": [
           {
             "in": "path",
@@ -1720,43 +1673,25 @@
               }
             },
             "description": "The exception the manager raised"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Flow Version"
-      }
-    },
-    "/health": {
-      "get": {
-        "description": "Liveness, for load balancers and deployment scripts.",
-        "operationId": "health_health_get",
-        "responses": {
-          "200": {
+          },
+          "default": {
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Health Health Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "A refusal"
           }
         },
-        "summary": "Health"
+        "summary": "Get Flow Version"
       }
     },
-    "/queues": {
+    "/neorc/queues": {
       "get": {
         "description": "Every declared queue, by name, with its kind.",
-        "operationId": "list_queues_queues_get",
+        "operationId": "list_queues_neorc_queues_get",
         "responses": {
           "200": {
             "content": {
@@ -1837,20 +1772,25 @@
               }
             },
             "description": "The exception the manager raised"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "A refusal"
           }
         },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "summary": "List Queues"
       }
     },
-    "/queues/{queue}/tasks": {
+    "/neorc/queues/{queue}/tasks": {
       "get": {
         "description": "Every task on a queue in the latest flows, for a worker to check.",
-        "operationId": "task_definitions_queues__queue__tasks_get",
+        "operationId": "task_definitions_neorc_queues__queue__tasks_get",
         "parameters": [
           {
             "in": "path",
@@ -1942,20 +1882,25 @@
               }
             },
             "description": "The exception the manager raised"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "A refusal"
           }
         },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "summary": "Task Definitions"
       }
     },
-    "/queues/{queue}/tasks/pending": {
+    "/neorc/queues/{queue}/tasks/pending": {
       "get": {
         "description": "A queue's pending tasks, oldest first, inputs filled in. Leases nothing.",
-        "operationId": "pending_tasks_queues__queue__tasks_pending_get",
+        "operationId": "pending_tasks_neorc_queues__queue__tasks_pending_get",
         "parameters": [
           {
             "in": "path",
@@ -2059,20 +2004,25 @@
               }
             },
             "description": "The exception the manager raised"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "A refusal"
           }
         },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "summary": "Pending Tasks"
       }
     },
-    "/queues/{queue}/tasks/receive": {
+    "/neorc/queues/{queue}/tasks/receive": {
       "post": {
         "description": "Long-poll for a task on a queue. 204 when the wait ends empty.",
-        "operationId": "receive_task_queues__queue__tasks_receive_post",
+        "operationId": "receive_task_neorc_queues__queue__tasks_receive_post",
         "parameters": [
           {
             "in": "path",
@@ -2195,20 +2145,25 @@
               }
             },
             "description": "The exception the manager raised"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "A refusal"
           }
         },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "summary": "Receive Task"
       }
     },
-    "/queues/{queue}/tasks/recent": {
+    "/neorc/queues/{queue}/tasks/recent": {
       "get": {
         "description": "A queue's tasks that changed since ``since``, 24 hours ago when not given.\n\nIn any status, the task published last first; ``status`` and ``flow`` keep\nonly the tasks in that status and of that flow.",
-        "operationId": "queue_tasks_queues__queue__tasks_recent_get",
+        "operationId": "queue_tasks_neorc_queues__queue__tasks_recent_get",
         "parameters": [
           {
             "in": "path",
@@ -2361,20 +2316,25 @@
               }
             },
             "description": "The exception the manager raised"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "A refusal"
           }
         },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "summary": "Queue Tasks"
       }
     },
-    "/runs": {
+    "/neorc/runs": {
       "get": {
         "description": "A page of runs, newest first; ``before`` is the last run of the previous page.",
-        "operationId": "list_runs_runs_get",
+        "operationId": "list_runs_neorc_runs_get",
         "parameters": [
           {
             "in": "query",
@@ -2528,20 +2488,25 @@
               }
             },
             "description": "The exception the manager raised"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "A refusal"
           }
         },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "summary": "List Runs"
       }
     },
-    "/runs/{run_id}": {
+    "/neorc/runs/{run_id}": {
       "get": {
         "description": "A run, for a status query.",
-        "operationId": "get_run_runs__run_id__get",
+        "operationId": "get_run_neorc_runs__run_id__get",
         "parameters": [
           {
             "in": "path",
@@ -2634,20 +2599,25 @@
               }
             },
             "description": "The exception the manager raised"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "A refusal"
           }
         },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "summary": "Get Run"
       }
     },
-    "/runs/{run_id}/cancel": {
+    "/neorc/runs/{run_id}/cancel": {
       "post": {
         "description": "Cancel a run by hand, and with it every active run in its tree.",
-        "operationId": "cancel_run_runs__run_id__cancel_post",
+        "operationId": "cancel_run_neorc_runs__run_id__cancel_post",
         "parameters": [
           {
             "in": "path",
@@ -2733,20 +2703,25 @@
               }
             },
             "description": "The exception the manager raised"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "A refusal"
           }
         },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "summary": "Cancel Run"
       }
     },
-    "/runs/{run_id}/fail": {
+    "/neorc/runs/{run_id}/fail": {
       "post": {
         "description": "Fail a run and the rest of its tree.",
-        "operationId": "fail_run_runs__run_id__fail_post",
+        "operationId": "fail_run_neorc_runs__run_id__fail_post",
         "parameters": [
           {
             "in": "path",
@@ -2832,20 +2807,25 @@
               }
             },
             "description": "The exception the manager raised"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "A refusal"
           }
         },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "summary": "Fail Run"
       }
     },
-    "/runs/{run_id}/state": {
+    "/neorc/runs/{run_id}/state": {
       "get": {
         "description": "What a run's tasks and sub-flow runs have produced so far.",
-        "operationId": "run_state_runs__run_id__state_get",
+        "operationId": "run_state_neorc_runs__run_id__state_get",
         "parameters": [
           {
             "in": "path",
@@ -2938,20 +2918,25 @@
               }
             },
             "description": "The exception the manager raised"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "A refusal"
           }
         },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "summary": "Run State"
       }
     },
-    "/runs/{run_id}/sub-runs": {
+    "/neorc/runs/{run_id}/sub-runs": {
       "get": {
         "description": "A run's direct sub-flow runs, in the order they started.",
-        "operationId": "sub_runs_runs__run_id__sub_runs_get",
+        "operationId": "sub_runs_neorc_runs__run_id__sub_runs_get",
         "parameters": [
           {
             "in": "path",
@@ -3044,18 +3029,23 @@
               }
             },
             "description": "The exception the manager raised"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "A refusal"
           }
         },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "summary": "Sub Runs"
       },
       "post": {
         "description": "Start the sub-flow run at an address in a run.",
-        "operationId": "start_sub_run_runs__run_id__sub_runs_post",
+        "operationId": "start_sub_run_neorc_runs__run_id__sub_runs_post",
         "parameters": [
           {
             "in": "path",
@@ -3148,20 +3138,25 @@
               }
             },
             "description": "The exception the manager raised"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "A refusal"
           }
         },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "summary": "Start Sub Run"
       }
     },
-    "/runs/{run_id}/succeed": {
+    "/neorc/runs/{run_id}/succeed": {
       "post": {
         "description": "Mark a run succeeded, with the value of its output reference.",
-        "operationId": "succeed_run_runs__run_id__succeed_post",
+        "operationId": "succeed_run_neorc_runs__run_id__succeed_post",
         "parameters": [
           {
             "in": "path",
@@ -3254,20 +3249,25 @@
               }
             },
             "description": "The exception the manager raised"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "A refusal"
           }
         },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "summary": "Succeed Run"
       }
     },
-    "/runs/{run_id}/tasks": {
+    "/neorc/runs/{run_id}/tasks": {
       "get": {
         "description": "A run's tasks, in the order they were published.",
-        "operationId": "run_tasks_runs__run_id__tasks_get",
+        "operationId": "run_tasks_neorc_runs__run_id__tasks_get",
         "parameters": [
           {
             "in": "path",
@@ -3360,18 +3360,23 @@
               }
             },
             "description": "The exception the manager raised"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "A refusal"
           }
         },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "summary": "Run Tasks"
       },
       "post": {
         "description": "Publish the task at an address in a run.",
-        "operationId": "publish_task_runs__run_id__tasks_post",
+        "operationId": "publish_task_neorc_runs__run_id__tasks_post",
         "parameters": [
           {
             "in": "path",
@@ -3464,20 +3469,25 @@
               }
             },
             "description": "The exception the manager raised"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "A refusal"
           }
         },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "summary": "Publish Task"
       }
     },
-    "/tasks/{task_id}": {
+    "/neorc/tasks/{task_id}": {
       "get": {
         "description": "A task, for a status query.",
-        "operationId": "get_task_tasks__task_id__get",
+        "operationId": "get_task_neorc_tasks__task_id__get",
         "parameters": [
           {
             "in": "path",
@@ -3570,20 +3580,25 @@
               }
             },
             "description": "The exception the manager raised"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "A refusal"
           }
         },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "summary": "Get Task"
       }
     },
-    "/tasks/{task_id}/claim": {
+    "/neorc/tasks/{task_id}/claim": {
       "post": {
         "description": "A worker claims a task it received; 409 if its run is no longer active.",
-        "operationId": "claim_task_tasks__task_id__claim_post",
+        "operationId": "claim_task_neorc_tasks__task_id__claim_post",
         "parameters": [
           {
             "in": "path",
@@ -3669,20 +3684,25 @@
               }
             },
             "description": "The exception the manager raised"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "A refusal"
           }
         },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "summary": "Claim Task"
       }
     },
-    "/tasks/{task_id}/complete": {
+    "/neorc/tasks/{task_id}/complete": {
       "post": {
         "description": "End a pending task with a result, or an error; 409 unless it is pending.",
-        "operationId": "complete_task_tasks__task_id__complete_post",
+        "operationId": "complete_task_neorc_tasks__task_id__complete_post",
         "parameters": [
           {
             "in": "path",
@@ -3768,20 +3788,25 @@
               }
             },
             "description": "The exception the manager raised"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "A refusal"
           }
         },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "summary": "Complete Task"
       }
     },
-    "/tasks/{task_id}/finished": {
+    "/neorc/tasks/{task_id}/finished": {
       "post": {
         "description": "A worker's result in its JSON form, or its failure.",
-        "operationId": "report_finished_tasks__task_id__finished_post",
+        "operationId": "report_finished_neorc_tasks__task_id__finished_post",
         "parameters": [
           {
             "in": "path",
@@ -3867,20 +3892,25 @@
               }
             },
             "description": "The exception the manager raised"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "A refusal"
           }
         },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "summary": "Report Finished"
       }
     },
-    "/tasks/{task_id}/heartbeat": {
+    "/neorc/tasks/{task_id}/heartbeat": {
       "post": {
         "description": "A worker keeping the task it holds; when its lease now lapses.",
-        "operationId": "extend_lease_tasks__task_id__heartbeat_post",
+        "operationId": "extend_lease_neorc_tasks__task_id__heartbeat_post",
         "parameters": [
           {
             "in": "path",
@@ -3973,20 +4003,25 @@
               }
             },
             "description": "The exception the manager raised"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "A refusal"
           }
         },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "summary": "Extend Lease"
       }
     },
-    "/tasks/{task_id}/inputs": {
+    "/neorc/tasks/{task_id}/inputs": {
       "get": {
         "description": "A task with its inputs filled in, as a worker would receive it.",
-        "operationId": "task_inputs_tasks__task_id__inputs_get",
+        "operationId": "task_inputs_neorc_tasks__task_id__inputs_get",
         "parameters": [
           {
             "in": "path",
@@ -4079,13 +4114,18 @@
               }
             },
             "description": "The exception the manager raised"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "A refusal"
           }
         },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "summary": "Task Inputs"
       }
     }

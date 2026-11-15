@@ -1,22 +1,27 @@
 # Copyright 2026 The neorc Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Assembling and running the manager process."""
+"""Standalone neorc: the manager's component, composed alone and served.
+
+oneberth composes the backend: the manager's routes under ``/neorc/``, sign-in,
+sessions and tokens under ``/auth``, the web UI under ``/ui/`` and
+``/health``. oneberth's server serves it.
+"""
 
 from __future__ import annotations
 
-import asyncio
 import os
-from collections.abc import AsyncIterator
-from contextlib import AsyncExitStack, asynccontextmanager
+from collections.abc import AsyncIterator, Callable
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from pathlib import Path
 
-import uvicorn
-from fastapi import FastAPI
+from oneberth.config import Config
+from oneberth.identity import IdentityStore
+from oneberth.stores import opened_store
+from oneberth.web import Composition, Listen, compose_app
+from oneberth.web import run as serve_composition
 
-from neorc.auth._config import AuthConfig
-from neorc.manager._app import DEFAULT_LONG_POLL_TIMEOUT, create_app
-from neorc.manager._sign_in import SignIn
-from neorc_core import Access, Manager
+from neorc.manager._component import DEFAULT_LONG_POLL_TIMEOUT, new_manager_webapp
 
 # A manager serves workers on other hosts, so it binds every interface.
 DEFAULT_HOST = "0.0.0.0"
@@ -29,134 +34,86 @@ DATABASE_URL_ENV = "NEORC_DATABASE_URL"
 def build_app(
     database_url: str | None = None,
     *,
-    auth: bool,
-    auth_config: AuthConfig | None = None,
+    config: Config,
     create_schema: bool = False,
+    database_file: str | os.PathLike[str] | None = None,
     long_poll_timeout: float = DEFAULT_LONG_POLL_TIMEOUT,
-    ui: bool = True,
-) -> FastAPI:
-    """Build the application from the environment: store, notifiers, then routes.
+    ui: bool | Path = True,
+    local: bool = False,
+) -> Composition:
+    """Compose standalone neorc: the manager's component, alone.
 
-    Which adapter backs the store is a deployment choice. This one is the
-    reference: Postgres, from ``NEORC_DATABASE_URL``. Nothing above this
-    function names it.
+    ``config`` is the deployment's sign-in configuration, oneberth's TOML file
+    read; it names the manager's public URL under ``[apps.neorc]``. With
+    ``local``, the backend is in oneberth's local mode: one person, the one at
+    the machine, signs in with a ticket, and ``config`` is
+    ``oneberth.config.local_config("neorc", port=...)``.
 
-    Two notification channels: one wakes workers when a task is published,
-    the other wakes a scheduler when an event is recorded. Both are hints sent
-    after the transaction commits; a waiter re-reads the store.
-
-    With ``auth``, every request to the API needs an API token, checked
-    against a credential store on the same database, which the lifespan opens
-    beside the flow store, after the schema step, and closes with it; without
-    ``create_schema``, the lifespan first checks the credential tables exist,
-    and fails with ``RuntimeError`` naming the fix if not. ``auth_config``
-    adds signing in to the UI with its providers, for the people its allow
-    list names. Without ``auth``, anyone who reaches the service may do
-    everything.
+    The manager's records are in PostgreSQL, ``database_url`` or
+    ``NEORC_DATABASE_URL``, and oneberth's store is the schema ``oneberth`` of
+    the same database. With ``create_schema``, both sets of tables are created
+    at the start. With ``database_file``, the records are in that SQLite file,
+    and oneberth's store is ``oneberth.db`` in the same directory; both are
+    created if they are new.
 
     With ``ui``, the web UI from the ``neorc-ui`` distribution is served at
-    ``/ui/``; ``FileNotFoundError`` names the fix if that holds no built UI,
-    as in a checkout that was never built.
+    ``/ui/``, or the built UI in the directory ``ui`` names;
+    ``FileNotFoundError`` names the fix if there is none.
     """
-    from neorc.postgres import (
-        PostgresCredentialStore,
-        PostgresStore,
-        PostgresTaskNotifier,
-    )
-    from neorc.postgres import create_schema as create_postgres_schema
-    from neorc.postgres._notifier import EVENTS_CHANNEL, TASKS_CHANNEL
-    from neorc.postgres._schema import ensure_credential_tables
+    if database_file is not None and database_url is not None:
+        raise ValueError("a manager keeps its data in one database: a file or a URL")
+    store: Callable[[], AbstractAsyncContextManager[IdentityStore]]
+    if database_file is not None:
+        folder = Path(database_file).parent
+        component = new_manager_webapp(
+            database_file=database_file, long_poll_timeout=long_poll_timeout
+        )
 
-    if auth_config is not None and not auth:
-        raise ValueError("sign-in needs authentication on")
-    dsn = database_url or os.environ.get(DATABASE_URL_ENV)
-    if not dsn:
-        raise RuntimeError(f"no database to serve: pass one or set {DATABASE_URL_ENV}")
-    static = None
-    if ui:
+        def store() -> AbstractAsyncContextManager[IdentityStore]:
+            return opened_store(data_dir=folder, setup=True)
+
+    else:
+        dsn = database_url or os.environ.get(DATABASE_URL_ENV)
+        if not dsn:
+            raise RuntimeError(
+                f"no database to serve: pass one or set {DATABASE_URL_ENV}"
+            )
+        component = new_manager_webapp(
+            database_url=dsn,
+            create_schema=create_schema,
+            long_poll_timeout=long_poll_timeout,
+        )
+        store = _postgres_store(dsn, setup=create_schema)
+    interface = None
+    if isinstance(ui, Path):
+        interface = ui
+    elif ui:
         import neorc_ui
 
-        static = neorc_ui.static_dir()
+        interface = neorc_ui.static_dir()
+    return compose_app(
+        [component], config=config, store=store, interface=interface, local=local
+    )
 
-    store = PostgresStore(dsn)
-    tasks = PostgresTaskNotifier(dsn, channel=TASKS_CHANNEL)
-    events = PostgresTaskNotifier(dsn, channel=EVENTS_CHANNEL)
-    credentials = PostgresCredentialStore(dsn) if auth else None
 
+def _postgres_store(
+    dsn: str, *, setup: bool
+) -> Callable[[], AbstractAsyncContextManager[IdentityStore]]:
     @asynccontextmanager
-    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        if create_schema:
-            await create_postgres_schema(dsn)
-        elif credentials is not None:
-            await ensure_credential_tables(dsn)
-        async with AsyncExitStack() as stack:
-            await stack.enter_async_context(store)
-            await stack.enter_async_context(tasks)
-            await stack.enter_async_context(events)
-            if credentials is not None:
-                await stack.enter_async_context(credentials)
-            yield
+    async def opened() -> AsyncIterator[IdentityStore]:
+        async with opened_store(database_url=dsn, setup=setup) as store:
+            yield store
 
-    access = None
-    sign_in = None
-    if credentials is not None:
-        if auth_config is None:
-            access = Access(credentials)
-        else:
-            access = Access(
-                credentials,
-                allow=auth_config.allow,
-                session_seconds=auth_config.session_seconds,
-            )
-            sign_in = SignIn.build(auth_config, access)
-    app = create_app(
-        Manager(store, tasks=tasks, events=events),
-        access=access,
-        sign_in=sign_in,
-        long_poll_timeout=long_poll_timeout,
-        ui=static,
-    )
-    app.router.lifespan_context = lifespan
-    return app
+    return opened
 
 
-def run(
-    host: str = DEFAULT_HOST,
-    port: int = DEFAULT_PORT,
-    *,
-    auth: bool,
-    auth_config: AuthConfig | None = None,
-    database_url: str | None = None,
-    create_schema: bool = False,
-    ui: bool = True,
-    ssl_certfile: str | None = None,
-    ssl_keyfile: str | None = None,
-) -> None:
-    """Serve the manager until interrupted. Blocks.
+def run(app: Composition, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None:
+    """Serve ``app`` until interrupted, on oneberth's server. Blocks.
 
-    With ``ssl_certfile`` and ``ssl_keyfile``, it serves HTTPS. Raises
-    ``RuntimeError`` before serving when there is no database, or when
-    authentication is on and the credential tables are missing.
+    Prints ``ready`` once it serves. Exits 1 when the backend does not start,
+    as when a store is of another version or not set up. In the local mode, a
+    launcher writes the launch secret on standard input; a start by hand has
+    none there, and prints ``open <url>``, the address that signs the person
+    in.
     """
-    app = build_app(
-        database_url,
-        auth=auth,
-        auth_config=auth_config,
-        create_schema=create_schema,
-        ui=ui,
-    )
-    if auth and not create_schema:
-        # Checked again by the lifespan; here, so the command can say so and
-        # exit rather than leave it to uvicorn's startup failure.
-        from neorc.postgres._schema import ensure_credential_tables
-
-        asyncio.run(
-            ensure_credential_tables(database_url or os.environ[DATABASE_URL_ENV])
-        )
-    uvicorn.run(
-        app,
-        host=host,
-        port=port,
-        ssl_certfile=ssl_certfile,
-        ssl_keyfile=ssl_keyfile,
-    )
+    serve_composition(app, Listen(host, port))

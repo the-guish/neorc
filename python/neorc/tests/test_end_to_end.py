@@ -5,9 +5,10 @@
 
 Nothing here is stubbed. The example scenarios of ``neorc_core.testing.examples``
 run here as they run in memory, with a scheduler and one worker per queue on
-the HTTP clients: if this passes, the pieces fit. The manager needs a token, as
-a deployment's does, created as ``neorc tokens create`` creates one: one of each
-role, and a worker token per queue.
+the HTTP clients: if this passes, the pieces fit. The manager is standalone
+neorc, composed by oneberth, and needs a token, as a deployment's does: a
+service token of each role, made as ``neorc tokens create`` makes one, a worker
+token per queue, and a person's own token for the client that starts runs.
 """
 
 from __future__ import annotations
@@ -19,10 +20,22 @@ from pathlib import Path
 
 import httpx
 import pytest
-from conftest import EXAMPLES, Tokens, deployed_example, role_tokens, serve_app
+from conftest import (
+    EXAMPLES,
+    Tokens,
+    declare_queues,
+    deployed_example,
+    free_port,
+    role_tokens,
+    serve_app,
+    service_token,
+)
+from oneberth.identity import InvalidValueError as TokenRefusedError
+from oneberth.web import Composition
+from oneberth.web.testing import config_for
 
 from neorc.manager import build_app
-from neorc_core import Access, InvalidValueError, QueueKind, Role, RunStatus
+from neorc_core import QueueKind, Role, RunStatus
 from neorc_core._values import JsonValue
 from neorc_core.flows import read_flows
 from neorc_core.testing import examples
@@ -31,39 +44,37 @@ pytestmark = pytest.mark.postgres
 
 
 @pytest.fixture
-async def tokens(pg_schema: str) -> Tokens:
-    """Tokens the manager accepts, one for each process's role.
-
-    Their queues are declared first, as an operator declares them: a worker
-    token is bound only to a declared worker queue.
-    """
-    from neorc.postgres import PostgresCredentialStore, PostgresStore, create_schema
-
-    await create_schema(pg_schema)
-    async with (
-        PostgresCredentialStore(pg_schema) as credentials,
-        PostgresStore(pg_schema) as store,
-    ):
-        access = Access(credentials, queues=store)
-        for queue in ("default", "scoring"):
-            await access.declare_queue(queue, QueueKind.WORKER)
-        return await role_tokens(access, ["default", "scoring"])
-
-
-@pytest.fixture
-async def manager_address(
-    pg_schema: str, tokens: Tokens, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> AsyncIterator[str]:
+async def served(
+    pg_schema: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> AsyncIterator[tuple[str, Composition, Tokens]]:
     """A manager service listening on a real port, backed by a real database.
 
-    It serves a stand-in UI: the built one needs Node.js, which Python tests
-    never do.
+    Its queues are declared first, as an operator declares them. It serves a
+    stand-in UI: the built one needs Node.js, which Python tests never do.
     """
     (tmp_path / "index.html").write_text("<!doctype html><title>stand-in</title>")
     monkeypatch.setattr("neorc_ui.STATIC", tmp_path)
-    app = build_app(pg_schema, auth=True, create_schema=True, long_poll_timeout=2)
-    async with serve_app(app) as address:
-        yield address
+    await declare_queues(pg_schema, "default", "scoring")
+    port = free_port()
+    app = build_app(
+        pg_schema,
+        config=config_for("neorc", public_url=f"http://127.0.0.1:{port}"),
+        create_schema=True,
+        long_poll_timeout=2,
+    )
+    async with serve_app(app, port=port) as address:
+        yield address, app, await role_tokens(app, ["default", "scoring"])
+
+
+@pytest.fixture
+def manager_address(served: tuple[str, Composition, Tokens]) -> str:
+    return served[0]
+
+
+@pytest.fixture
+def tokens(served: tuple[str, Composition, Tokens]) -> Tokens:
+    """Tokens the manager accepts, one for each process's role."""
+    return served[2]
 
 
 # The examples, deployed.
@@ -105,10 +116,10 @@ async def test_the_manager_serves_the_ui_and_the_listings(
 ) -> None:
     async with httpx.AsyncClient(base_url=manager_address) as http:
         page = await http.get("/ui/")
-        anonymous = await http.get("/flows")
+        anonymous = await http.get("/neorc/flows")
         headers = {"authorization": f"Bearer {tokens.user}"}
-        flows = await http.get("/flows", headers=headers)
-        runs = await http.get("/runs", headers=headers)
+        flows = await http.get("/neorc/flows", headers=headers)
+        runs = await http.get("/neorc/runs", headers=headers)
 
     assert page.status_code == 200 and "stand-in" in page.text
     assert "content-security-policy" in page.headers
@@ -119,21 +130,18 @@ async def test_the_manager_serves_the_ui_and_the_listings(
 
 @pytest.mark.usefixtures("own_tasks_module")
 async def test_an_external_trigger_starts_runs_and_reads_nothing(
-    pg_schema: str, manager_address: str, tokens: Tokens
+    served: tuple[str, Composition, Tokens], manager_address: str, tokens: Tokens
 ) -> None:
-    from neorc.postgres import PostgresCredentialStore
-
-    async with PostgresCredentialStore(pg_schema) as credentials:
-        trigger, _ = await Access(credentials).create_token(
-            "webhook", Role.EXTERNAL_TRIGGER
-        )
+    trigger = await service_token(served[1], Role.EXTERNAL_TRIGGER)
     headers = {"authorization": f"Bearer {trigger}"}
 
     async with (
         deployed_example(
             manager_address, "hello", ["default"], tokens=tokens
         ) as client,
-        httpx.AsyncClient(base_url=manager_address, headers=headers) as webhook,
+        httpx.AsyncClient(
+            base_url=f"{manager_address}/neorc", headers=headers
+        ) as webhook,
     ):
         await client.upload_flows(read_flows(EXAMPLES / "hello" / "flows"))
         started = await webhook.post("/flows/a/runs", json={"inputs": {}})
@@ -144,8 +152,8 @@ async def test_an_external_trigger_starts_runs_and_reads_nothing(
 
     assert started.status_code == 201
     assert run.status is RunStatus.SUCCEEDED
-    assert (read.status_code, read.json()["error"]) == (403, "PermissionDeniedError")
-    assert "external-trigger token may not runs:read" in read.json()["detail"]
+    assert (read.status_code, read.json()["error"]) == (403, "Forbidden")
+    assert "may not neorc/runs:read" in read.json()["detail"]
     assert cancel.status_code == 403
 
 
@@ -176,21 +184,27 @@ async def test_a_run_waits_for_a_responder_deployed(
 
     The queue is declared and the tokens created as the commands do it, on the
     database. Nothing takes the external task but the responder: not the
-    worker's token, not a person's, and not a second completion.
+    worker's token, not the scheduler's, and not a second completion.
     """
-    from neorc.postgres import PostgresCredentialStore, PostgresStore
+    from argparse import Namespace
 
-    async with (
-        PostgresCredentialStore(pg_schema) as credentials,
-        PostgresStore(pg_schema) as store,
-    ):
-        access = Access(credentials, queues=store)
-        await access.declare_queue("editors", QueueKind.EXTERNAL)
-        responder, _ = await access.create_token(
-            "inbox", Role.RESPONDER, queue="editors"
+    from neorc._admin import NeorcConnector
+    from neorc_core import QueueDeclarations
+    from neorc_core.local import MemoryTokenGrants
+
+    args = Namespace(database_url=pg_schema, database_file=None)
+    async with NeorcConnector().open(args) as admin:
+        from neorc.postgres import PostgresStore
+
+        async with PostgresStore(pg_schema, max_size=1) as store:
+            await QueueDeclarations(store, MemoryTokenGrants()).declare(
+                "editors", QueueKind.EXTERNAL
+            )
+        responder, _ = await admin.create_token(
+            "inbox", Role.RESPONDER, resource="editors"
         )
-        with pytest.raises(InvalidValueError, match="queue 'editors' is external"):
-            await access.create_token("w", Role.WORKER, queue="editors")
+        with pytest.raises(TokenRefusedError, match="queue 'editors' is external"):
+            await admin.create_token("w", Role.WORKER, resource="editors")
 
     def bearer(secret: str) -> dict[str, str]:
         return {"authorization": f"Bearer {secret}", "content-type": "application/json"}
@@ -199,7 +213,7 @@ async def test_a_run_waits_for_a_responder_deployed(
         deployed_example(
             manager_address, "hello", ["default"], tokens=tokens
         ) as client,
-        httpx.AsyncClient(base_url=manager_address) as http,
+        httpx.AsyncClient(base_url=f"{manager_address}/neorc") as http,
     ):
         await client.upload_flows([APPROVAL])
         run = await client.start_run("approval", {})

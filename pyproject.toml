@@ -8,6 +8,8 @@ members = ["python/*"]
 neorc = { workspace = true }
 neorc-core = { workspace = true }
 neorc-ui = { workspace = true }
+# Pinned by commit; uv builds it from that commit. See docs/specs/core.md.
+oneberth = { git = "https://github.com/the-guish/oneberth", rev = "d8693a66f5ca3e78ab085d6e4bc77ff15126c764", subdirectory = "python/oneberth" }
 
 [dependency-groups]
 dev = [

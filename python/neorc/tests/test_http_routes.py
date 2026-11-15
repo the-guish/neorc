@@ -4,7 +4,9 @@
 """The routes over an ASGI transport, on the memory store.
 
 Routing, status codes and request validation only: what a flow means is
-settled in core, and the HTTP clients are held to the client contracts.
+settled in core, and the HTTP clients are held to the client contracts. The
+manager is composed by oneberth and served under ``/neorc/``; each request
+carries a token of a role that may make it.
 """
 
 from __future__ import annotations
@@ -18,8 +20,8 @@ from typing import Any
 
 import httpx
 import pytest
+from conftest import PUBLIC_URL, composed, role_tokens_transport
 
-from neorc.manager import create_app
 from neorc.manager._routes import MAX_BODY_BYTES
 from neorc_core import Manager, QueueKind
 from neorc_core._values import MAX_JSON_DEPTH, JsonValue
@@ -35,14 +37,16 @@ MAIN: JsonValue = {
 
 @pytest.fixture
 async def http(manager: Manager) -> AsyncIterator[httpx.AsyncClient]:
-    app = create_app(manager, access=None, long_poll_timeout=2)
-    transport = httpx.ASGITransport(app=app)
+    app = await composed(manager)
     # Every write is sent as JSON, as the clients send it, body or not.
-    async with httpx.AsyncClient(
-        transport=transport,
-        base_url="http://manager.test",
-        headers={"content-type": "application/json"},
-    ) as client:
+    async with (
+        app.lifespan(),
+        httpx.AsyncClient(
+            transport=role_tokens_transport(app, manager),
+            base_url=f"{PUBLIC_URL}/neorc",
+            headers={"content-type": "application/json"},
+        ) as client,
+    ):
         yield client
 
 
@@ -136,7 +140,7 @@ async def test_requests_the_manager_refuses_carry_the_error_they_hit(
     assert (no_flow.status_code, _error(no_flow)) == (404, "FlowNotFoundError")
     for response in (no_run, no_state, no_cancel):
         assert (response.status_code, _error(response)) == (404, "RunNotFoundError")
-    assert (not_an_id.status_code, _error(not_an_id)) == (422, "InvalidValueError")
+    assert (not_an_id.status_code, _error(not_an_id)) == (422, "InvalidRequest")
 
 
 @pytest.mark.parametrize(
@@ -154,7 +158,7 @@ async def test_requests_the_manager_refuses_carry_the_error_they_hit(
         (b'{"flows": [], "flows": []}', "InvalidValueError"),
         (b'{"flows": [NaN]}', "InvalidValueError"),
         (b'{"flows": [-Infinity]}', "InvalidValueError"),
-        (b'{"flows": [' + b" " * MAX_BODY_BYTES + b"]}", "PayloadTooLargeError"),
+        (b'{"flows": [' + b" " * MAX_BODY_BYTES + b"]}", "PayloadTooLarge"),
     ],
     ids=[
         "one-too-deep",
@@ -176,7 +180,7 @@ async def test_bodies_are_checked_before_anything_parses_them(
         "/flows", content=content, headers={"content-type": "application/json"}
     )
 
-    assert response.status_code == (413 if error == "PayloadTooLargeError" else 422)
+    assert response.status_code == (413 if error == "PayloadTooLarge" else 422)
     assert _error(response) == error
 
 
@@ -330,7 +334,8 @@ async def test_scheduler_and_worker_requests_are_validated(
         assert (response.status_code, _error(response)) == (422, "InvalidValueError")
     for response in (no_such_step, no_reason, bad_lease, huge_lease, infinite_lease):
         assert (response.status_code, _error(response)) == (422, "InvalidValueError")
-    assert (bad_after.status_code, _error(bad_after)) == (422, "InvalidValueError")
+    # A query parameter FastAPI cannot read is refused by oneberth's handler.
+    assert (bad_after.status_code, _error(bad_after)) == (422, "InvalidRequest")
     assert (unknown_task.status_code, _error(unknown_task)) == (
         404,
         "TaskNotFoundError",
@@ -430,8 +435,9 @@ async def test_listing_requests_are_validated_and_misses_are_404(
     for response in (no_tasks, no_children, no_before):
         assert (response.status_code, _error(response)) == (404, "RunNotFoundError")
     assert (no_task.status_code, _error(no_task)) == (404, "TaskNotFoundError")
-    for response in (bad_before, bad_status, bad_limit, huge_limit, bad_flow):
-        assert (response.status_code, _error(response)) == (422, "InvalidValueError")
+    for response in (bad_before, bad_status, bad_limit, huge_limit):
+        assert (response.status_code, _error(response)) == (422, "InvalidRequest")
+    assert (bad_flow.status_code, _error(bad_flow)) == (422, "InvalidValueError")
 
 
 # The responders' routes: docs/specs/task-completion.md.
@@ -616,16 +622,20 @@ async def test_a_listing_of_a_queues_tasks_is_validated(
 ) -> None:
     recent = "/queues/default/tasks/recent"
 
-    refused = [
+    unreadable = [
         await http.get(recent, params={"status": "done"}),
         await http.get(recent, params={"limit": 0}),
         await http.get(recent, params={"limit": 10_000}),
-        await http.get(recent, params={"flow": "a/b"}),
         await http.get(recent, params={"since": "yesterday"}),
+    ]
+    refused = [
+        await http.get(recent, params={"flow": "a/b"}),
         await http.get(recent, params={"since": "2026-11-14T10:00:00"}),
         await http.get("/queues/a.b/tasks/recent"),
     ]
 
+    for response in unreadable:
+        assert (response.status_code, _error(response)) == (422, "InvalidRequest")
     for response in refused:
         assert (response.status_code, _error(response)) == (422, "InvalidValueError")
 
