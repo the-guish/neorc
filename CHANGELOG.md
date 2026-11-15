@@ -61,6 +61,9 @@ one version, cut from a single tag on `main`.
 
 ### Added
 
+- `neorc-ui`: `@neorc/ui` exports `formOf`, the reader of a form, and its
+  type `Form`. A host's test checks the form it gives neorc against neorc's
+  subset with `formOf({ form: messages })`.
 - `neorc`, `neorc-core`, `neorc-ui`: a run records who started it, as
   `RunStarter`: a person or a service, with oneberth's id and name for it. The
   manager's route that starts a run takes it from the principal; `Manager.start_run`

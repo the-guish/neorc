@@ -8,6 +8,10 @@ import type { NeorcOptions } from "./NeorcApp";
 
 export type { NeorcAppProps, NeorcOptions } from "./NeorcApp";
 export type { FormMessages, FormRequest, FormSource } from "./context";
+// The reader of a form, for a host's tests: a host checks the form it gives
+// neorc against the subset neorc draws. A host's bundle leaves it out unless
+// the host calls it; neorc's own chunk holds it.
+export { formOf, type Form } from "./forms/subset";
 
 /** How a host registers neorc with the shell. */
 export interface NeorcShellOptions extends NeorcOptions {

@@ -35,7 +35,7 @@ applyRememberedTheme();
 createRoot(root).render(<Shell apps={apps} title="Robinauts" />);
 ```
 
-- `@neorc/ui` exports `neorcApp`, `NeorcIcon` and the types. Its root
+- `@neorc/ui` exports `neorcApp`, `NeorcIcon`, `formOf` and the types. Its root
   component loads the first time neorc's icon is chosen.
 - `@neorc/ui/app` exports the root component, `NeorcApp`. It takes the
   shell's `AppProps`, `api` and `forms`.
@@ -44,6 +44,10 @@ createRoot(root).render(<Shell apps={apps} title="Robinauts" />);
   form as A2UI v0.9 messages, as a flow's own form file holds them, or null.
   neorc draws its own form for a flow the source has no form for.
   [docs/architecture/forms.md](../../docs/architecture/forms.md) has the subset.
+- `formOf` reads a form the way neorc draws it, and answers null for a form
+  outside the subset. A host's test checks its form with
+  `formOf({ form: messages })`. A host's bundle holds `formOf` only where the
+  host calls it.
 - While the shell hides neorc, neorc stops its long poll and its polls.
 - The styles come with the root component. Every class starts with `neorc-`,
   and the colours are the tokens of `@oneberth/ui`.
