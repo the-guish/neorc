@@ -44,6 +44,10 @@ one version, cut from a single tag on `main`.
   shell with one application, neorc. React is 19.3.1. `@oneberth/ui` comes
   from the oneberth commit `pyproject.toml` pins, packed by
   `scripts/oneberth-ui-from-source.sh`.
+- `neorc`: the manager's long polls, the events and a worker's receive, end
+  when the client leaves and when the backend begins to stop. The answer then
+  says that nothing came yet. A backend with a waiting client stops at once,
+  instead of waiting out the server's grace.
 
 ### Removed
 

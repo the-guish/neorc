@@ -98,13 +98,21 @@ def manager_component(
 ) -> Component:
     """The component around the manager ``source`` opens when the backend starts."""
     running: list[Manager] = []
+    stops: list[asyncio.Event] = []
 
     def current() -> Manager:
         if not running:
             raise Refusal(503, "Unavailable", "the manager is starting or stopping")
         return running[0]
 
-    router = _routes.routes_for(_routes.ManagerState(current, long_poll_timeout))
+    def stopping() -> asyncio.Event:
+        if not stops:
+            raise Refusal(503, "Unavailable", "the manager is starting or stopping")
+        return stops[0]
+
+    router = _routes.routes_for(
+        _routes.ManagerState(current, long_poll_timeout, stopping)
+    )
 
     @asynccontextmanager
     async def lifespan(context: Context) -> AsyncIterator[None]:
@@ -113,10 +121,23 @@ def manager_component(
             if scheduler:
                 await stack.enter_async_context(_scheduling(manager))
             running.append(manager)
+            stops.append(asyncio.Event())
             try:
                 yield
             finally:
+                stops[0].set()
                 running.clear()
+                stops.clear()
+
+    @asynccontextmanager
+    async def serving(context: Context) -> AsyncIterator[None]:
+        # The backend stops: the long polls end while the listeners still
+        # serve, so the server does not wait them out.
+        try:
+            yield
+        finally:
+            if stops:
+                stops[0].set()
 
     async def health() -> bool:
         return bool(running)
@@ -129,6 +150,7 @@ def manager_component(
         roles=NEORC_ROLES,
         router=router,
         lifespan=lifespan,
+        serving=serving,
         health=health,
         errors=dict[type[Exception], int](STATUS_OF.items()),
         error_body=_error_body,

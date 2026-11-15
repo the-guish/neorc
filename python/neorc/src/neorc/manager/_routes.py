@@ -29,8 +29,10 @@ the routes that component's manager (``_component.py``).
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Any, TypeVar
@@ -38,7 +40,7 @@ from typing import Annotated, Any, TypeVar
 from fastapi import APIRouter, Depends, Query, Request, Response, status
 from fastapi.responses import JSONResponse
 from oneberth.identity import Principal
-from oneberth.web import permit
+from oneberth.web import permit, while_connected
 from pydantic import BaseModel, ValidationError
 
 from neorc.manager._schemas import (
@@ -101,6 +103,8 @@ class ManagerState:
     manager: Callable[[], Manager]
     """The running manager; a 503 before it starts."""
     long_poll_timeout: float
+    stopping: Callable[[], asyncio.Event]
+    """Set when the backend begins to stop, while its listeners still serve."""
 
 
 def _state(request: Request) -> ManagerState:
@@ -132,6 +136,7 @@ Managed = Annotated[Manager, Depends(_get_manager)]
 """The manager, injected into a route; a module-level name, for FastAPI."""
 
 _M = TypeVar("_M", bound=BaseModel)
+_T = TypeVar("_T")
 
 
 async def read_body(request: Request, model: type[_M]) -> _M:
@@ -453,6 +458,33 @@ def _waited(request: Request, timeout: float | None) -> float:
     return limit if timeout is None else min(timeout, limit)
 
 
+async def _long_poll(request: Request, wait: Awaitable[_T]) -> _T | None:
+    """``wait``'s result, or ``None`` once its client leaves or the backend stops.
+
+    The caller then answers "nothing yet". A server waits for a handler in
+    progress before it stops, so a wait left running would hold up the stop.
+    """
+    return await while_connected(request, _unless(_state(request).stopping(), wait))
+
+
+async def _unless(stopping: asyncio.Event, wait: Awaitable[_T]) -> _T | None:
+    """``wait``'s result, or ``None`` once ``stopping`` is set; ``wait`` is then
+    cancelled."""
+    waiting = asyncio.ensure_future(wait)
+    stopped = asyncio.ensure_future(stopping.wait())
+    try:
+        await asyncio.wait({waiting, stopped}, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        for pending in (waiting, stopped):
+            if not pending.done():
+                pending.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await pending
+    if waiting.cancelled():
+        return None
+    return waiting.result()
+
+
 @router.get(
     "/events",
     dependencies=[permit(Permission.EVENTS_READ)],
@@ -467,10 +499,11 @@ async def wait_for_events(
     timeout: Annotated[float | None, Query(ge=0)] = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """Events after a sequence, long-polled; an empty list when the wait ends."""
-    events = await manager.wait_for_events(
-        after, timeout=_waited(request, timeout), limit=limit
+    events = await _long_poll(
+        request,
+        manager.wait_for_events(after, timeout=_waited(request, timeout), limit=limit),
     )
-    return {"events": [wire.event_to(event) for event in events]}
+    return {"events": [wire.event_to(event) for event in events or []]}
 
 
 @router.get(
@@ -589,12 +622,16 @@ async def receive_task(
 ) -> Response:
     """Long-poll for a task on a queue. 204 when the wait ends empty."""
     # A worker that left mid-poll must not be leased a task: the wait asks
-    # whether the client is still there before every receive.
-    delivery = await manager.receive_task(
-        queue,
-        timeout=_waited(request, timeout),
-        lease_seconds=lease_seconds,
-        abandoned=request.is_disconnected,
+    # whether the client is still there before every receive. A worker that
+    # leaves while the lease is taken keeps it until it lapses.
+    delivery = await _long_poll(
+        request,
+        manager.receive_task(
+            queue,
+            timeout=_waited(request, timeout),
+            lease_seconds=lease_seconds,
+            abandoned=request.is_disconnected,
+        ),
     )
     if delivery is None:
         return Response(status_code=status.HTTP_204_NO_CONTENT)

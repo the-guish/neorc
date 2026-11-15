@@ -34,6 +34,10 @@ manager; a worker that reaches it re-polls. A wakeup is a hint, not a promise â€
 a woken waiter that finds nothing to receive goes back to waiting rather than
 returning empty.
 
+A long poll ends when its client leaves, and when the backend begins to stop.
+The answer then says that nothing came yet. A server waits for the requests in
+progress before it stops. A wait left running would hold up the stop.
+
 ## Receiving a task
 
 Receiving takes a lease, not a handoff: it makes the task invisible to other
