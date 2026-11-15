@@ -24,9 +24,12 @@ from neorc_core._errors import (
 )
 from neorc_core._queues import Queue, QueueKind
 from neorc_core._runs import (
+    MAX_STARTER_TEXT,
     EventKind,
     Run,
+    RunStarter,
     RunStatus,
+    StarterKind,
     StoredFlow,
     Task,
     sub_run_id_for,
@@ -299,6 +302,36 @@ class StoreContract:
         assert child.parent_address == WORK
         kinds = [e.kind for e in await store.events_after(0)]
         assert kinds == [EventKind.RUN_STARTED, EventKind.RUN_STARTED]
+
+    async def test_a_run_keeps_who_started_it(self, store: Store) -> None:
+        await self.upload(store, "a")
+        await self.upload(store, "b")
+        version = Version(1, 0, 0)
+        ada = RunStarter(StarterKind.USER, str(uuid.uuid4()), "Ada Lovelace ✓")
+        trigger = RunStarter(StarterKind.SERVICE, str(uuid.uuid4()), "trigger")
+        unnamed = RunStarter(StarterKind.USER, "x" * MAX_STARTER_TEXT)
+
+        by_ada = await store.start_run("a", version, {}, started_by=ada)
+        by_trigger = await store.start_run("a", version, {}, started_by=trigger)
+        by_unnamed = await store.start_run("a", version, {}, started_by=unnamed)
+        by_no_one = await store.start_run("a", version, {})
+        child = await store.start_run(
+            "b",
+            version,
+            {},
+            parent_id=by_ada.id,
+            parent_address=WORK,
+            started_by=ada,
+        )
+
+        runs = [by_ada, by_trigger, by_unnamed, by_no_one]
+        starters = [ada, trigger, unnamed, None]
+        assert [run.started_by for run in runs] == starters
+        assert [(await store.get_run(run.id)).started_by for run in runs] == starters
+        listed = await store.list_runs(flow="a")
+        assert [run.started_by for run in reversed(listed)] == starters
+        assert child.started_by == ada
+        assert await store.sub_runs(by_ada.id) == [child]
 
     async def test_no_sub_flow_run_starts_in_an_inactive_run(
         self, store: Store

@@ -17,7 +17,9 @@ from contextlib import AsyncExitStack
 
 import httpx
 import pytest
-from conftest import declare_queues
+from conftest import PUBLIC_URL, declare_queues, role_tokens_transport
+from oneberth.identity import SchemaVersionError
+from oneberth.web.testing import config_for
 
 from neorc.http import HttpManagerClient, HttpQueueClient
 from neorc.manager import build_app
@@ -43,19 +45,29 @@ class _Process:
 
 @pytest.fixture
 async def processes(pg_schema: str) -> AsyncIterator[tuple[_Process, _Process]]:
-    """Two manager processes on the same database, their lifespans running."""
+    """Two manager processes on the same database, their lifespans running.
+
+    Both share oneberth's store too, in the same database; each request carries
+    a token of a role that may make it.
+    """
     await declare_queues(pg_schema, "default")
     async with AsyncExitStack() as stack:
         built = []
         for _ in range(2):
-            app = build_app(pg_schema, auth=False, long_poll_timeout=5, ui=False)
-            await stack.enter_async_context(app.router.lifespan_context(app))
-            transport = httpx.ASGITransport(app=app)
+            app = build_app(
+                pg_schema,
+                config=config_for("neorc"),
+                create_schema=True,
+                long_poll_timeout=5,
+                ui=False,
+            )
+            await stack.enter_async_context(app.lifespan())
+            transport = role_tokens_transport(app)
             manager = await stack.enter_async_context(
-                HttpManagerClient("manager.test", transport=transport)
+                HttpManagerClient(PUBLIC_URL, transport=transport)
             )
             queue = await stack.enter_async_context(
-                HttpQueueClient("manager.test", transport=transport)
+                HttpQueueClient(PUBLIC_URL, transport=transport)
             )
             built.append(_Process(manager, queue))
         yield built[0], built[1]
@@ -107,35 +119,28 @@ async def test_the_flow_tables_are_created_at_startup(pg_schema: str) -> None:
     from neorc.postgres import drop_schema
 
     await drop_schema(pg_schema)
-    app = build_app(pg_schema, auth=False, create_schema=True, ui=False)
+    app = build_app(pg_schema, config=config_for("neorc"), create_schema=True, ui=False)
 
-    async with app.router.lifespan_context(app):
+    async with app.lifespan():
         await declare_queues(pg_schema, "default")
-        transport = httpx.ASGITransport(app=app)
-        async with HttpManagerClient("manager.test", transport=transport) as client:
+        transport = role_tokens_transport(app)
+        async with HttpManagerClient(PUBLIC_URL, transport=transport) as client:
             assert await client.upload_flows([FLOW]) == [True]
 
 
-async def test_with_authentication_the_manager_needs_the_credential_tables(
-    pg_schema: str,
-) -> None:
-    from neorc.postgres._driver import connected
-    from neorc.postgres._schema import SESSIONS_TABLE, MissingTablesError
+async def test_the_manager_needs_oneberths_store_set_up(pg_schema: str) -> None:
+    """oneberth's store is the schema ``oneberth`` of the same database."""
+    refused = build_app(pg_schema, config=config_for("neorc"), ui=False)
+    created = build_app(
+        pg_schema, config=config_for("neorc"), create_schema=True, ui=False
+    )
 
-    async with connected(pg_schema) as conn:
-        await conn.execute(f"DROP TABLE {SESSIONS_TABLE}")
-    refused = build_app(pg_schema, auth=True, ui=False)
-    unguarded = build_app(pg_schema, auth=False, ui=False)
-    created = build_app(pg_schema, auth=True, create_schema=True, ui=False)
-
-    with pytest.raises(MissingTablesError, match=rf"{SESSIONS_TABLE}.*--create-schema"):
-        async with refused.router.lifespan_context(refused):
+    with pytest.raises(SchemaVersionError, match="not set up"):
+        async with refused.lifespan():
             pass
-    async with unguarded.router.lifespan_context(unguarded):
+    async with created.lifespan():
         pass
-    async with created.router.lifespan_context(created):
-        transport = httpx.ASGITransport(app=created)
-        async with httpx.AsyncClient(
-            transport=transport, base_url="http://manager.test"
-        ) as http:
-            assert (await http.get("/runs")).status_code == 401
+    async with refused.lifespan():
+        transport = httpx.ASGITransport(app=refused)
+        async with httpx.AsyncClient(transport=transport, base_url=PUBLIC_URL) as http:
+            assert (await http.get("/neorc/runs")).status_code == 401

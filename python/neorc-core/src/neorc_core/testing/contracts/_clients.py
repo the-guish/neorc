@@ -25,8 +25,9 @@ from neorc_core._errors import (
     TaskNotFoundError,
     TaskStateError,
 )
-from neorc_core._runs import EventKind, RunStatus, TaskDelivery
+from neorc_core._runs import EventKind, RunStatus, TaskDelivery, sub_run_id_for
 from neorc_core._values import MAX_PAYLOAD_BYTES, MAX_VALUE_DEPTH, JsonValue
+from neorc_core._wire import starter_to
 from neorc_core._worker import Worker
 from neorc_core.flows import (
     Address,
@@ -70,6 +71,17 @@ ECHO: JsonValue = {
             "handler": "tasks:say",
             "params": {"t": "inputs.text"},
         }
+    },
+}
+
+
+WHO: JsonValue = {
+    "name": "who",
+    "version": "1.0.0",
+    "inputs": {"word": "string"},
+    "steps": {
+        "by": {"handler": "tasks:by", "params": {"by": "neorc.started_by"}},
+        "call": {"flow": "echo", "params": {"text": "inputs.word"}},
     },
 }
 
@@ -152,6 +164,24 @@ class ManagerClientContract(_Clients):
         assert run.parent_id is None
         with pytest.raises(RunNotFoundError):
             await manager_client.get_run(uuid.uuid4())
+
+    async def test_a_run_reads_back_with_its_starter_down_its_tree(
+        self, manager_client: ManagerClient, queue_client: QueueClient
+    ) -> None:
+        """Whoever the client asks for, the run, its sub-flow run and their
+        handlers have the same starter."""
+        await manager_client.upload_flows([WHO, ECHO])
+        run = await manager_client.start_run("who", {"word": "red"})
+        await manager_client.publish_task(run.id, Address("by"))
+        await manager_client.start_sub_run(run.id, Address("call"))
+
+        delivery = await self.take(queue_client)
+        sub_run = await manager_client.get_run(sub_run_id_for(run.id, Address("call")))
+
+        assert run.started_by is not None
+        assert (await manager_client.get_run(run.id)).started_by == run.started_by
+        assert sub_run.started_by == run.started_by
+        assert delivery.inputs == {"by": starter_to(run.started_by)}
 
     async def test_inputs_that_are_not_json_or_not_declared_are_refused(
         self, manager_client: ManagerClient

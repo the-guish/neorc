@@ -16,8 +16,10 @@ from neorc_core import (
     PayloadTooLargeError,
     QueueKind,
     ResolutionError,
+    RunStarter,
     RunStateError,
     RunStatus,
+    StarterKind,
     TaskNotFoundError,
     TaskStatus,
 )
@@ -341,6 +343,70 @@ async def test_a_sub_flow_run_starts_with_its_inputs_resolved(
     assert sub_run.flow == "g"
     assert sub_run.inputs == {"text": "red"}
     assert sub_run.root_id == run_id
+
+
+ASKS_WHO: JsonValue = {
+    "name": "asks_who",
+    "version": "1.0.0",
+    "steps": {
+        "who": {"handler": "tasks:who", "params": {"by": "neorc.started_by"}},
+        "call": {"flow": "asks_again", "params": {}},
+    },
+}
+ASKS_AGAIN: JsonValue = {
+    "name": "asks_again",
+    "version": "1.0.0",
+    "steps": {"who": {"handler": "tasks:who", "params": {"by": "neorc.started_by"}}},
+}
+ADA = RunStarter(StarterKind.USER, str(uuid.uuid4()), "Ada Lovelace")
+
+
+@pytest.mark.parametrize(
+    ("starter", "handed"),
+    [
+        (ADA, {"kind": "user", "id": ADA.id, "name": "Ada Lovelace"}),
+        (
+            RunStarter(StarterKind.SERVICE, "7", None),
+            {"kind": "service", "id": "7", "name": None},
+        ),
+        (None, None),
+    ],
+)
+async def test_a_runs_starter_reaches_its_sub_flow_runs_and_their_handlers(
+    flows: Manager, starter: RunStarter | None, handed: JsonValue
+) -> None:
+    await flows.upload_flows([ASKS_AGAIN, ASKS_WHO])
+    run = await flows.start_run("asks_who", {}, started_by=starter)
+    await flows.publish_task(run.id, Address("who"))
+    sub_run = await flows.start_sub_run(run.id, Address("call"))
+    await flows.publish_task(sub_run.id, Address("who"))
+
+    first = await flows.receive_task("default", timeout=0)
+    second = await flows.receive_task("default", timeout=0)
+
+    assert run.started_by == starter
+    assert sub_run.started_by == starter
+    assert first is not None
+    assert second is not None
+    assert first.inputs == {"by": handed}
+    assert second.inputs == {"by": handed}
+
+
+@pytest.mark.parametrize(
+    ("kind", "id_", "name", "problem"),
+    [
+        (StarterKind.USER, "", None, "has an id"),
+        (StarterKind.USER, "a\x00b", None, "id holds what no store can"),
+        (StarterKind.SERVICE, "7", "bad\ud800", "name holds what no store can"),
+        (StarterKind.USER, "x" * 201, None, "id is at most 200"),
+        (StarterKind.USER, "7", "y" * 201, "name is at most 200"),
+    ],
+)
+def test_a_starter_no_store_can_hold_is_refused(
+    kind: StarterKind, id_: str, name: str | None, problem: str
+) -> None:
+    with pytest.raises(InvalidValueError, match=problem):
+        RunStarter(kind, id_, name)
 
 
 async def test_a_sub_flow_run_needs_its_called_flow(flows: Manager) -> None:

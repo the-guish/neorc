@@ -21,7 +21,6 @@ from enum import StrEnum
 import pytest
 
 from neorc.postgres import (
-    PostgresCredentialStore,
     PostgresStore,
     create_schema,
     drop_schema,
@@ -44,7 +43,6 @@ from neorc.postgres._rows import (
     values,
 )
 from neorc.postgres._schema import (
-    CREDENTIAL_TABLES,
     EVENTS_TABLE,
     FLOW_TASKS_TABLE,
     FLOW_VERSIONS_TABLE,
@@ -52,21 +50,18 @@ from neorc.postgres._schema import (
     QUEUES_TABLE,
     RETIRED_TABLES,
     RUNS_TABLE,
-    SESSIONS_TABLE,
     TABLES,
-    TOKENS_TABLE,
     MissingTablesError,
-    ensure_credential_tables,
+    ensure_tables,
     missing_tables,
 )
 from neorc_core import (
     Event,
     EventKind,
-    PrincipalKind,
     QueueKind,
-    Role,
     Run,
     RunStatus,
+    StarterKind,
     StoredFlow,
     Task,
     TaskStatus,
@@ -103,10 +98,24 @@ async def test_create_schema_is_idempotent_and_creates_everything(
     await create_schema(database_url)
 
     async with connected(database_url) as conn:
-        assert await _names(conn, _TABLES) == set(TABLES) | set(RETIRED_TABLES)
+        assert await _names(conn, _TABLES) == set(TABLES) | {"neorc_tasks"}
         assert set(INDEXES) <= await _names(conn, _INDEXES)
 
     await drop_schema(database_url)
+    async with connected(database_url) as conn:
+        assert await _names(conn, _TABLES) == set()
+
+
+async def test_the_credential_tables_of_an_earlier_version_are_dropped_too(
+    database_url: str,
+) -> None:
+    """Credentials are oneberth's now; a reused database may hold neorc's own."""
+    async with connected(database_url) as conn:
+        for table in RETIRED_TABLES:
+            await conn.execute(f"CREATE TABLE IF NOT EXISTS {table} (id uuid)")
+
+    await drop_schema(database_url)
+
     async with connected(database_url) as conn:
         assert await _names(conn, _TABLES) == set()
 
@@ -157,13 +166,15 @@ async def test_create_schema_adds_the_columns_tables_from_before_lack(
 
             runs = await _names(conn, _COLUMNS, RUNS_TABLE)
             tasks = await _names(conn, _COLUMNS, FLOW_TASKS_TABLE)
+            # Columns added later, such as the starter's, are in the
+            # statements alone: such a table is not read as a run.
             (row,) = await conn.fetch(
-                f"SELECT {RUN_COLUMNS}, position FROM {RUNS_TABLE}"
+                f"SELECT id, created_at, position FROM {RUNS_TABLE}"
             )
 
         assert {"created_at", "finished_at", "position"} <= runs
         assert {"created_at", "started_at", "finished_at"} <= tasks
-        assert run_from_row(row).id == run_id
+        assert row["id"] == run_id
         assert row["created_at"] is not None and row["position"] == 1  # backfilled
     finally:  # the tables lack their constraints: leave nothing for the next test
         await drop_schema(database_url)
@@ -184,19 +195,15 @@ SELECT pg_get_constraintdef(c.oid) AS definition
         (FLOW_TASKS_TABLE, "status", TaskStatus),
         (RUNS_TABLE, "status", RunStatus),
         (EVENTS_TABLE, "kind", EventKind),
-        (SESSIONS_TABLE, "kind", PrincipalKind),
-        (SESSIONS_TABLE, "role", Role),
-        (TOKENS_TABLE, "role", Role),
         (QUEUES_TABLE, "kind", QueueKind),
+        (RUNS_TABLE, "starter_kind", StarterKind),
     ],
     ids=[
         "tasks",
         "runs",
         "events",
-        "sessions",
-        "session-roles",
-        "token-roles",
         "queue-kinds",
+        "starter-kinds",
     ],
 )
 async def test_check_constraints_are_in_step_with_the_enums(
@@ -379,15 +386,13 @@ async def test_a_schema_of_its_own_holds_every_table_and_is_used(
     """With ``schema``, the tables are made in it, and the stores work in it."""
     schema = f"neorc test {uuid.uuid4().hex[:8]}"  # quoted, as any name may need
     try:
-        assert await missing_tables(
-            database_url, CREDENTIAL_TABLES, schema=schema
-        ) == list(CREDENTIAL_TABLES)
+        assert await missing_tables(database_url, TABLES, schema=schema) == list(TABLES)
         with pytest.raises(MissingTablesError):
-            await ensure_credential_tables(database_url, schema=schema)
+            await ensure_tables(database_url, (QUEUES_TABLE,), schema=schema)
 
         await create_schema(database_url, schema=schema)
         await create_schema(database_url, schema=schema)
-        await ensure_credential_tables(database_url, schema=schema)
+        await ensure_tables(database_url, (QUEUES_TABLE,), schema=schema)
 
         async with connected(database_url) as conn:
             assert await _names(conn, _SCHEMA_TABLES, schema) == set(TABLES)
@@ -399,8 +404,6 @@ async def test_a_schema_of_its_own_holds_every_table_and_is_used(
             }
             await store.store_flows([_flow(content)])
             assert [f.name for f in await store.latest_flows()] == ["a"]
-        async with PostgresCredentialStore(database_url, schema=schema) as store:
-            assert await store.tokens() == []
         async with connected(database_url) as conn:
             count = await conn.fetchval(
                 f'SELECT count(*) FROM "{schema}".{FLOW_VERSIONS_TABLE}'

@@ -23,11 +23,9 @@ from neorc_core.testing.contracts._clients import (
     ManagerClientContract,
     QueueClientContract,
 )
-from neorc_core.testing.contracts._credentials import CredentialStoreContract
 from neorc_core.testing.contracts._store import StoreContract
 
 __all__ = [
-    "CredentialStoreContract",
     "ManagerClientContract",
     "QueueClientContract",
     "StoreContract",

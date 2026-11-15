@@ -14,7 +14,7 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime
 
 from neorc_core._manager import Manager
-from neorc_core._runs import Event, Run, RunId, TaskDelivery
+from neorc_core._runs import Event, Run, RunId, RunStarter, TaskDelivery
 from neorc_core._task import TaskId
 from neorc_core._values import JsonValue
 from neorc_core._wire import (
@@ -105,10 +105,18 @@ class DirectQueueClient(QueueClient):
 
 
 class DirectManagerClient(ManagerClient):
-    """The scheduler's and a deploy script's client for a manager in this process."""
+    """The scheduler's and a deploy script's client for a manager in this process.
 
-    def __init__(self, manager: Manager) -> None:
+    ``started_by`` is who the client asks for: the runs it starts are theirs,
+    as a credential names the starter over HTTP. ``None`` starts runs for no
+    one, as ``neorc run`` does.
+    """
+
+    def __init__(
+        self, manager: Manager, *, started_by: RunStarter | None = None
+    ) -> None:
         self._manager = manager
+        self._started_by = started_by
 
     async def upload_flows(self, contents: Sequence[JsonValue]) -> list[bool]:
         request = transmit({"flows": list(contents)})
@@ -127,7 +135,9 @@ class DirectManagerClient(ManagerClient):
 
     async def start_run(self, flow: str, inputs: Mapping[str, JsonValue]) -> Run:
         request = transmit({"flow": flow, "inputs": dict(inputs)})
-        run = await self._manager.start_run(request["flow"], request["inputs"])
+        run = await self._manager.start_run(
+            request["flow"], request["inputs"], started_by=self._started_by
+        )
         return run_from(transmit(run_to(run)))
 
     async def get_run(self, run_id: RunId) -> Run:

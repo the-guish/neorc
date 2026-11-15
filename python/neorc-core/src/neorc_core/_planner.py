@@ -36,7 +36,7 @@ from neorc_core.flows import (
     resolve,
 )
 
-_FILLED_IN_LATER = frozenset({"task_id", "flow_run_id", "attempts"})
+_FILLED_IN_LATER = frozenset({"task_id", "flow_run_id", "started_by", "attempts"})
 """Metadata the manager or the worker fills in, not the run's state."""
 
 
