@@ -141,6 +141,22 @@ and [examples/code_task](examples/code_task) to try one.
 [examples/hello](examples/hello) and [examples/wordplay](examples/wordplay)
 walk through both ways of running, step by step.
 
+## Tasks in any language
+
+A task's handler can be a program in the place of a Python function: an
+executable file in the `programs` directory of the worker's code location.
+
+```yaml
+close_month:
+  handler: programs/close_month.sh
+  params: {month: inputs.month}
+```
+
+The worker starts it as a process of its own, writes the task's inputs to its
+standard input as JSON, and reads the task's result from its standard output.
+A path that leaves that directory is refused
+([workers-and-manager.md](docs/specs/workers-and-manager.md), "Programs").
+
 ## Tasks for a person or another system
 
 Some tasks are done outside a neorc worker: an approval a person gives, or

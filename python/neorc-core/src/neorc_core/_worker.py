@@ -7,14 +7,17 @@ Handlers are plain functions named by import path, called with a task's inputs
 as keyword arguments; they need not import neorc. Only a function defined
 under the worker's code location is a handler, whether it is checked by
 ``prepare`` or first met in a task: flows may be uploaded after the worker
-started, and whoever uploads them names the handlers.
+started, and whoever uploads them names the handlers. A handler may also be a
+program, an executable file in the code location's ``programs`` directory,
+which the worker runs as a process of its own (``_programs``).
 
 A refused token ends the worker: ``run`` raises the ``AccessError``, whether
 the token is not accepted or its role may not do what was asked, rather than
 poll again. Refused while a handler runs, by a heartbeat, it ends
 the handler too, since without heartbeats the lease lapses and another worker
-may take the task: an async handler is cancelled, and a handler in a thread,
-which cannot be, is left behind; ``run`` raises without waiting for it.
+may take the task: an async handler is cancelled and given a moment to end,
+which is when a program is ended, and a handler in a thread, which cannot be,
+is left behind; ``run`` raises without waiting for it.
 """
 
 from __future__ import annotations
@@ -42,6 +45,9 @@ HEARTBEAT_FRACTION = 1 / 3
 
 MAX_ERROR_LENGTH = 64 * 1024
 """The most of a task's error message that is reported, in characters."""
+
+CANCEL_SECONDS = 5.0
+"""How long a cancelled handler has to end before the worker goes on without it."""
 
 _log = logging.getLogger(__name__)
 
@@ -172,6 +178,10 @@ class Worker:
                 # A heartbeat ends only when the token was refused: the lease
                 # will lapse, so the handler must not go on holding the task.
                 work.cancel()
+                # Let it end before the worker stops: the process may exit
+                # right after, and a program still running would outlive it.
+                # A handler in a thread ends here at once, left behind.
+                await asyncio.wait({work}, timeout=CANCEL_SECONDS)
                 heartbeat.result()
                 raise AssertionError("unreachable: a heartbeat ended unrefused")
             # Let the lease lapse on a cancellation: the task belongs to

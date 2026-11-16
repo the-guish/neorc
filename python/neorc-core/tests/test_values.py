@@ -111,6 +111,17 @@ def test_inputs_already_accepted_decode_past_the_value_depth() -> None:
     assert decode(collected, limit=MAX_JSON_DEPTH) == collected
 
 
+def test_inputs_already_accepted_encode_past_the_value_depth() -> None:
+    """A worker writes a task's inputs again for a program, as deep as they came."""
+    collected = {"x": [[_nested(MAX_VALUE_DEPTH)]]}
+
+    with pytest.raises(InvalidValueError, match="deeper than"):
+        encode(collected)
+    assert encode(collected, limit=MAX_JSON_DEPTH) == collected
+    with pytest.raises(InvalidValueError, match="deeper than"):
+        encode(_nested(MAX_JSON_DEPTH + 1), limit=MAX_JSON_DEPTH)
+
+
 def test_invalid_value_is_a_value_error() -> None:
     with pytest.raises(ValueError):
         encode({1, 2})

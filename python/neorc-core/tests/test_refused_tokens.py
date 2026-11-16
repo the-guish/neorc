@@ -9,6 +9,8 @@ Refused as unknown, or as a role that may not make the request: both alike.
 from __future__ import annotations
 
 import asyncio
+import os
+import sys
 import time
 import uuid
 from datetime import datetime
@@ -215,3 +217,36 @@ async def test_a_refused_heartbeat_leaves_a_thread_handler_behind(
         assert client.reports == []
     finally:
         release.touch()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the program is a POSIX script")
+async def test_a_refused_heartbeat_ends_a_program_before_the_worker_stops(
+    flows: Manager, tmp_path: Path, refusal: AccessError
+) -> None:
+    script = tmp_path / "programs" / "waits.sh"
+    script.parent.mkdir()
+    script.write_text("#!/bin/sh\necho $$ > pid\nsleep 30\n")
+    script.chmod(0o755)
+    await flows.upload_flows(
+        [
+            {
+                "name": "f",
+                "version": "1.0.0",
+                "steps": {"work": {"handler": "programs/waits.sh"}},
+            }
+        ]
+    )
+    run = await flows.start_run("f", {})
+    await flows.publish_task(run.id, Address("work"))
+    client = RefusingHeartbeat(flows, refusal)
+    worker = Worker(client, code_location=tmp_path, poll_timeout=0.1, lease_seconds=0.9)
+
+    with pytest.raises(type(refusal)):
+        await asyncio.wait_for(worker.run(), timeout=5)
+
+    # Nothing ran between the worker's stop and this: the program is gone
+    # already, as it must be for a worker whose process exits there.
+    pid = int((tmp_path / "pid").read_text())
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)
+    assert client.reports == []

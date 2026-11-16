@@ -19,6 +19,10 @@ a virtual environment inside the code location is not the worker's code, nor
 is a package pip installed into it, found by the ``RECORD`` beside it. The
 function must also have been defined in such a module, not imported into one
 from elsewhere.
+
+A handler that starts with ``programs/`` names a program instead, an
+executable file in the code location's ``programs`` directory: see
+``_programs``.
 """
 
 from __future__ import annotations
@@ -35,6 +39,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
+from neorc_core._programs import is_program, resolve_program
+
 
 def resolve_handler(target: object, code_location: Path) -> Callable[..., Any]:
     """The function ``module:function`` names under ``code_location``.
@@ -43,7 +49,12 @@ def resolve_handler(target: object, code_location: Path) -> Callable[..., Any]:
     form, the module is not under ``code_location`` or does not import, or the
     function is not there or was defined outside ``code_location``.
     ``code_location`` goes to the front of the import path.
+
+    A target that starts with ``programs/`` names a program: the function
+    returned runs it, and ``ValueError`` says why there is no such program.
     """
+    if is_program(target):
+        return resolve_program(target, code_location)
     if not isinstance(target, str) or ":" not in target:
         raise ValueError(f'wants "module:function", not {target!r}')
     module_name, _, attribute = target.partition(":")

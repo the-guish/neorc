@@ -80,6 +80,100 @@ A queue name is letters, digits, `_` and `-`: it travels in a URL path, where a
 Task definitions are local to their flow. One handler can back several tasks,
 in the same flow or in different flows.
 
+## Programs
+
+A task can be a program in the place of a Python function: an executable
+file, written in any language. The Python worker runs it as a process of its
+own.
+
+```yaml
+close_month:
+  queue: python-default
+  handler: programs/billing/close_month.sh
+  params:
+    month: inputs.month
+```
+
+A handler that starts with `programs/` names a program. It is a path from the
+worker's code location, and every program of a code location is in its
+`programs` directory.
+
+- The path is plain names joined by `/`: letters, digits, `_`, `-` and `.`,
+  none starting with `.` or `-`. So it holds no `.`, no `..` and no empty
+  part.
+- The file it leads to, links followed, is in the `programs` directory too. A
+  link that stays inside is followed, as a mounted ConfigMap has. A link out
+  of it is refused, and so is a `programs` that is itself a link.
+- The file is a regular file the worker may execute.
+
+The worker checks all of it where it checks any handler: at startup, for the
+tasks its queue has, and when a task names a program uploaded later. A
+refused program fails its task without being started. The file is looked for
+again each time a task runs.
+
+Whoever uploads a flow chooses which program of that directory a task runs,
+and the task's inputs, and nothing else. The program is started as it is,
+with no shell and no arguments, with the code location as its working
+directory and the worker's environment. So the `programs` directory holds the
+programs of tasks, and no other executable.
+
+### What a program reads and writes
+
+| | |
+|---|---|
+| standard input | the task's inputs, as one JSON object by name, then the end of input |
+| standard output | the task's result: one JSON value and nothing else; nothing at all is `null` |
+| standard error | the program's log |
+| exit code | 0 when the task succeeded; any other fails the task |
+
+- Values are written as they travel (see [Values](#values)). A datetime
+  among the inputs is `{"$datetime": "..."}`, and a program writes one the
+  same way.
+- The result is at most 1 MiB. A program that writes more is ended, and its
+  task fails.
+- Output that is not JSON, or not a value neorc carries, fails the task.
+- The error of a task whose program failed is the program's exit code, or
+  the signal that ended it, and the end of what it wrote to standard error,
+  16 KiB at most. When a program succeeds, the worker logs that end.
+
+### Heartbeat
+
+A program may say it is still working. `NEORC_HEARTBEAT_FILE`, in its
+environment, names a file. The program touches it, or writes to it.
+
+- A program that never touches the file is not watched.
+- Once the file is there, the program touches it again within 60 seconds of
+  the last time. When it does not, the worker takes it for stuck, ends it,
+  and fails the task.
+
+This is between a program and its worker. The worker keeps the task's lease
+with the manager while the program runs, as it does for any handler.
+
+### Ending a program
+
+A program has a process group of its own, and the worker ends it by killing
+the group, so what the program started ends with it. The worker ends a
+program when its heartbeat stops, when it writes too much, and when its task
+is cancelled, as when the manager refuses the worker's token.
+
+- A program that ends by itself leaves what it started running. Its output
+  is what was written by one second after it ended.
+- A worker that is killed leaves its program running. The task's lease
+  lapses, another worker takes the task, and the task runs twice: delivery is
+  at-least-once, and a program is idempotent as any handler is.
+
+The worker stays free while a program runs: it heartbeats, and it stops when
+asked. It still runs one task at a time.
+
+### Not in scope
+
+- How a program gets to the `programs` directory of a worker.
+- A limit on how long a program runs, other than its heartbeat.
+- An environment of its own for a program, or a sandbox.
+- A program's own list of its inputs. The worker checks a function's
+  parameters against its task's inputs, and has nothing to check a program
+  against.
+
 ## Values
 
 Flow inputs, task inputs and task results are JSON values plus datetimes: dicts,

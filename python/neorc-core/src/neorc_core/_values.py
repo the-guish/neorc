@@ -44,15 +44,19 @@ NUL = "\u0000"
 """The one character a string may not hold: Postgres ``text`` cannot store it."""
 
 
-def encode(value: Any, *, path: str = "value") -> JsonValue:
+def encode(
+    value: Any, *, path: str = "value", limit: int = MAX_VALUE_DEPTH
+) -> JsonValue:
     """Turn a user value into its JSON form, tagging datetimes.
 
     Raises ``InvalidValueError`` for anything neorc does not carry: sets,
     tuples, dates, naive datetimes, non-finite floats, non-string keys, keys
     starting with ``$``, text no store can hold (see ``check_text``), and
-    nesting past ``MAX_VALUE_DEPTH``. ``path`` names the value in the error.
+    nesting past ``limit``. ``path`` names the value in the error. The default
+    limit is for a value entering the system; a worker writing a task's inputs
+    again, for a program, passes ``MAX_JSON_DEPTH``, as it does to ``decode``.
     """
-    return _encode(value, path, 0)
+    return _encode(value, path, 0, limit)
 
 
 def decode(
@@ -144,7 +148,7 @@ pass rather than being retried from every later quote, which is quadratic.
 """
 
 
-def _encode(value: Any, path: str, depth: int) -> JsonValue:
+def _encode(value: Any, path: str, depth: int, limit: int) -> JsonValue:
     # bool before int: a bool is an int in Python.
     if value is None or isinstance(value, bool):
         return value
@@ -163,16 +167,17 @@ def _encode(value: Any, path: str, depth: int) -> JsonValue:
             raise InvalidValueError(f"{path}: datetime {value} has no timezone")
         return {DATETIME_TAG: value.isoformat()}
     if isinstance(value, list):
-        _check_depth(depth, path, MAX_VALUE_DEPTH)
+        _check_depth(depth, path, limit)
         return [
-            _encode(item, f"{path}[{i}]", depth + 1) for i, item in enumerate(value)
+            _encode(item, f"{path}[{i}]", depth + 1, limit)
+            for i, item in enumerate(value)
         ]
     if isinstance(value, dict):
-        _check_depth(depth, path, MAX_VALUE_DEPTH)
+        _check_depth(depth, path, limit)
         encoded: dict[str, JsonValue] = {}
         for key, item in value.items():
             _check_key(key, path)
-            encoded[key] = _encode(item, f"{path}.{key}", depth + 1)
+            encoded[key] = _encode(item, f"{path}.{key}", depth + 1, limit)
         return encoded
     raise InvalidValueError(f"{path}: {type(value).__name__} is not a supported type")
 
