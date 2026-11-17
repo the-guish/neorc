@@ -1,7 +1,7 @@
 # Switch
 
-A switch runs one of several named cases. Its `on` reference gives the name of
-the case to run:
+A switch runs one of several named cases. This flow sends a gift for a VIP
+booking.
 
 ```yaml
 check_vip:
@@ -36,20 +36,18 @@ confirm:
 ```
 
 `on` refers to a task in the same scope as the switch, or to a flow input.
-Its value is a case name. Any other value fails the run.
+Its value is a case name. Other values fail the run.
 
-Each case has `steps` and an `output`. A case may have no steps. The `output`
-key is required, and its value may be `null`. A non-null output refers to a
-step inside the case.
+Each case needs two keys, `steps` and `output`. `steps` may be empty, and
+`output` may be `null`. Any other `output` refers to a step inside the case.
 
-A switch is finished once every step of the chosen case has succeeded. The
-other cases never run.
+A switch finishes once every step of the chosen case has succeeded. The switch
+runs no other case.
 
 Steps outside a case refer only to the switch's output, as `switches.<name>`.
-That output is the chosen case's output, or `null`. A flow's own `output` can
-refer to a switch the same way.
+That output is the chosen case's output. A flow can return a switch's output.
 
-A switch adds no list level. Inside a loop or a fan-out, it chooses a case for
-each iteration or branch.
+A switch adds no list level. It chooses a case again for each iteration or
+branch of an enclosing loop or fan-out.
 
-Step names are unique across the whole flow, cases included.
+Each step has a unique name in the flow, including the steps of every case.
