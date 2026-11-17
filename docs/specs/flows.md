@@ -66,6 +66,10 @@ carry no metadata: a consumer receives plain values, and for a list fan-out
 result *i* lines up with input element *i*. If any branch fails, the fan-in
 task is not executed and the flow fails.
 
+## Switch
+
+A switch runs one of several named cases. See [switch.md](switch.md).
+
 ## Resolving references
 
 What a reference to another task's output resolves to depends on the loops and

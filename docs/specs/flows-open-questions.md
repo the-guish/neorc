@@ -113,7 +113,10 @@ def my_task_handler(my_input_1, my_input_2, other_data_i_need_1, some_config):
 - Is there any branching besides a loop's exit condition? `if done: break`
   in word_picker_rounds is the exit condition. Assumed: no general if/else.
 
-> **Answer:** no other branching.
+> **Answer:** at first, no other branching. Revised: a `switch` step runs one
+> of several named cases.
+
+> **Settled:** moved to [switch.md](switch.md).
 
 ### 2.4 Task definitions vs. flow definitions
 
