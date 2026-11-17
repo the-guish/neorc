@@ -54,7 +54,7 @@ def encode(
     starting with ``$``, text no store can hold (see ``check_text``), and
     nesting past ``limit``. ``path`` names the value in the error. The default
     limit is for a value entering the system; a worker writing a task's inputs
-    again, for a program, passes ``MAX_JSON_DEPTH``, as it does to ``decode``.
+    again, for an executable, passes ``MAX_JSON_DEPTH``, as it does to ``decode``.
     """
     return _encode(value, path, 0, limit)
 

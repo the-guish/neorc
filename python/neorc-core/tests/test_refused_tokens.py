@@ -219,11 +219,11 @@ async def test_a_refused_heartbeat_leaves_a_thread_handler_behind(
         release.touch()
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="the program is a POSIX script")
-async def test_a_refused_heartbeat_ends_a_program_before_the_worker_stops(
+@pytest.mark.skipif(sys.platform == "win32", reason="the executable is a POSIX script")
+async def test_a_refused_heartbeat_ends_a_executable_before_the_worker_stops(
     flows: Manager, tmp_path: Path, refusal: AccessError
 ) -> None:
-    script = tmp_path / "programs" / "waits.sh"
+    script = tmp_path / "executables" / "waits.sh"
     script.parent.mkdir()
     script.write_text("#!/bin/sh\necho $$ > pid\nsleep 30\n")
     script.chmod(0o755)
@@ -232,7 +232,7 @@ async def test_a_refused_heartbeat_ends_a_program_before_the_worker_stops(
             {
                 "name": "f",
                 "version": "1.0.0",
-                "steps": {"work": {"handler": "programs/waits.sh"}},
+                "steps": {"work": {"handler": "executables/waits.sh"}},
             }
         ]
     )
@@ -244,7 +244,7 @@ async def test_a_refused_heartbeat_ends_a_program_before_the_worker_stops(
     with pytest.raises(type(refusal)):
         await asyncio.wait_for(worker.run(), timeout=5)
 
-    # Nothing ran between the worker's stop and this: the program is gone
+    # Nothing ran between the worker's stop and this: the executable is gone
     # already, as it must be for a worker whose process exits there.
     pid = int((tmp_path / "pid").read_text())
     with pytest.raises(ProcessLookupError):

@@ -112,7 +112,7 @@ def test_inputs_already_accepted_decode_past_the_value_depth() -> None:
 
 
 def test_inputs_already_accepted_encode_past_the_value_depth() -> None:
-    """A worker writes a task's inputs again for a program, as deep as they came."""
+    """A worker writes a task's inputs again for an executable, as deep as they came."""
     collected = {"x": [[_nested(MAX_VALUE_DEPTH)]]}
 
     with pytest.raises(InvalidValueError, match="deeper than"):

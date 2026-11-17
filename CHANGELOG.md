@@ -61,20 +61,21 @@ one version, cut from a single tag on `main`.
 
 ### Added
 
-- `neorc-core`: a task's handler may be a program, an executable file in the
-  `programs` directory of the worker's code location, named by its path:
-  `handler: programs/close_month.sh`. The Python worker starts it as a process
-  of its own, with no shell and no arguments, writes the task's inputs to its
-  standard input as one JSON object, and takes the JSON value on its standard
-  output as the task's result; an exit code other than 0 fails the task, with
-  the end of its standard error. So a task can be written in any language. A
-  path that is not plain names, or a file that leads out of `programs`, is
-  refused at the worker's start and when a task names it. A program may touch
-  the file `NEORC_HEARTBEAT_FILE` names: once it has, a heartbeat older than
-  60 seconds has the worker end it and fail the task. The worker stays free
-  while a program runs, and a task that is cancelled ends its program with
-  what the program started. `encode` takes a depth `limit`, as `decode` does.
-  See [workers-and-manager.md](docs/specs/workers-and-manager.md), "Programs".
+- `neorc-core`: a task's handler may be an executable file, so a task can be
+  written in any language. The file is in the `executables` directory of the
+  worker's code location, and the handler names its path:
+  `handler: executables/close_month.sh`. The Python worker starts it as a
+  process of its own, with no shell and no arguments. It writes the task's
+  inputs to standard input as one JSON object. The JSON value on standard
+  output is the task's result. An exit code other than 0 fails the task, with
+  the end of standard error as its error. The worker refuses a path that is not
+  plain names, or a file that leads out of `executables`, at its start and when
+  a task names it. An executable may touch the file `NEORC_HEARTBEAT_FILE`
+  names. Once it has, 60 seconds without a touch end the executable and fail
+  the task. The worker stays free while an executable runs. A cancelled task
+  ends its executable and what it started. `encode` takes a depth `limit`, as
+  `decode` does. See [workers-and-manager.md](docs/specs/workers-and-manager.md),
+  "Executables".
 - `neorc-ui`: `@neorc/ui` exports `formOf`, the reader of a form, and its
   type `Form`. A host's test checks the form it gives neorc against neorc's
   subset with `formOf({ form: messages })`.

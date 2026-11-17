@@ -1,23 +1,23 @@
 # Copyright 2026 The neorc Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Programs as handlers: an executable file of the worker's, run as a task.
+"""Executables as handlers: an executable file of the worker's, run as a task.
 
-A handler that starts with ``programs/`` names an executable file in the
-``programs`` directory of the worker's code location. The worker starts it as
+A handler that starts with ``executables/`` names an executable file in the
+``executables`` directory of the worker's code location. The worker starts it as
 a process of its own, writes the task's inputs to its standard input as one
 JSON object, and reads the task's result from its standard output as one JSON
 value. So a task can be written in any language. See
-docs/specs/workers-and-manager.md, "Programs".
+docs/specs/workers-and-manager.md, "Executables".
 
-Whoever uploads a flow chooses its handlers, so a program is confined as a
-function is. Its path is plain names under ``programs``, with no ``.``, no
+Whoever uploads a flow chooses its handlers, so an executable is confined as a
+function is. Its path is plain names under ``executables``, with no ``.``, no
 ``..`` and no empty part, and the file it leads to, links followed, is in that
 directory too. The file is started as it is: no shell, no arguments, nothing
 of the flow's on its command line.
 
-The worker stays free while a program runs: nothing here blocks its loop, and
-a task that is cancelled ends its program, with everything the program
+The worker stays free while an executable runs: nothing here blocks its loop, and
+a task that is cancelled ends its executable, with everything the executable
 started.
 """
 
@@ -38,97 +38,104 @@ from typing import Any, TypeGuard
 
 from neorc_core import _values
 
-PROGRAMS_DIRECTORY = "programs"
-"""The one directory of a code location that holds programs."""
+EXECUTABLES_DIRECTORY = "executables"
+"""The one directory of a code location that holds executables."""
 
 HEARTBEAT_FILE_ENV = "NEORC_HEARTBEAT_FILE"
-"""Names, to a program, the file it may touch to say it is still working."""
+"""Names, to an executable, the file it may touch to say it is still working."""
 
 HEARTBEAT_STALE_SECONDS = 60.0
-"""How old a heartbeat may get before its program is taken for stuck."""
+"""How old a heartbeat may get before its executable is taken for stuck."""
 
 MAX_LOG_BYTES = 16 * 1024
-"""The most of a program's standard error that is kept: its end."""
+"""The most of an executable's standard error that is kept: its end."""
 
 DRAIN_SECONDS = 1.0
-"""How long a program's output is still read after the program has ended.
+"""How long an executable's output is still read after the executable has ended.
 
-What the program started may hold its output open for longer than that.
+What the executable started may hold its output open for longer than that.
 """
 
-_PREFIX = PROGRAMS_DIRECTORY + "/"
+_PREFIX = EXECUTABLES_DIRECTORY + "/"
 _NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*")
 _CHUNK = 64 * 1024
 
 _log = logging.getLogger(__name__)
 
 
-class ProgramError(Exception):
-    """A program did not give a result: it failed, got stuck, or wrote no JSON.
+class ExecutableError(Exception):
+    """An executable did not give a result: it failed, got stuck, or wrote no JSON.
 
-    Raised by a program's handler, as a function's handler raises its own
+    Raised by an executable's handler, as a function's handler raises its own
     errors: the worker reports it as the task's error, and it goes no further.
     """
 
 
-def is_program(target: object) -> TypeGuard[str]:
-    """Whether a task's handler names a program, not a function."""
+def is_executable(target: object) -> TypeGuard[str]:
+    """Whether a task's handler names an executable, not a function."""
     return isinstance(target, str) and target.startswith(_PREFIX)
 
 
-def resolve_program(
-    target: str, code_location: Path, *, stale_after: float | None = None
+def resolve_executable(
+    target: str, code_location: Path
 ) -> Callable[..., Awaitable[Any]]:
-    """The handler that runs the program ``target`` names under ``code_location``.
+    """The handler that runs the executable ``target`` names under ``code_location``.
 
-    Raises ``ValueError`` saying why there is none, as ``locate_program``
+    Raises ``ValueError`` saying why there is none, as ``locate_executable``
     does. The handler takes the task's inputs by name, whatever their names
-    are. It looks for the program again at every call, since the file may have
-    changed since. A program that beats is taken for stuck ``stale_after``
-    seconds after its last beat, ``HEARTBEAT_STALE_SECONDS`` when not given.
+    are. It looks for the executable again at every call, since the file may have
+    changed since. An executable that beats is taken for stuck
+    ``HEARTBEAT_STALE_SECONDS`` after its last beat.
     """
-    locate_program(target, code_location)
+    locate_executable(target, code_location)
 
     async def run(**inputs: Any) -> Any:
-        program = locate_program(target, code_location)
-        allowed = HEARTBEAT_STALE_SECONDS if stale_after is None else stale_after
-        return await _run(target, program, code_location.resolve(), inputs, allowed)
+        executable = locate_executable(target, code_location)
+        return await _run(
+            target,
+            executable,
+            code_location.resolve(),
+            inputs,
+            HEARTBEAT_STALE_SECONDS,
+        )
 
     return run
 
 
-def locate_program(target: str, code_location: Path) -> Path:
-    """The file ``target`` names in the programs directory of ``code_location``.
+def locate_executable(target: str, code_location: Path) -> Path:
+    """The file ``target`` names in the executables directory of ``code_location``.
 
     Raises ``ValueError`` saying why there is none: the path is not plain
-    names under ``programs``, it leads out of that directory, or there is no
+    names under ``executables``, it leads out of that directory, or there is no
     executable file there. The path returned has its links followed, so what
     was checked is what is started.
     """
     names = target.split("/")
-    if names[0] != PROGRAMS_DIRECTORY or len(names) < 2:
+    if names[0] != EXECUTABLES_DIRECTORY or len(names) < 2:
         raise ValueError(f"{target!r} is not a path under {_PREFIX!r}")
     if not all(_NAME.fullmatch(name) for name in names[1:]):
         raise ValueError(
-            f"{target!r} is not a program's path: after {_PREFIX!r}, names of "
+            f"{target!r} is not an executable's path: after {_PREFIX!r}, names of "
             "letters, digits, '_', '-' and '.', joined by '/', none starting "
             "with '.' or '-'"
         )
-    directory = code_location.resolve() / PROGRAMS_DIRECTORY
-    program = directory.joinpath(*names[1:]).resolve()
-    if not program.is_relative_to(directory):
-        raise ValueError(f"{target!r} leads out of the programs directory {directory}")
-    if not program.is_file():
-        raise ValueError(f"no program {target!r} in the code location")
-    if not os.access(program, os.X_OK):
+    directory = code_location.resolve() / EXECUTABLES_DIRECTORY
+    executable = directory.joinpath(*names[1:]).resolve()
+    if not executable.is_relative_to(directory):
+        raise ValueError(
+            f"{target!r} leads out of the executables directory {directory}"
+        )
+    if not executable.is_file():
+        raise ValueError(f"no executable {target!r} in the code location")
+    if not os.access(executable, os.X_OK):
         raise ValueError(f"{target!r} is not an executable file")
-    return program
+    return executable
 
 
 async def _run(
-    target: str, program: Path, location: Path, inputs: dict[str, Any], stale: float
+    target: str, executable: Path, location: Path, inputs: dict[str, Any], stale: float
 ) -> Any:
-    """Run ``program`` on ``inputs`` and return the value it wrote.
+    """Run ``executable`` on ``inputs`` and return the value it wrote.
 
     The inputs were accepted already and collected into lists by the loops and
     fan-outs between, so they are written at the depth they arrived with.
@@ -141,24 +148,24 @@ async def _run(
     tasks: list[asyncio.Future[Any]] = []
     process: Process | None = None
     with tempfile.TemporaryDirectory(prefix="neorc-task-") as folder:
-        heartbeat = Path(folder) / "heartbeat"
+        heartbeat = _Heartbeat(Path(folder) / "heartbeat")
         try:
             pipes.append(written := await _Pipe.open())
             pipes.append(logged := await _Pipe.open())
             try:
                 process = await asyncio.create_subprocess_exec(
-                    str(program),
+                    str(executable),
                     stdin=PIPE,
                     stdout=written.writing,
                     stderr=logged.writing,
                     cwd=location,
-                    env={**os.environ, HEARTBEAT_FILE_ENV: str(heartbeat)},
-                    # A group of its own, so that ending the program ends what
+                    env={**os.environ, HEARTBEAT_FILE_ENV: str(heartbeat.path)},
+                    # A group of its own, so that ending the executable ends what
                     # it started too.
                     start_new_session=True,
                 )
             except OSError as exc:
-                raise ProgramError(f"{target} could not be started: {exc}") from exc
+                raise ExecutableError(f"{target} could not be started: {exc}") from exc
             written.handed_over()
             logged.handed_over()
             assert process.stdin is not None
@@ -180,8 +187,8 @@ async def _run(
                     return_when=asyncio.FIRST_COMPLETED,
                 )
                 _ensure_fits(target, reading)
-                if not exiting.done() and _is_stale(heartbeat, stale):
-                    raise ProgramError(
+                if not exiting.done() and heartbeat.is_stale(stale):
+                    raise ExecutableError(
                         f"{target} wrote no heartbeat for {stale:g} seconds"
                     )
             await asyncio.wait(tasks, timeout=DRAIN_SECONDS)
@@ -202,18 +209,18 @@ async def _run(
         ended = (
             f"exited with code {code}" if code > 0 else f"was ended by signal {-code}"
         )
-        raise ProgramError(f"{target} {ended}" + (f": {said}" if said else ""))
+        raise ExecutableError(f"{target} {ended}" + (f": {said}" if said else ""))
     if said:
         _log.info("%s wrote to its standard error:\n%s", target, said)
     return _written(target, bytes(output))
 
 
 class _Pipe:
-    """A pipe a program writes to and the worker reads.
+    """A pipe an executable writes to and the worker reads.
 
     The worker owns the reading end, and closes it when the task ends, whoever
-    still holds the other: what a program started may keep the program's
-    output open long after the program has ended.
+    still holds the other: what an executable started may keep the executable's
+    output open long after the executable has ended.
     """
 
     def __init__(
@@ -222,7 +229,7 @@ class _Pipe:
         self._transport = transport
         self.reader = reader
         self.writing: int | None = fd
-        """The end the program writes to, until it is handed over."""
+        """The end the executable writes to, until it is handed over."""
 
     @classmethod
     async def open(cls) -> _Pipe:
@@ -239,7 +246,7 @@ class _Pipe:
         return cls(transport, reader, writing)
 
     def handed_over(self) -> None:
-        """Close this side's writing end: the program has one of its own."""
+        """Close this side's writing end: the executable has one of its own."""
         if self.writing is not None:
             os.close(self.writing)
             self.writing = None
@@ -250,39 +257,59 @@ class _Pipe:
 
 
 def _written(target: str, output: bytes) -> Any:
-    """The value a program wrote: JSON as it travels, or nothing for ``None``."""
+    """The value an executable wrote: JSON as it travels, or nothing for ``None``."""
     try:
         text = output.decode("utf-8")
     except UnicodeDecodeError as exc:
-        raise ProgramError(f"{target} wrote output that is not UTF-8: {exc}") from None
+        raise ExecutableError(
+            f"{target} wrote output that is not UTF-8: {exc}"
+        ) from None
     if not text.strip():
         return None
     _values.ensure_json_depth(text)
     try:
         parsed = json.loads(text)
     except json.JSONDecodeError as exc:
-        raise ProgramError(f"{target} wrote output that is not JSON: {exc}") from None
+        raise ExecutableError(
+            f"{target} wrote output that is not JSON: {exc}"
+        ) from None
     return _values.decode(parsed, path="output")
 
 
 def _ensure_fits(target: str, reading: asyncio.Future[bool]) -> None:
     if reading.done() and not reading.cancelled() and not reading.result():
-        raise ProgramError(
+        raise ExecutableError(
             f"{target} wrote more than {_values.MAX_PAYLOAD_BYTES} bytes of output"
         )
 
 
-def _is_stale(heartbeat: Path, after: float) -> bool:
-    """Whether a program that beats has stopped; one that never did is not watched."""
-    try:
-        beat = heartbeat.stat().st_mtime
-    except OSError:
-        return False
-    return time.time() - beat > after
+class _Heartbeat:
+    """The file an executable touches, read by the time it changes.
+
+    The wall clock can jump, so the file's age is never compared with it. The
+    worker remembers the last modification time it saw and the monotonic time
+    it saw it change.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self._seen: int | None = None
+        self._changed = 0.0
+
+    def is_stale(self, after: float) -> bool:
+        """Whether a beating executable has stopped. A silent one is not watched."""
+        try:
+            beat = self.path.stat().st_mtime_ns
+        except OSError:
+            return False
+        now = time.monotonic()
+        if beat != self._seen:
+            self._seen, self._changed = beat, now
+        return now - self._changed > after
 
 
 def _kill(process: Process) -> None:
-    """End a program that has not ended, with every process of its group."""
+    """End an executable that has not ended, with every process of its group."""
     try:
         if hasattr(os, "killpg"):
             os.killpg(process.pid, signal.SIGKILL)
@@ -293,7 +320,7 @@ def _kill(process: Process) -> None:
 
 
 async def _feed(stdin: asyncio.StreamWriter, sent: bytes) -> None:
-    """Write the inputs and close; a program need not read them."""
+    """Write the inputs and close; an executable need not read them."""
     try:
         stdin.write(sent)
         await stdin.drain()

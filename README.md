@@ -7,7 +7,7 @@ This repository is a monorepo. The packages it publishes:
 
 | Package                           | Description                             |
 | --------------------------------- | --------------------------------------- |
-| [`neorc`](python/neorc)           | Manager service, scheduler and worker commands, Postgres, SQLite and HTTP adapters |
+| [`neorc`](python/neorc)           | Manager service, scheduler and worker commands, Postgres and HTTP adapters |
 | [`neorc-core`](python/neorc-core) | The mechanism: flow definitions, the planner, ports, and the manager, scheduler and worker logic |
 
 ## How it works
@@ -38,59 +38,37 @@ A deployment installs what each host needs — the base install pulls in nothing
     pip install 'neorc[manager,postgres]'   # the manager host
     pip install 'neorc[http]'               # scheduler and worker hosts
 
-The manager is built on [oneberth](https://github.com/the-guish/oneberth),
-which signs people in and keeps the tokens. A file names the manager's public
-URL and, as below, who may sign in; `ONEBERTH_CONFIG` names that file:
-
-```toml
-# oneberth.toml
-[apps.neorc]
-public_url = "https://manager.internal"   # where people open the UI
-```
-
-Start the manager, declare the queues, and create a token for each process
-that will reach the manager. Every request needs one; `neorc tokens create`
-prints its secret once:
+Start the manager, declare the queues, and create an API token for each
+process that will reach the manager. Every request needs one; `neorc tokens
+create` prints its secret once:
 
     export NEORC_DATABASE_URL=postgresql://localhost/neorc
-    export ONEBERTH_CONFIG=oneberth.toml
-    neorc manager start --create-schema
+    neorc manager start --create-schema \
+        --ssl-certfile manager.pem --ssl-keyfile manager-key.pem
     neorc queues declare default --kind worker
-    neorc tokens create github-actions --role neorc/ci
-    neorc tokens create scheduler --role neorc/scheduler
-    neorc tokens create worker-1 --role neorc/worker --resource default
-    neorc tokens create bookings-webhook --role neorc/external-trigger
+    neorc tokens create github-actions --role ci
+    neorc tokens create scheduler --role scheduler
+    neorc tokens create worker-1 --role worker --queue default
+    neorc tokens create bookings-webhook --role external-trigger
 
 Each token has a role, and may do only what its role allows
 ([roles.md](docs/specs/roles.md)):
 
-| Role                     | May                                                                        |
-| ------------------------ | -------------------------------------------------------------------------- |
-| `neorc/ci`               | upload flows                                                               |
-| `neorc/scheduler`        | read flows, runs and events; publish tasks, start sub-runs, end runs       |
-| `neorc/worker`           | fetch, receive, claim, heartbeat and finish the tasks of its one queue     |
-| `neorc/responder`        | list and complete the pending tasks of its one queue                       |
-| `neorc/user`             | read flows, runs, events and queues; start and cancel runs; complete tasks |
-| `neorc/external-trigger` | start runs                                                                 |
+| Role               | May                                                                        |
+| ------------------ | -------------------------------------------------------------------------- |
+| `ci`               | upload flows                                                               |
+| `scheduler`        | read flows, runs and events; publish tasks, start sub-runs, end runs       |
+| `worker`           | fetch, receive, claim, heartbeat and finish the tasks of its one queue     |
+| `responder`        | list and complete the pending tasks of its one queue                       |
+| `user`             | read flows, runs, events and queues; start and cancel runs; complete tasks |
+| `external-trigger` | start runs                                                                 |
 
-A person signed in to the UI holds `neorc/user`, and their scripts send a
-token of their own. A token is sent only over HTTPS, or to a loopback address:
-serve the manager behind a proxy that terminates TLS. `neorc tokens list` and
-`neorc tokens revoke <name>` manage the tokens. The manager has the address of
-its backend, and serves its API under `/neorc/` there.
-
-A manager on one machine can keep its data in a SQLite file instead of
-Postgres. The file is created at the first start, and oneberth's store of
-sign-ins and tokens is `oneberth.db` beside it
-([sqlite-implementation.md](docs/specs/sqlite-implementation.md)). `--local`
-is oneberth's local mode, for one person at the machine: it needs no sign-in
-configuration, listens on `127.0.0.1`, and prints the address that signs that
-person in.
-
-    neorc manager start --database-file neorc.db --local
-    neorc queues declare default --kind worker --database-file neorc.db
-    neorc tokens create worker-1 --role neorc/worker --resource default \
-        --database-file neorc.db
+A person signed in to the UI is a `user`; a `user` token is for their scripts.
+A token is sent only over HTTPS, or to a loopback address: serve the manager
+with a certificate as above, or behind a proxy that terminates TLS. `neorc
+tokens list` and `neorc tokens revoke <name>` manage them. To try it on one
+machine nobody else reaches, `neorc manager start --no-auth` asks for none,
+and allows everything.
 
 Write the work, as plain functions that need not import neorc:
 
@@ -117,45 +95,29 @@ Upload the flows, start the scheduler, and a worker on any host that can reach
 the manager, with the code the handlers import from, each with its token in
 `NEORC_API_TOKEN`:
 
-    export NEORC_MANAGER_ADDRESS=https://manager.internal
+    export NEORC_MANAGER_ADDRESS=https://manager.internal:8420
     NEORC_API_TOKEN=<github-actions> neorc flows upload flows
     NEORC_API_TOKEN=<scheduler>      neorc scheduler start
     NEORC_API_TOKEN=<worker-1>       neorc worker start --code-location .
 
 Start a run from anywhere, with a token that may:
 
-    curl -X POST https://manager.internal/neorc/flows/hello/runs \
+    curl -X POST https://manager.internal:8420/flows/hello/runs \
         -H "authorization: Bearer <bookings-webhook>" \
         -H 'content-type: application/json' -d '{"inputs": {"name": "world"}}'
 
-Or from the web UI the manager serves at `https://manager.internal/ui/`:
+Or from the web UI the manager serves at `https://manager.internal:8420/ui/`:
 the flows, each with its steps drawn as a graph, the runs and every task of
 each, live, as an outline or as a zoomable graph of the run's steps, with a
-form to start a run and a button to cancel one. People sign in to it with an
-identity provider, as below.
+form to start a run and a button to cancel one. People sign in to it with an identity provider, as below; a
+manager started with `--no-auth` asks nobody, and says so on every page.
 
 A flow can give that form its own fields, a list of values, radio buttons, a
-check box, laid out in rows and cards, in a file next to the flow's: [docs/architecture/forms.md](docs/architecture/forms.md),
+check box, in a file next to the flow's: [docs/architecture/forms.md](docs/architecture/forms.md),
 and [examples/code_task](examples/code_task) to try one.
 
 [examples/hello](examples/hello) and [examples/wordplay](examples/wordplay)
 walk through both ways of running, step by step.
-
-## Tasks in any language
-
-A task's handler can be a program in the place of a Python function: an
-executable file in the `programs` directory of the worker's code location.
-
-```yaml
-close_month:
-  handler: programs/close_month.sh
-  params: {month: inputs.month}
-```
-
-The worker starts it as a process of its own, writes the task's inputs to its
-standard input as JSON, and reads the task's result from its standard output.
-A path that leaves that directory is refused
-([workers-and-manager.md](docs/specs/workers-and-manager.md), "Programs").
 
 ## Tasks for a person or another system
 
@@ -167,7 +129,7 @@ work another system does. Such a task waits on an *external* queue until a
 Declare the queue external, and create a responder token for it:
 
     neorc queues declare editors --kind external
-    neorc tokens create inbox-app --role neorc/responder --resource editors
+    neorc tokens create inbox-app --role responder --queue editors
 
 A step names that queue. Its handler is a text for the responder:
 
@@ -181,21 +143,15 @@ approve_draft:
 The responder lists the pending tasks of its queue, each with its inputs
 filled in, and completes one with a result, or with an error that fails it:
 
-    curl https://manager.internal/neorc/queues/editors/tasks/pending \
+    curl https://manager.internal:8420/queues/editors/tasks/pending \
         -H "authorization: Bearer <inbox-app>"
-    curl -X POST https://manager.internal/neorc/tasks/<task id>/complete \
+    curl -X POST https://manager.internal:8420/tasks/<task id>/complete \
         -H "authorization: Bearer <inbox-app>" \
         -H 'content-type: application/json' -d '{"result": {"approved": true}}'
 
 A task is completed once: a second completion answers 409. Workers are kept
 off an external queue. A responder token for a worker queue completes a task
 there until a worker receives it.
-
-A person completes such a task on the queue's page of the web UI. A step can
-name a form for it, as a flow does. The form can show the task's inputs, a
-card for each item of a list in them with a choice in each, and buttons that
-complete the task: [docs/architecture/forms.md](docs/architecture/forms.md),
-and [examples/review_loop](examples/review_loop) to try one.
 
 Every queue is declared before it is used, a worker queue with `--kind
 worker`. An upload naming a queue nobody declared is refused, and so is a
@@ -205,14 +161,12 @@ responder, so a run with a task for a person waits there.
 
 ## Signing in with Google or Okta
 
-oneberth signs people in to the UI with OpenID Connect. Describe the
-providers, and who may sign in, in the same file; secrets stay in the
-environment:
+The UI signs people in with OpenID Connect. Describe the providers, and who
+may sign in, in a file the manager reads; secrets stay in the environment:
 
 ```toml
-# oneberth.toml
-[apps.neorc]
-public_url = "https://manager.internal"   # where people open the UI
+# auth.toml
+public_url = "https://manager.internal:8420"   # where people open the UI
 
 [providers.google]
 title = "Google"
@@ -242,22 +196,21 @@ group = "neorc-users"
 ```
 
     export NEORC_GOOGLE_CLIENT_SECRET=... NEORC_OKTA_CLIENT_SECRET=...
-    neorc manager start --config oneberth.toml
+    neorc manager start --auth-config auth.toml \
+        --ssl-certfile manager.pem --ssl-keyfile manager-key.pem
 
 Register `{public_url}/auth/callback/<provider id>` with each provider as the
-redirect URI, here `https://manager.internal/auth/callback/google`. An
+redirect URI, here `https://manager.internal:8420/auth/callback/google`. An
 `[[allow]]` entry names a provider and one of `everyone = true`, `subject`,
 `email`, `email_domain`, `hosted_domain` (Google only) or `group`; anyone no
 entry matches is refused. For Google, an address counts only in a Workspace
 or at Gmail, since Google verifies personal accounts made with any address,
-so `email_domain` is refused for it: use `hosted_domain`. Everyone signed in
-holds `neorc/user`. A `[[grant]]` entry, with the same matchers and `roles =
-["oneberth/admin"]`, lets a person create service tokens in the UI.
+so `email_domain` is refused for it: use `hosted_domain`. Everyone signed in,
+and every token, may do everything the API allows; roles are for later.
 
-`neorc sessions clear` signs everyone out. The allow list is checked again as
-a person's credentials are used, at most once a minute. The manager is served
-from the root of its origin; behind a proxy, `public_url` is the address
-people type. oneberth's specs describe the file in full.
+`neorc sessions clear` signs everyone out, and a changed allow list applies
+from each person's next sign-in. The manager is served from the root of its
+origin; behind a proxy, `public_url` is the address people type.
 
 ## Documentation
 
@@ -268,10 +221,9 @@ people type. oneberth's specs describe the file in full.
 - [docs/specs/task-completion.md](docs/specs/task-completion.md) — tasks a
   person or another system completes: queue kinds, pending tasks, responders
 - [docs/specs/postgres-implementation.md](docs/specs/postgres-implementation.md)
-- [docs/specs/sqlite-implementation.md](docs/specs/sqlite-implementation.md)
   — how the reference persistence layer receives, leases and recovers
-- [docs/specs/roles.md](docs/specs/roles.md) — neorc's roles and permissions,
-  as oneberth registers them
+- [docs/working-notes/sso-plan.md](docs/working-notes/sso-plan.md) — API
+  tokens and signing in: what is checked, where, and why
 - [docs/working-notes/web-ui-plan.md](docs/working-notes/web-ui-plan.md) — the
   web UI: what it shows, how it is built and shipped, and why
 - [CONTRIBUTING.md](CONTRIBUTING.md) — repository layout and development setup
