@@ -1,0 +1,51 @@
+# A switch: a gift for a VIP booking, and no gift for any other booking.
+# The flow of docs/specs/switch.md. README.md says how to run it.
+name: vip_booking
+version: 1.0.0
+
+inputs:
+  booking_id: number
+
+output: tasks.confirm
+
+steps:
+  load_booking:
+    handler: tasks:load_booking
+    params:
+      booking_id: inputs.booking_id
+
+  # Returns the name of a case: "is_vip" or "not_vip".
+  check_vip:
+    handler: tasks:vip_case
+    params:
+      booking: tasks.load_booking
+
+  route:
+    switch:
+      on: tasks.check_vip
+      cases:
+        is_vip:
+          # The steps of a case refer to each other and to steps outside the
+          # switch.
+          steps:
+            compute_benefit:
+              handler: tasks:vip_benefit
+              params:
+                booking: tasks.load_booking
+            send_gift:
+              handler: tasks:send_gift
+              params:
+                booking: tasks.load_booking
+                benefit: tasks.compute_benefit
+          output: tasks.send_gift
+        # A case states its result, even nothing.
+        not_vip:
+          steps: {}
+          output: null
+
+  # Outside the switch: the output of the case that ran.
+  confirm:
+    handler: tasks:confirm
+    params:
+      booking: tasks.load_booking
+      notice: switches.route

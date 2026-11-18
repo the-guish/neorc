@@ -57,7 +57,12 @@ class Namespace(StrEnum):
     INPUTS = "inputs"
     TASKS = "tasks"
     FLOWS = "flows"
+    SWITCHES = "switches"
     NEORC = "neorc"
+
+
+STEP_NAMESPACES = (Namespace.TASKS, Namespace.FLOWS, Namespace.SWITCHES)
+"""The namespaces that name a step of the flow: its result, output or chosen case's."""
 
 
 NEORC_METADATA = frozenset(
@@ -172,8 +177,54 @@ class SubFlowStep:
     fixed_params: Mapping[str, JsonValue] = field(default_factory=dict)
 
 
-Step = TaskStep | LoopStep | FanOutStep | SubFlowStep
+@dataclass(frozen=True, slots=True)
+class Case:
+    """One case of a switch: its steps, and the step whose result is its output.
+
+    ``output`` is ``None`` for a case that states it has none, and then the
+    switch's output is ``null`` when the case is chosen.
+    """
+
+    name: str
+    steps: tuple[Step, ...]
+    output: Reference | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SwitchStep:
+    """Steps of one case out of several: the one ``on`` names, as a string.
+
+    See docs/specs/switch.md. A switch is no loop or fan-out: the steps of its
+    cases are instances in the switch's own iteration and branch.
+    """
+
+    name: str
+    on: Reference
+    cases: tuple[Case, ...]
+
+    def case(self, name: str) -> Case | None:
+        """The case called ``name``, or ``None`` if the switch has none."""
+        for case in self.cases:
+            if case.name == name:
+                return case
+        return None
+
+
+@dataclass(frozen=True, slots=True)
+class InCase:
+    """A case of a switch, as what a step is inside of."""
+
+    switch: SwitchStep
+    case: Case
+
+    def __str__(self) -> str:
+        return f"case {self.case.name!r} of {self.switch.name}"
+
+
+Step = TaskStep | LoopStep | FanOutStep | SubFlowStep | SwitchStep
 Container = LoopStep | FanOutStep
+Around = LoopStep | FanOutStep | InCase
+"""What a step can be inside of. Only a ``Container`` adds a level to an address."""
 
 
 @dataclass(frozen=True)
@@ -190,9 +241,12 @@ class FlowDefinition:
         """Every step at any depth, with its enclosing loops and fan-outs.
 
         Enclosing containers come outermost first. Steps come in file order,
-        a container before the steps inside it.
+        a container before the steps inside it, and a switch before the steps
+        of its cases. A switch is not a container: a step of a case has the
+        loops and fan-outs its switch has.
         """
-        yield from _walk(self.steps, ())
+        for step, around in _walk(self.steps, ()):
+            yield step, _containers(around)
 
     def step(self, name: str) -> Step:
         """The step called ``name``, at any depth. ``KeyError`` if there is none."""
@@ -200,16 +254,29 @@ class FlowDefinition:
 
     def enclosing(self, name: str) -> tuple[Container, ...]:
         """The loops and fan-outs around step ``name``, outermost first."""
+        return _containers(self._index[name][1])
+
+    def around(self, name: str) -> tuple[Around, ...]:
+        """Everything step ``name`` is inside of, outermost first.
+
+        The loops and fan-outs of ``enclosing``, and between them the cases
+        the step is in, each with its switch.
+        """
         return self._index[name][1]
+
+    def cases_around(self, name: str) -> tuple[InCase, ...]:
+        """The cases step ``name`` is inside of, with their switch, outermost first."""
+        return tuple(a for a in self._index[name][1] if isinstance(a, InCase))
 
     def waits_on(self, name: str) -> frozenset[str]:
         """The steps that must finish before step ``name`` can start.
 
         All of them are siblings of ``name``, in the scope the two share. A step
         referring to one inside a loop or fan-out it is not part of waits for
-        that whole container; a loop or fan-out waits for whatever the steps
-        inside it refer to outside it. References that name no step are left
-        out: validation reports them.
+        that whole container, and one referring to a switch for the switch; a
+        loop, fan-out or switch waits for whatever the steps inside it refer to
+        outside it, and a switch for what its ``on`` reads. References that
+        name no step are left out: validation reports them.
         """
         return self._dependencies.get(name, frozenset())
 
@@ -222,15 +289,15 @@ class FlowDefinition:
     @cached_property
     def _dependencies(self) -> dict[str, frozenset[str]]:
         edges: dict[str, set[str]] = {}
-        for consumer, enclosing in self.walk():
-            consumer_chain = [c.name for c in enclosing] + [consumer.name]
+        for consumer, around in self._index.values():
+            consumer_chain = [*_holders(around), consumer.name]
             for _, reference in step_references(consumer):
-                if reference.namespace not in (Namespace.TASKS, Namespace.FLOWS):
+                if reference.namespace not in STEP_NAMESPACES:
                     continue
                 if reference.name not in self._index:
                     continue
-                target_enclosing = self._index[reference.name][1]
-                target_chain = [c.name for c in target_enclosing] + [reference.name]
+                target_around = self._index[reference.name][1]
+                target_chain = [*_holders(target_around), reference.name]
                 shared = 0
                 while (
                     shared < min(len(consumer_chain), len(target_chain))
@@ -244,23 +311,40 @@ class FlowDefinition:
         return {name: frozenset(targets) for name, targets in edges.items()}
 
     @cached_property
-    def _index(self) -> dict[str, tuple[Step, tuple[Container, ...]]]:
-        return {step.name: (step, enclosing) for step, enclosing in self.walk()}
+    def _index(self) -> dict[str, tuple[Step, tuple[Around, ...]]]:
+        return {step.name: (step, around) for step, around in _walk(self.steps, ())}
 
 
 def step_references(step: Step) -> Iterator[tuple[str, Reference]]:
-    """Every reference a step makes, with where in the file it is."""
+    """Every reference a step makes to what it waits for, with where in the file.
+
+    A case's ``output`` is not one: it reads a step inside the switch itself.
+    """
     if isinstance(step, TaskStep | SubFlowStep):
         for name, reference in step.params.items():
             yield f"{step.name}.params.{name}", reference
     if isinstance(step, FanOutStep) and step.over is not None:
         yield f"{step.name}.fan_out.over", step.over
+    if isinstance(step, SwitchStep):
+        yield f"{step.name}.switch.on", step.on
 
 
 def _walk(
-    steps: tuple[Step, ...], enclosing: tuple[Container, ...]
-) -> Iterator[tuple[Step, tuple[Container, ...]]]:
+    steps: tuple[Step, ...], around: tuple[Around, ...]
+) -> Iterator[tuple[Step, tuple[Around, ...]]]:
     for step in steps:
-        yield step, enclosing
+        yield step, around
         if isinstance(step, LoopStep | FanOutStep):
-            yield from _walk(step.steps, (*enclosing, step))
+            yield from _walk(step.steps, (*around, step))
+        elif isinstance(step, SwitchStep):
+            for case in step.cases:
+                yield from _walk(case.steps, (*around, InCase(step, case)))
+
+
+def _containers(around: tuple[Around, ...]) -> tuple[Container, ...]:
+    return tuple(a for a in around if not isinstance(a, InCase))
+
+
+def _holders(around: tuple[Around, ...]) -> list[str]:
+    """The step each level of ``around`` belongs to: a loop, a fan-out or a switch."""
+    return [a.switch.name if isinstance(a, InCase) else a.name for a in around]

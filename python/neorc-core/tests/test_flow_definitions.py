@@ -429,10 +429,10 @@ def test_reference_and_structure_problems(steps: str, expected: str) -> None:
     assert expected in problems(flow(steps, header="inputs: {x: number}\n"))
 
 
-def test_output_must_refer_to_a_task_or_sub_flow() -> None:
+def test_output_must_refer_to_a_task_a_sub_flow_or_a_switch() -> None:
     header = "inputs: {x: string}\noutput: inputs.x\n"
 
-    assert "must refer to tasks. or flows." in problems(
+    assert "must refer to tasks., flows. or switches." in problems(
         flow("t: {handler: m:f}", header=header)
     )
 

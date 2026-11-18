@@ -111,6 +111,14 @@ async def test_word_picker_rounds_runs_deployed(
         await examples.word_picker_rounds(client, EXAMPLES)
 
 
+@pytest.mark.usefixtures("own_tasks_module")
+async def test_vip_booking_runs_deployed(manager_address: str, tokens: Tokens) -> None:
+    async with deployed_example(
+        manager_address, "vip_booking", ["default"], tokens=tokens
+    ) as client:
+        await examples.vip_booking(client, EXAMPLES)
+
+
 async def test_the_manager_serves_the_ui_and_the_listings(
     manager_address: str, tokens: Tokens
 ) -> None:

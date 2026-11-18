@@ -13,6 +13,11 @@ loop or fan-out around the referenced step is, relative to the consumer, one of:
 
 Each list level nests inside the previous one, outermost container first.
 
+A switch adds no list level, docs/specs/switch.md: ``switches.<name>`` is the
+output of the case it chose, once per iteration and branch the switch is in.
+A step of a case is read from inside that case, and in an iteration where the
+case did not run it reads as ``null``.
+
 Pure code: a definition and a ``RunState`` in, a value out.
 """
 
@@ -24,12 +29,17 @@ from enum import StrEnum
 from neorc_core._errors import ResolutionError
 from neorc_core._values import JsonValue
 from neorc_core.flows._definition import (
+    STEP_NAMESPACES,
+    Around,
+    Case,
     Container,
     FanOutStep,
     FlowDefinition,
+    InCase,
     LoopStep,
     Namespace,
     Reference,
+    SwitchStep,
 )
 from neorc_core.flows._run_state import Address, Outcome, RunState, Scope
 
@@ -58,12 +68,12 @@ def shape(
     """The list levels ``reference`` arrives in for step ``consumer``, outermost first.
 
     ``consumer`` is ``None`` for the flow's output. Inputs and metadata are
-    always single values.
+    always single values. A switch has the levels a task in its place would.
     """
-    if reference.namespace not in (Namespace.TASKS, Namespace.FLOWS):
+    if reference.namespace not in STEP_NAMESPACES:
         return ()
-    around = definition.enclosing(consumer) if consumer is not None else ()
-    levels = _levels(around, definition.enclosing(reference.name))
+    around = definition.around(consumer) if consumer is not None else ()
+    levels = _levels(around, definition.around(reference.name))
     return tuple(level for _, level in levels if level is not None)
 
 
@@ -86,7 +96,7 @@ def resolve(
     ``consumer`` whose scope does not match where its step is in ``definition``.
 
     Raises ``ResolutionError`` when a fan-out's ``over`` value, needed on the
-    way, is not a list.
+    way, is not a list, or a switch's ``on`` value is not the name of a case.
     """
     scope = consumer.scope if consumer is not None else ()
     around = definition.enclosing(consumer.step) if consumer is not None else ()
@@ -99,54 +109,157 @@ def resolve(
         return _metadata(definition, state, consumer, around, reference)
 
     target = reference.name
-    levels = _levels(around, definition.enclosing(target))
+    inside = definition.around(consumer.step) if consumer is not None else ()
+    levels = _levels(inside, definition.around(target))
     return _Collector(definition, state, target, levels, dict(scope)).collect(0, ())
 
 
+def switch_case(
+    definition: FlowDefinition, state: RunState, switch: SwitchStep, scope: Scope
+) -> Case | None:
+    """The case ``switch`` runs within ``scope``, or ``None`` if not known yet.
+
+    ``scope`` is the switch's own: ``on`` is read in that iteration and branch,
+    one value and no list. Raises ``ResolutionError`` if that value is not the
+    name of one of the switch's cases, as a string.
+    """
+    address = Address(switch.name, scope)
+    chosen = _read_own(definition, state, address, switch.on)
+    if chosen is None:
+        return None
+    value = chosen.value
+    if isinstance(value, str):
+        case = switch.case(value)
+        if case is not None:
+            return case
+        given = repr(value) if len(value) <= _SHOWN else repr(value[:_SHOWN]) + "..."
+    else:
+        given = "null" if value is None else f"a {type(value).__name__}"
+    # Sorted: a store may keep a flow's keys in another order than its file.
+    names = ", ".join(sorted(case.name for case in switch.cases))
+    raise ResolutionError(
+        f"{address}: switch.on {switch.on} is {given}, not one of its cases: {names}"
+    )
+
+
+_SHOWN = 60
+"""How much of a string that names no case an error shows."""
+
+
+def _switch_output(
+    definition: FlowDefinition, state: RunState, switch: SwitchStep, scope: Scope
+) -> Resolved | None:
+    """The output of the case ``switch`` chose within ``scope``: ``switches.<name>``."""
+    case = switch_case(definition, state, switch, scope)
+    if case is None:
+        return None
+    if case.output is None:
+        return Resolved(None)
+    return _read_own(definition, state, Address(switch.name, scope), case.output)
+
+
+def _read_own(
+    definition: FlowDefinition, state: RunState, reader: Address, reference: Reference
+) -> Resolved | None:
+    """What ``on`` or a case's ``output`` reads, for the switch at ``reader``.
+
+    The referenced step's result in the switch's own iteration and branch: a
+    loop around both adds no list of iterations so far, as for a loop's exit
+    condition. A loop or fan-out the switch is outside of, which only a
+    case's output can reach into, adds its level as usual.
+    """
+    if reference.namespace is Namespace.INPUTS:
+        return Resolved(state.inputs[reference.name])
+    levels = _levels(
+        definition.around(reader.step),
+        definition.around(reference.name),
+        own_iteration=True,
+    )
+    collector = _Collector(
+        definition, state, reference.name, levels, dict(reader.scope)
+    )
+    return collector.collect(0, ())
+
+
 def _levels(
-    around: tuple[Container, ...], target_around: tuple[Container, ...]
-) -> list[tuple[Container, Level | None]]:
-    """Each container around the target with its level, ``None`` in a shared branch."""
+    around: tuple[Around, ...],
+    target_around: tuple[Around, ...],
+    *,
+    own_iteration: bool = False,
+) -> list[tuple[Around, Level | None]]:
+    """Everything around the target, each with the list level it adds for a reader.
+
+    ``around`` is what the reader is inside of. The level is ``None`` for a
+    case, which adds none, for a fan-out branch the reader shares and, with
+    ``own_iteration``, for a loop iteration it shares.
+    """
     shared = 0
-    while (
-        shared < min(len(around), len(target_around))
-        and around[shared].name == target_around[shared].name
+    while shared < min(len(around), len(target_around)) and _same(
+        around[shared], target_around[shared]
     ):
         shared += 1
-    levels: list[tuple[Container, Level | None]] = []
-    for depth, container in enumerate(target_around):
-        if isinstance(container, LoopStep):
-            inside = depth < shared
-            levels.append(
-                (container, Level.ITERATIONS_SO_FAR if inside else Level.ITERATIONS)
-            )
+    levels: list[tuple[Around, Level | None]] = []
+    for depth, one in enumerate(target_around):
+        inside = depth < shared
+        if isinstance(one, InCase):
+            levels.append((one, None))
+        elif isinstance(one, LoopStep):
+            so_far = None if own_iteration else Level.ITERATIONS_SO_FAR
+            levels.append((one, so_far if inside else Level.ITERATIONS))
         else:
-            levels.append((container, None if depth < shared else Level.BRANCHES))
+            levels.append((one, None if inside else Level.BRANCHES))
     return levels
+
+
+def _same(one: Around, other: Around) -> bool:
+    if isinstance(one, InCase) or isinstance(other, InCase):
+        return (
+            isinstance(one, InCase)
+            and isinstance(other, InCase)
+            and one.switch.name == other.switch.name
+            and one.case.name == other.case.name
+        )
+    return one.name == other.name
 
 
 @dataclass(frozen=True, slots=True)
 class _Collector:
-    """Walks the containers around a target, gathering its instances' values."""
+    """Walks what is around a target, gathering its instances' values."""
 
     definition: FlowDefinition
     state: RunState
     target: str
-    levels: list[tuple[Container, Level | None]]
+    levels: list[tuple[Around, Level | None]]
     consumer_scope: dict[str, int]
 
     def on_path(self, scope: Scope) -> bool:
         """Whether ``scope`` is the start of the consumer's own scope."""
         return all(self.consumer_scope.get(name) == n for name, n in scope)
 
+    def instance(self, scope: Scope) -> Resolved | None:
+        """The target's one value within ``scope``, every level above it walked."""
+        target = self.definition.step(self.target)
+        if isinstance(target, SwitchStep):
+            return _switch_output(self.definition, self.state, target, scope)
+        result = self.state.get(Address(self.target, scope))
+        if result is None or result.outcome is not Outcome.SUCCEEDED:
+            return None
+        return Resolved(result.value)
+
     def collect(self, depth: int, scope: Scope) -> Resolved | None:
         if depth == len(self.levels):
-            result = self.state.get(Address(self.target, scope))
-            if result is None or result.outcome is not Outcome.SUCCEEDED:
-                return None
-            return Resolved(result.value)
+            return self.instance(scope)
 
         container, level = self.levels[depth]
+        if isinstance(container, InCase):
+            chosen = switch_case(self.definition, self.state, container.switch, scope)
+            if chosen is None:
+                return None
+            if chosen.name != container.case.name:
+                # The switch ran another case in that iteration: position i
+                # stays iteration i, with nothing in it.
+                return Resolved(None)
+            return self.collect(depth + 1, scope)
         if level is None:
             number = self.consumer_scope[container.name]
             # The consumer's own branch, in every iteration so far of a loop

@@ -1,10 +1,11 @@
 # Copyright 2026 The neorc Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""The example scenarios: ``examples/hello`` and ``examples/wordplay`` run to their end.
+"""The example scenarios: ``examples/hello``, ``wordplay`` and ``vip_booking``.
 
 Each function uploads an example's flows through a ``ManagerClient``, starts a
-run, waits for it to finish, and asserts what it produced. What runs the
+run, waits for it to finish, and asserts what it produced: the example runs to
+its end. What runs the
 scheduler and the workers is the caller's choice: ``LocalCluster`` in memory,
 or a deployment on Postgres and HTTP. The scenarios are the same either way,
 which is the point.
@@ -119,3 +120,30 @@ async def word_picker_rounds(
     assert report["flow_run_id"] == str(run.id)
     assert report["attempts"] == 1
     return run
+
+
+async def vip_booking(
+    client: ManagerClient, examples: Path, *, timeout: float = DEFAULT_TIMEOUT
+) -> list[Run]:
+    """``examples/vip_booking``: a switch, run once for each of its two cases.
+
+    The gift's tasks run for the VIP booking and for no other.
+    """
+    flows = examples / "vip_booking" / "flows"
+    confirmed = {
+        1: "Booking 1 is confirmed.",
+        2: "Booking 2 is confirmed: champagne is on its way to Grace.",
+    }
+    gift = {Address("compute_benefit"), Address("send_gift")}
+    runs = []
+    for booking_id, output in confirmed.items():
+        run = await run_flow(
+            client, flows, "vip_booking", {"booking_id": booking_id}, timeout=timeout
+        )
+        state = await client.run_state(run.id)
+
+        assert run.status is RunStatus.SUCCEEDED, run
+        assert run.output == output
+        assert (gift & set(state.steps)) == (gift if booking_id == 2 else set())
+        runs.append(run)
+    return runs

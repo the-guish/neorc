@@ -22,13 +22,16 @@ from neorc_core import _values
 from neorc_core._errors import FlowDefinitionError, InvalidValueError
 from neorc_core.flows._definition import (
     DEFAULT_QUEUE,
+    Case,
     FanOutStep,
     FlowDefinition,
     InputType,
     LoopStep,
+    Namespace,
     Reference,
     Step,
     SubFlowStep,
+    SwitchStep,
     TaskStep,
     Version,
     is_name,
@@ -38,12 +41,13 @@ from neorc_core.flows._validation import check_flow, check_flow_set
 from neorc_core.forms import form_problems, inline_form
 
 _TOP_KEYS = {"name", "version", "inputs", "output", "steps", "form"}
-_KIND_KEYS = ("handler", "loop", "fan_out", "flow")
+_KIND_KEYS = ("handler", "loop", "fan_out", "flow", "switch")
 _STEP_KEYS = {
     "handler": {"handler", "queue", "params", "fixed_params", "form"},
     "loop": {"loop", "steps"},
     "fan_out": {"fan_out", "steps"},
     "flow": {"flow", "params", "fixed_params"},
+    "switch": {"switch"},
 }
 
 
@@ -295,6 +299,7 @@ class _Parser:
         self.problems: list[str] = []
         self._names: set[str] = set()
         self._with_form: set[str] = set()
+        self._chosen_on: list[tuple[str, Reference]] = []
 
     def problem(self, path: str, message: str) -> None:
         self.problems.append(f"{path}: {message}")
@@ -313,6 +318,14 @@ class _Parser:
         if "output" in data:
             output = self.reference(data["output"], "output")
         steps = self.steps(data.get("steps"), "steps")
+        # Once every step is read: a switch may come before the task it reads.
+        for path, on in self._chosen_on:
+            if on.namespace is Namespace.TASKS and on.name in self._with_form:
+                self.problem(
+                    path,
+                    f"{on.name} has a form, so its result is a mapping, and on "
+                    "gives the name of a case",
+                )
         if name is None or version is None:
             return None
         return FlowDefinition(name, version, inputs, steps, output)
@@ -364,9 +377,11 @@ class _Parser:
                 inputs[name] = input_type
         return inputs
 
-    def steps(self, data: Any, path: str) -> tuple[Step, ...]:
-        if not isinstance(data, Mapping) or not data:
-            self.problem(path, "must be a non-empty mapping of step names to steps")
+    def steps(self, data: Any, path: str, *, empty: bool = False) -> tuple[Step, ...]:
+        """The steps of a mapping; only a case's may be ``empty``."""
+        if not isinstance(data, Mapping) or not (data or empty):
+            some = "a" if empty else "a non-empty"
+            self.problem(path, f"must be {some} mapping of step names to steps")
             return ()
         steps: list[Step] = []
         for key, value in data.items():
@@ -422,6 +437,8 @@ class _Parser:
             )
         if kind == "loop":
             return self.loop(name, data, path)
+        if kind == "switch":
+            return self.switch(name, data["switch"], f"{path}.switch")
         return self.fan_out(name, data, path)
 
     def loop(self, name: str, data: Mapping[str, Any], path: str) -> LoopStep | None:
@@ -467,6 +484,58 @@ class _Parser:
             return None if width is None else FanOutStep(name, steps, range=width)
         over = self.reference(config["over"], f"{path}.fan_out.over")
         return None if over is None else FanOutStep(name, steps, over=over)
+
+    def switch(self, name: str, config: Any, path: str) -> SwitchStep | None:
+        if not isinstance(config, Mapping):
+            self.problem(path, "must be a mapping")
+            return None
+        self.keys(config, path, allowed={"on", "cases"}, required={"on", "cases"})
+        on = self.reference(config["on"], f"{path}.on") if "on" in config else None
+        cases = (
+            self.cases(config["cases"], f"{path}.cases") if "cases" in config else ()
+        )
+        if on is None:
+            return None
+        self._chosen_on.append((f"{path}.on", on))
+        return SwitchStep(name, on, cases)
+
+    def cases(self, data: Any, path: str) -> tuple[Case, ...]:
+        if not isinstance(data, Mapping) or not data:
+            self.problem(path, "must be a non-empty mapping of case names to cases")
+            return ()
+        cases: list[Case] = []
+        for key, value in data.items():
+            case = self.case(key, value, f"{path}.{key}")
+            if case is not None:
+                cases.append(case)
+        return tuple(cases)
+
+    def case(self, key: Any, data: Any, path: str) -> Case | None:
+        if isinstance(key, bool):
+            # What YAML makes of an unquoted true or false; JSON keys are text.
+            word = str(key).lower()
+            self.problem(
+                path,
+                f"{word} is read as a boolean: write it in quotes, {word!r}, "
+                "to name a case",
+            )
+            name = None
+        else:
+            name = self.name(key, path)
+        if not isinstance(data, Mapping):
+            self.problem(path, "must be a mapping with 'steps' and 'output'")
+            return None
+        required = {"steps", "output"}
+        self.keys(data, path, allowed=required, required=required)
+        steps = (
+            self.steps(data["steps"], f"{path}.steps", empty=True)
+            if "steps" in data
+            else ()
+        )
+        output = None
+        if data.get("output") is not None:
+            output = self.reference(data["output"], f"{path}.output")
+        return None if name is None else Case(name, steps, output)
 
     def params(self, data: Any, path: str) -> dict[str, Reference]:
         if not isinstance(data, Mapping):

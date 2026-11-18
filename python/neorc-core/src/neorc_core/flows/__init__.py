@@ -6,15 +6,19 @@
 from neorc_core.flows._definition import (
     DEFAULT_QUEUE,
     NEORC_METADATA,
+    Around,
+    Case,
     Container,
     FanOutStep,
     FlowDefinition,
+    InCase,
     InputType,
     LoopStep,
     Namespace,
     Reference,
     Step,
     SubFlowStep,
+    SwitchStep,
     TaskStep,
     Version,
     is_name,
@@ -31,16 +35,26 @@ from neorc_core.flows._loader import (
     read_flows,
     validate_flow_set,
 )
-from neorc_core.flows._references import Level, Resolved, fan_out_width, resolve, shape
+from neorc_core.flows._references import (
+    Level,
+    Resolved,
+    fan_out_width,
+    resolve,
+    shape,
+    switch_case,
+)
 from neorc_core.flows._run_state import Address, Outcome, RunState, Scope, StepResult
 
 __all__ = [
     "DEFAULT_QUEUE",
     "NEORC_METADATA",
     "Address",
+    "Around",
+    "Case",
     "Container",
     "FanOutStep",
     "FlowDefinition",
+    "InCase",
     "InputType",
     "Level",
     "LoopStep",
@@ -53,6 +67,7 @@ __all__ = [
     "Step",
     "StepResult",
     "SubFlowStep",
+    "SwitchStep",
     "TaskStep",
     "Version",
     "fan_out_width",
@@ -68,5 +83,6 @@ __all__ = [
     "read_flows",
     "resolve",
     "shape",
+    "switch_case",
     "validate_flow_set",
 ]

@@ -55,6 +55,13 @@ async def test_word_picker_rounds_pads_each_word_to_eight_characters() -> None:
         await examples.word_picker_rounds(cluster.client, EXAMPLES)
 
 
+async def test_vip_booking_sends_a_gift_for_the_vip_booking_only() -> None:
+    async with LocalCluster(code_location=EXAMPLES / "vip_booking") as cluster:
+        await cluster.upload(EXAMPLES / "vip_booking" / "flows")
+        await cluster.start()
+        await examples.vip_booking(cluster.client, EXAMPLES)
+
+
 async def test_run_local_runs_an_example_to_its_end() -> None:
     """What ``neorc run`` does, on the same flows."""
     run = await run_local(

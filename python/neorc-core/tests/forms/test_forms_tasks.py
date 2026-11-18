@@ -220,6 +220,51 @@ def test_a_tasks_form_in_a_loop_is_read_in_too(tmp_path: Path) -> None:
     assert parse_flow(content).name == "rounds"
 
 
+def test_a_tasks_form_in_a_case_of_a_switch_is_read_in_too(tmp_path: Path) -> None:
+    (tmp_path / "ask.form.json").write_text(json.dumps(review_form()))
+    ask = {"queue": "editors", "handler": "ask", "form": "ask.form.json"}
+    data = {
+        "name": "routed",
+        "version": "1.0.0",
+        "inputs": {"kind": "string"},
+        "steps": {
+            "route": {
+                "switch": {
+                    "on": "inputs.kind",
+                    "cases": {
+                        "asked": {"steps": {"ask": ask}, "output": "tasks.ask"},
+                        "skipped": {"steps": {}, "output": None},
+                    },
+                }
+            }
+        },
+    }
+
+    content = inline_form(data, tmp_path, read_flow_json)
+
+    assert step_forms(content) == {"ask": review_form()}
+    assert parse_flow(content).name == "routed"
+    # The structure given is left as it was: the form is read into a copy.
+    assert ask["form"] == "ask.form.json"
+
+
+def test_a_form_file_missing_in_a_case_is_refused_naming_the_case(
+    tmp_path: Path,
+) -> None:
+    ask = {"queue": "editors", "handler": "ask", "form": "ask.form.json"}
+    case = {"steps": {"ask": ask}, "output": None}
+    switch = {"switch": {"on": "inputs.kind", "cases": {"asked": case}}}
+    data = {"name": "routed", "version": "1.0.0", "steps": {"route": switch}}
+
+    with pytest.raises(FlowDefinitionError) as refused:
+        inline_form(data, tmp_path, read_flow_json)
+
+    assert refused.value.problems == [
+        "steps.route.switch.cases.asked.steps.ask.form: cannot read "
+        "ask.form.json: No such file or directory"
+    ]
+
+
 def test_a_tasks_form_file_that_is_missing_is_refused_naming_the_step(
     flows: Path,
 ) -> None:

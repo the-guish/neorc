@@ -11,19 +11,31 @@ from __future__ import annotations
 
 from neorc_core.flows._definition import (
     NEORC_METADATA,
+    STEP_NAMESPACES,
+    Case,
     Container,
     FanOutStep,
     FlowDefinition,
+    InCase,
+    InputType,
     LoopStep,
     Namespace,
     Reference,
     Step,
     SubFlowStep,
+    SwitchStep,
     TaskStep,
     step_references,
 )
 
 _ROOT = "the flow"
+
+_KINDS: dict[Namespace, tuple[type, str]] = {
+    Namespace.TASKS: (TaskStep, "is not a task; tasks. refers to tasks"),
+    Namespace.FLOWS: (SubFlowStep, "is not a sub-flow; flows. refers to them"),
+    Namespace.SWITCHES: (SwitchStep, "is not a switch; switches. refers to them"),
+}
+"""For each namespace that names a step, the kind of step, and what to say otherwise."""
 
 
 def check_flow(definition: FlowDefinition) -> list[str]:
@@ -37,6 +49,9 @@ def check_flow(definition: FlowDefinition) -> list[str]:
                 )
         if isinstance(step, LoopStep):
             problems.extend(_check_exit_condition(step))
+        if isinstance(step, SwitchStep):
+            problems.extend(_check_switch(definition, step))
+            continue  # its one reference, on, is checked with it
         for where, reference in step_references(step):
             problems.extend(
                 _check_reference(definition, step, enclosing, where, reference)
@@ -48,13 +63,15 @@ def check_flow(definition: FlowDefinition) -> list[str]:
 
 
 def check_output(definition: FlowDefinition, output: Reference) -> list[str]:
-    """Problems with ``output`` as a flow's output: a task or sub-flow of the flow.
+    """Problems with ``output`` as a flow's output: a task, sub-flow or switch of it.
 
     For the flow's own output, and for the reference a run is succeeded with.
     """
-    if output.namespace not in (Namespace.TASKS, Namespace.FLOWS):
-        return [f"output: {output} must refer to tasks. or flows."]
-    return _check_target(definition, "output", output)
+    if output.namespace not in STEP_NAMESPACES:
+        return [f"output: {output} must refer to tasks., flows. or switches."]
+    return _check_target(definition, "output", output) or _check_cases(
+        definition, "output", (), output
+    )
 
 
 def check_flow_set(definitions: list[FlowDefinition]) -> list[str]:
@@ -113,6 +130,13 @@ def _check_reference(
         return []
     if reference.namespace is Namespace.NEORC:
         return _check_metadata(consumer, enclosing, where, reference)
+    return _check_step_reference(definition, consumer, where, reference)
+
+
+def _check_step_reference(
+    definition: FlowDefinition, consumer: Step, where: str, reference: Reference
+) -> list[str]:
+    """Problems with a reference from ``consumer`` to another step of the flow."""
     problems = _check_target(definition, where, reference)
     if problems:
         return problems
@@ -122,7 +146,13 @@ def _check_reference(
         c.name for c in definition.enclosing(reference.name)
     ):
         return [f"{where}: {reference} is inside the fan-out it feeds"]
-    return []
+    inside = definition.cases_around(consumer.name)
+    if reference.name in (around.switch.name for around in inside):
+        return [
+            f"{where}: {reference} is the switch this step is inside of, and it "
+            "would wait on itself"
+        ]
+    return _check_cases(definition, where, inside, reference)
 
 
 def _check_target(
@@ -132,11 +162,106 @@ def _check_target(
         target = definition.step(reference.name)
     except KeyError:
         return [f"{where}: there is no step {reference.name!r}"]
-    if reference.namespace is Namespace.TASKS and not isinstance(target, TaskStep):
-        return [f"{where}: {reference.name!r} is not a task; tasks. refers to tasks"]
-    if reference.namespace is Namespace.FLOWS and not isinstance(target, SubFlowStep):
-        return [f"{where}: {reference.name!r} is not a sub-flow; flows. refers to them"]
+    kind, otherwise = _KINDS[reference.namespace]
+    if not isinstance(target, kind):
+        return [f"{where}: {reference.name!r} {otherwise}"]
     return []
+
+
+def _check_cases(
+    definition: FlowDefinition,
+    where: str,
+    inside: tuple[InCase, ...],
+    reference: Reference,
+) -> list[str]:
+    """A step of a case is read from inside that case only; outside, its switch is.
+
+    ``inside`` are the cases the reader is in, outermost first.
+    """
+    reader = [(around.switch.name, around.case.name) for around in inside]
+    for depth, around in enumerate(definition.cases_around(reference.name)):
+        switch = around.switch.name
+        own = reader[depth : depth + 1]
+        if own == [(switch, around.case.name)]:
+            continue
+        if own and own[0][0] == switch:
+            return [
+                f"{where}: {reference} is inside {around}, and a step of "
+                f"another case of {switch} cannot read it"
+            ]
+        return [
+            f"{where}: {reference} is inside {around}; outside {switch}, read "
+            f"switches.{switch}"
+        ]
+    return []
+
+
+def _check_switch(definition: FlowDefinition, switch: SwitchStep) -> list[str]:
+    """Problems with a switch's ``on`` and with each of its cases' ``output``."""
+    problems = _check_on(definition, switch)
+    inside = definition.cases_around(switch.name)
+    for case in switch.cases:
+        where = f"{switch.name}.switch.cases.{case.name}.output"
+        problems.extend(
+            _check_case_output(definition, where, (*inside, InCase(switch, case)))
+        )
+    return problems
+
+
+def _check_on(definition: FlowDefinition, switch: SwitchStep) -> list[str]:
+    """``on`` reads one value: a string input, or a step around the switch."""
+    where = f"{switch.name}.switch.on"
+    on = switch.on
+    if on.namespace is Namespace.INPUTS:
+        declared = definition.inputs.get(on.name)
+        if declared is None:
+            return [f"{where}: the flow has no input {on.name!r}"]
+        if declared is not InputType.STRING:
+            return [
+                f"{where}: {on} is a {declared.value}, and on takes only string inputs"
+            ]
+        return []
+    if on.namespace not in STEP_NAMESPACES:
+        return [f"{where}: {on} must refer to inputs., tasks., flows. or switches."]
+    problems = _check_target(definition, where, on)
+    if problems:
+        return problems
+    if switch.name in (a.switch.name for a in definition.cases_around(on.name)):
+        return [f"{where}: {on} is inside the switch it chooses a case of"]
+    problems = _check_step_reference(definition, switch, where, on)
+    if problems:
+        return problems
+    around = [container.name for container in definition.enclosing(switch.name)]
+    for container in definition.enclosing(on.name):
+        if container.name not in around:
+            kind = "loop" if isinstance(container, LoopStep) else "fan-out"
+            return [
+                f"{where}: {on} is inside the {kind} {container.name}, which "
+                f"{switch.name} is outside of, and on reads one value"
+            ]
+    return []
+
+
+def _check_case_output(
+    definition: FlowDefinition, where: str, inside: tuple[InCase, ...]
+) -> list[str]:
+    """A case's output is ``null``, or a step inside the case and no deeper case."""
+    case: Case = inside[-1].case
+    output = case.output
+    if output is None:
+        return []
+    if output.namespace not in STEP_NAMESPACES:
+        return [f"{where}: {output} must be null, or refer to a step inside the case"]
+    problems = _check_target(definition, where, output)
+    if problems:
+        return problems
+    target = definition.cases_around(output.name)
+    if len(target) < len(inside) or any(
+        (a.switch.name, a.case.name) != (b.switch.name, b.case.name)
+        for a, b in zip(target, inside, strict=False)
+    ):
+        return [f"{where}: {output} is not a step inside {inside[-1]}"]
+    return _check_cases(definition, where, inside, output)
 
 
 def _check_metadata(
@@ -161,18 +286,21 @@ def _check_metadata(
 def _check_cycles(definition: FlowDefinition) -> list[str]:
     """Steps that wait on each other, within the scope they share."""
     graphs: dict[str, dict[str, set[str]]] = {}
-    for step, enclosing in definition.walk():
+    for step, _ in definition.walk():
         waits_on = definition.waits_on(step.name)
         if waits_on:
-            scope = enclosing[-1].name if enclosing else _ROOT
+            around = definition.around(step.name)
+            scope = _ROOT
+            if around:
+                last = around[-1]
+                scope = str(last) if isinstance(last, InCase) else repr(last.name)
             graphs.setdefault(scope, {})[step.name] = set(waits_on)
 
     problems = []
     for scope, edges in graphs.items():
         for cycle in _cycles(edges):
-            where = scope if scope == _ROOT else repr(scope)
             problems.append(
-                f"steps wait on each other in {where}: " + " -> ".join(cycle)
+                f"steps wait on each other in {scope}: " + " -> ".join(cycle)
             )
     return problems
 

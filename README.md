@@ -248,7 +248,9 @@ people type. oneberth's specs describe the file in full.
 - [docs/specs/core.md](docs/specs/core.md) — the components and what they owe
   each other
 - [docs/specs/flows.md](docs/specs/flows.md) — flow files: tasks, loops,
-  fan-outs, sub-flows and references
+  fan-outs, switches, sub-flows and references
+- [docs/specs/switch.md](docs/specs/switch.md) — a switch runs one of several
+  named cases; [examples/vip_booking](examples/vip_booking) to try one
 - [docs/specs/task-completion.md](docs/specs/task-completion.md) — tasks a
   person or another system completes: queue kinds, pending tasks, responders
 - [docs/specs/postgres-implementation.md](docs/specs/postgres-implementation.md)

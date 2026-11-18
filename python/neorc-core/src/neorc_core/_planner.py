@@ -31,9 +31,11 @@ from neorc_core.flows import (
     Scope,
     Step,
     SubFlowStep,
+    SwitchStep,
     TaskStep,
     fan_out_width,
     resolve,
+    switch_case,
 )
 
 _FILLED_IN_LATER = frozenset({"task_id", "flow_run_id", "started_by", "attempts"})
@@ -83,7 +85,8 @@ def plan(definition: FlowDefinition, state: RunState) -> list[Action]:
 
     Every task and sub-flow instance that is ready and not started yet is
     published or started, in file order, branches and iterations in increasing
-    order. Once every step has finished, the run succeeds. A run that can go no
+    order. A switch runs the steps of the case its ``on`` names, and no other
+    case. Once every step has finished, the run succeeds. A run that can go no
     further, because a task or sub-flow run failed or the flow cannot carry on,
     gets a single ``FailRun`` instead of anything else.
     """
@@ -140,6 +143,13 @@ class _Planner:
             return self.body_finished(step, iteration) and (
                 self.exit_value(step, iteration) is True
             )
+        if isinstance(step, SwitchStep):
+            # The steps of the chosen case, in the switch's own scope: a
+            # switch is no iteration or branch of its own.
+            case = switch_case(self.definition, self.state, step, scope)
+            return case is not None and all(
+                self.finished(inner, scope) for inner in case.steps
+            )
         width = fan_out_width(self.definition, self.state, step, scope)
         if width is None:
             return False
@@ -166,6 +176,10 @@ class _Planner:
             width = fan_out_width(self.definition, self.state, step, scope)
             for index in range(1, (width or 0) + 1):
                 self.scope(step.steps, (*scope, (step.name, index)))
+        elif isinstance(step, SwitchStep):
+            case = switch_case(self.definition, self.state, step, scope)
+            if case is not None:
+                self.scope(case.steps, scope)
 
     def advance_loop(self, loop: LoopStep, scope: Scope) -> None:
         """Run the current iteration, or start the next one once it finished."""
