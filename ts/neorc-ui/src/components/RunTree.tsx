@@ -1,5 +1,6 @@
 import {
   addressKey,
+  chosenCase,
   instancesOf,
   iterationOutcome,
   type Published,
@@ -14,7 +15,8 @@ import { TaskDetails } from "./TaskDetails";
 /**
  * The run's steps as its definition lays them out, each with what the run
  * has done there: tasks with their status, loops with their iterations,
- * fan-outs with their branches, and sub-flows linking to their runs.
+ * fan-outs with their branches, switches with their cases, and sub-flows
+ * linking to their runs.
  */
 export function RunTree({
   steps,
@@ -99,7 +101,60 @@ function Step({
     case "loop":
     case "fan_out":
       return <Container step={step} scope={scope} done={done} />;
+    case "switch":
+      return <Switch step={step} scope={scope} done={done} />;
   }
+}
+
+/**
+ * A switch with every case it has, the one it chose apart from the others:
+ * the steps of a case are at the switch's own scope, in no iteration or
+ * branch of their own.
+ */
+function Switch({
+  step,
+  scope,
+  done,
+}: {
+  step: Extract<StepNode, { kind: "switch" }>;
+  scope: Scope;
+  done: Published;
+}) {
+  const chosen = chosenCase(step, scope, done);
+  return (
+    <div className={`neorc-card neorc-container-card${chosen === undefined ? " neorc-not-yet" : ""}`}>
+      <div className="neorc-step-line">
+        <span className="neorc-step-text">
+          <strong>{step.name}</strong>{" "}
+          <span className="neorc-muted">
+            switch on <code>{step.on}</code>
+          </span>
+        </span>
+      </div>
+      {step.cases.map((one) => {
+        const ran = chosen === undefined ? "not chosen yet" : chosen === one.name ? "chosen" : "not chosen";
+        return (
+          <section
+            key={one.name}
+            className={`neorc-instance${chosen === one.name ? "" : " neorc-not-yet"}`}
+            aria-label={`${step.name} case ${one.name}`}
+          >
+            <h4>
+              case {one.name}{" "}
+              <span className="neorc-muted">
+                · {ran} · {one.output === undefined ? "no output" : `output ${one.output}`}
+              </span>
+            </h4>
+            {one.children.length === 0 ? (
+              <p className="neorc-muted neorc-case-empty">no steps</p>
+            ) : (
+              <RunTree steps={one.children} scope={scope} done={done} />
+            )}
+          </section>
+        );
+      })}
+    </div>
+  );
 }
 
 /** The status in words, and how long it took once it has: colour alone says nothing to everyone. */

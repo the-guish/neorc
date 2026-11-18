@@ -815,6 +815,12 @@
   opacity: 0.7;
 }
 
+/* A case of a switch that has no steps. */
+.neorc-case-empty {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
 .neorc-step-card.neorc-not-yet {
   border-style: dashed;
 }

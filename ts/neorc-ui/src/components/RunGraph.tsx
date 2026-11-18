@@ -358,6 +358,10 @@ function ContainerNode({
         <span className="neorc-muted">{data.about}</span>
       </div>
       {loop && <IterationPicker name={data.name} loop={loop} />}
+      {/* A switch has an output, which the steps reading it are joined from. */}
+      {data.container === "switch" && (
+        <Handle type="source" position={Position.Bottom} isConnectable={false} />
+      )}
     </div>
   );
 }

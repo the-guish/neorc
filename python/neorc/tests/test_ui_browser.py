@@ -15,7 +15,9 @@ A second journey is a person's on ``examples/approval``, in oneberth's local
 mode, signed in with a ticket: the queues, a queue's tasks, and the two
 answers its run waits for. A third is a person's on ``examples/review_loop``,
 in the local mode too: a list of issues triaged on a queue's page, two rounds
-of it, and the run ending with the result.
+of it, and the run ending with the result. A fourth is on
+``examples/vip_booking``, in the local mode too: a switch and its cases on a
+flow's page, and on the pages of two runs, each with the case it chose.
 Skipped without a built UI or a browser: CI builds and installs both for one
 Python, and contributing/dev-environment.md says how to locally.
 ``NEORC_TEST_CHROMIUM`` names a Chromium to launch instead of Playwright's own.
@@ -54,6 +56,7 @@ from oneberth.web.testing import (
 
 from neorc.manager import build_app
 from neorc_core.flows import read_flows
+from neorc_core.testing import examples
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
@@ -216,6 +219,25 @@ async def triaging(
         queues=["default"],
         served=["default"],
         external=["editors"],
+        local=True,
+    ) as deployment:
+        yield deployment
+
+
+@pytest.fixture
+async def routing(
+    pg_schema: str, monkeypatch: pytest.MonkeyPatch
+) -> AsyncIterator[tuple[Deployed, ManagerClient]]:
+    """The manager serving the built UI, the vip_booking example uploaded.
+
+    Its one queue, ``default``, has a worker: a run goes to its end alone.
+    """
+    async with _deployment(
+        pg_schema,
+        monkeypatch,
+        "vip_booking",
+        queues=["default"],
+        served=["default"],
         local=True,
     ) as deployment:
         yield deployment
@@ -619,3 +641,88 @@ async def test_a_person_triages_a_list_of_issues_in_the_browser(
 
     # The browser's console names the one completion the manager refused.
     assert len(complaints) == 1 and "status of 422" in complaints[0], complaints
+
+
+@pytest.mark.usefixtures("own_tasks_module")
+async def test_a_switch_shows_its_cases_and_the_one_a_run_chose_in_the_browser(
+    routing: tuple[Deployed, ManagerClient], browsing: tuple[Page, list[str]]
+) -> None:
+    """docs/specs/switch.md, on a flow's page and on the pages of two runs.
+
+    A switch is a box holding a box per case. A run says which case it chose,
+    in the outline and in the graph, and the other case stays as it was.
+    """
+    from playwright.async_api import expect
+
+    (deployed, client), (page, complaints) = routing, browsing
+    ui_address = deployed.address
+    expect.set_options(timeout=10_000)
+    vip = await client.start_run("vip_booking", {"booking_id": 2})
+    other = await client.start_run("vip_booking", {"booking_id": 1})
+    for run in (vip, other):
+        await examples.wait_for_run(client, run.id, timeout=RUN_TIMEOUT_MS / 1000)
+
+    # The flow's page: the switch, its two cases, and the steps of each.
+    await _open_signed_in(page, deployed, "#/neorc/flows/vip_booking")
+    await expect(page.get_by_role("button", name="Account")).to_be_visible()
+    steps = page.get_by_label("Flow graph")
+    await expect(steps.locator(".react-flow__node")).to_have_count(8)
+    await expect(steps.locator(".react-flow__edge")).to_have_count(7)
+    await expect(steps.get_by_text("switch on tasks.check_vip")).to_be_visible()
+    await expect(steps.get_by_text("case, output tasks.send_gift")).to_be_visible()
+    await expect(steps.get_by_text("case, no output")).to_be_visible()
+    # A definition has no run: no case is chosen, and none is said not to be.
+    await expect(steps.get_by_text("not chosen yet")).to_have_count(0)
+
+    # The VIP's run, as an outline: the gift's case chosen, its tasks done.
+    await page.goto(f"{ui_address}/ui/#/neorc/runs/{vip.id}")
+    heading = page.get_by_role("heading", level=1)
+    await expect(heading).to_contain_text("succeeded")
+    is_vip = page.get_by_role("region", name="route case is_vip")
+    not_vip = page.get_by_role("region", name="route case not_vip")
+    await expect(is_vip.get_by_role("heading").first).to_have_text(
+        "case is_vip · chosen · output tasks.send_gift"
+    )
+    await expect(not_vip.get_by_role("heading")).to_have_text(
+        "case not_vip · not chosen · no output"
+    )
+    await expect(not_vip).to_contain_text("no steps")
+    gift = is_vip.locator("li.neorc-step-task", has_text="send_gift")
+    await gift.get_by_text("details").click()
+    await expect(gift).to_contain_text("champagne is on its way to Grace")
+    confirm = page.locator("li.neorc-step-task", has_text="confirm")
+    await confirm.get_by_text("details").click()
+    await expect(confirm).to_contain_text("switches.route")
+
+    # The same run as a graph: the switch says its case, each case whether
+    # it is the one, and the switch feeds the step that reads its output.
+    await page.get_by_role("link", name="Graph").click()
+    canvas = page.get_by_label("Run graph")
+    await expect(canvas.locator(".react-flow__node")).to_have_count(8)
+    await expect(canvas.locator(".react-flow__edge")).to_have_count(7)
+    await expect(canvas.get_by_text("case is_vip", exact=True)).to_be_visible()
+    await expect(canvas.get_by_text("chosen", exact=True)).to_be_visible()
+    await expect(canvas.get_by_text("not chosen", exact=True)).to_be_visible()
+    await canvas.get_by_text("send_gift", exact=True).click()
+    panel = page.get_by_role("complementary", name="send_gift details")
+    await expect(panel).to_contain_text("champagne is on its way to Grace")
+    await panel.get_by_role("button", name="Close").click()
+
+    # The other booking's run: the other case, and the gift's tasks never
+    # published. The graph is still chosen: the choice of view is kept.
+    await page.goto(f"{ui_address}/ui/#/neorc/runs/{other.id}")
+    await expect(heading).to_contain_text("succeeded")
+    await expect(canvas.get_by_text("case not_vip", exact=True)).to_be_visible()
+    await page.get_by_role("link", name="Outline").click()
+    await expect(not_vip.get_by_role("heading")).to_have_text(
+        "case not_vip · chosen · no output"
+    )
+    await expect(is_vip.get_by_role("heading").first).to_have_text(
+        "case is_vip · not chosen · output tasks.send_gift"
+    )
+    await expect(is_vip.get_by_text("not published")).to_have_count(2)
+    await expect(page.locator("h2:text-is('Output') + pre")).to_have_text(
+        '"Booking 1 is confirmed."'
+    )
+
+    assert complaints == [], "the browser complained: " + "; ".join(complaints)

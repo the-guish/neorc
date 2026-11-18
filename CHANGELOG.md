@@ -74,6 +74,13 @@ one version, cut from a single tag on `main`.
   the model, `FlowDefinition.cases_around` gives the cases a step is in, and
   `switch_case` the case a switch chose in a run. `examples/vip_booking` is
   the flow of [switch.md](docs/specs/switch.md).
+- `neorc-ui`: a flow's page and a run's page show a switch. In the graph a
+  switch is a box that holds one box per case, with the steps of the case
+  inside. An edge joins what `on` reads to the switch, and the switch to each
+  step that reads `switches.<name>`. In the outline a switch lists its cases.
+  A run's page says which case the run chose: it reads the input, the task's
+  result or the sub-flow's output that `on` names. For a switch on another
+  switch, it shows the case once a step of that case is published.
 - `neorc-core`: a task's handler may be an executable file, so a task can be
   written in any language. The file is in the `executables` directory of the
   worker's code location, and the handler names its path:

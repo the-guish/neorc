@@ -1,13 +1,15 @@
 // A run as a graph: one node per step, a parent node per loop and per branch
-// of a fan-out, an edge from each step a param refers to, laid out by dagre
-// one container level at a time. A loop is drawn once, as the definition has
-// it, showing one of its iterations: the latest, or the one picked. No React
-// here: the view draws what this gives.
+// of a fan-out, a parent node per switch with one inside it per case, an edge
+// from each step a param refers to, laid out by dagre one container level at
+// a time. A loop is drawn once, as the definition has it, showing one of its
+// iterations: the latest, or the one picked. No React here: the view draws
+// what this gives.
 import dagre from "@dagrejs/dagre";
 
 import type { Run, RunStatus, Task, TaskStatus } from "./api";
 import {
   addressKey,
+  chosenCase,
   instancesOf,
   iterationOutcome,
   lastIteration,
@@ -49,10 +51,12 @@ export type NodeData =
   | {
       kind: "container";
       name: string;
-      container: "loop" | "fan_out";
+      /** A switch holds one container per case, and a case the case's steps. */
+      container: "loop" | "fan_out" | "switch" | "case";
       about: string;
-      /** "iteration 2", "branch 1", or "not entered yet". */
+      /** "iteration 2", "branch 1", "case is_vip", "chosen", or "not entered yet". */
       instance: string;
+      /** Of a switch, whether it chose a case; of a case, whether it is that one. */
       entered: boolean;
       /** For a loop that has been entered: its iterations, and the one drawn. */
       loop?: LoopShown;
@@ -139,10 +143,9 @@ export function containerNodeId(container: string, scope: Scope, n: number): str
   return `${addressKey(container, scope)}#${n}`;
 }
 
-/** The node holding everything at `scope`: a container instance, or none for the roots. */
-function levelId(scope: Scope): string | undefined {
-  const last = scope[scope.length - 1];
-  return last && containerNodeId(last[0], scope.slice(0, -1), last[1]);
+/** One id per case of a switch, in each iteration and branch the switch is in. */
+export function caseNodeId(switchName: string, scope: Scope, caseName: string): string {
+  return `${addressKey(switchName, scope)}/${caseName}`;
 }
 
 /**
@@ -159,14 +162,14 @@ export function runGraph(
   const state: Build = {
     done,
     picked,
-    leaves: leafPaths(steps),
+    paths: stepPaths(steps),
     nodes: [],
     byId: new Map(),
     edges: new Map(),
     levelEdges: new Map(),
     fanOuts: new Map(),
   };
-  const level = build(state, steps, [], undefined);
+  const level = build(state, steps, [], []);
   const { width, height } = layoutLevel(state, level, undefined);
   // A reference into a fan-out branch that an earlier iteration never had
   // names a node that was never built: the core would refuse it, the graph
@@ -182,17 +185,32 @@ interface Container {
   kind: "loop" | "fan_out";
 }
 
-/** One end of an edge: a node, and the scope of the level it sits in. */
+/** A case of a switch, as what a step is inside of: it adds nothing to a scope. */
+interface InCase {
+  kind: "case";
+  switch: string;
+  name: string;
+}
+
+type Around = Container | InCase;
+
+/**
+ * One end of an edge: a node, and the nodes holding it, outermost first, a
+ * container instance, or a switch and then its case.
+ */
 interface End {
   id: string;
-  scope: Scope;
+  holders: string[];
 }
 
 interface Build {
   done: Published;
   picked: Picked;
-  /** The containers around each task or sub-flow step, outermost first. */
-  leaves: Map<string, Container[]>;
+  /**
+   * What is around each step a reference can name, a task, a sub-flow or a
+   * switch, outermost first.
+   */
+  paths: Map<string, Around[]>;
   nodes: GraphNode[];
   byId: Map<string, GraphNode>;
   edges: Map<string, GraphEdge>;
@@ -202,23 +220,47 @@ interface Build {
    * container, between the members holding its ends.
    */
   levelEdges: Map<string | undefined, [string, string][]>;
-  /** By level, each fan-out's branch nodes in order, to keep them left to right. */
+  /**
+   * By level, each fan-out's branch nodes and each switch's case nodes in
+   * order, to keep them left to right.
+   */
   fanOuts: Map<string | undefined, string[][]>;
 }
 
-function leafPaths(
+function stepPaths(
   steps: StepNode[],
-  path: Container[] = [],
-  into = new Map<string, Container[]>(),
-): Map<string, Container[]> {
+  path: Around[] = [],
+  into = new Map<string, Around[]>(),
+): Map<string, Around[]> {
   for (const step of steps) {
     if (step.kind === "loop" || step.kind === "fan_out") {
-      leafPaths(step.children, [...path, { name: step.name, kind: step.kind }], into);
-    } else {
-      into.set(step.name, path);
+      stepPaths(step.children, [...path, { name: step.name, kind: step.kind }], into);
+      continue;
+    }
+    into.set(step.name, path);
+    if (step.kind === "switch") {
+      for (const one of step.cases) {
+        stepPaths(one.children, [...path, { kind: "case", switch: step.name, name: one.name }], into);
+      }
     }
   }
   return into;
+}
+
+/** The nodes holding a step under `path` at `scope`, outermost first. */
+function holdersOf(path: Around[], scope: Scope): string[] {
+  const holders: string[] = [];
+  let depth = 0;
+  for (const around of path) {
+    const within = scope.slice(0, depth);
+    if (around.kind === "case") {
+      holders.push(stepNodeId(around.switch, within), caseNodeId(around.switch, within, around.name));
+    } else {
+      holders.push(containerNodeId(around.name, within, scope[depth]?.[1] ?? 0));
+      depth += 1;
+    }
+  }
+  return holders;
 }
 
 /** A node's size from the text it shows. */
@@ -252,27 +294,51 @@ function drawn(state: Build, { name, kind }: Container, scope: Scope): number[] 
   return branches.length === 0 ? [0] : branches;
 }
 
+/** Add a node to the graph, under `parentId` if it has a parent. */
+function add(state: Build, node: GraphNode, parentId: string | undefined): void {
+  if (parentId !== undefined) {
+    node.parentId = parentId;
+    node.extent = "parent";
+  }
+  state.nodes.push(node);
+  state.byId.set(node.id, node);
+}
+
 /**
- * Add the nodes of `steps` at `scope`, under `parentId`, with the edges into
- * them; gives the ids of the nodes at this level, for laying it out. A
- * fan-out becomes one node per branch and a loop one node, for the iteration
- * shown, each holding a level of its own, laid out at once so the
- * container's size is known here.
+ * Size a container's node to the level laid out inside it, and to its title
+ * bar if that is wider: its children then go in the middle.
+ */
+function fit(
+  state: Build,
+  node: GraphNode,
+  inner: string[],
+  size: { width: number; height: number },
+  titleWidth: number,
+): void {
+  node.width = Math.max(size.width, titleWidth);
+  node.height = size.height;
+  for (const child of inner) {
+    state.byId.get(child)!.position.x += (node.width - size.width) / 2;
+  }
+}
+
+/**
+ * Add the nodes of `steps` at `scope`, inside the nodes `holders`, with the
+ * edges into them; gives the ids of the nodes at this level, for laying it
+ * out. A fan-out becomes one node per branch, a loop one node, for the
+ * iteration shown, and a switch one node holding one per case, each holding
+ * a level of its own, laid out at once so the container's size is known here.
  */
 function build(
   state: Build,
   steps: StepNode[],
   scope: Scope,
-  parentId: string | undefined,
+  holders: string[],
 ): string[] {
+  const parentId = holders[holders.length - 1];
   const level: string[] = [];
   const place = (node: GraphNode) => {
-    if (parentId !== undefined) {
-      node.parentId = parentId;
-      node.extent = "parent";
-    }
-    state.nodes.push(node);
-    state.byId.set(node.id, node);
+    add(state, node, parentId);
     level.push(node.id);
   };
   for (const step of steps) {
@@ -299,7 +365,7 @@ function build(
             ...(task && { task }),
           },
         });
-        refer(state, { id, scope }, step.params, scope);
+        refer(state, { id, holders }, step.params, scope);
         break;
       }
       case "flow": {
@@ -320,7 +386,7 @@ function build(
             ...(run && { run }),
           },
         });
-        refer(state, { id, scope }, step.params, scope);
+        refer(state, { id, holders }, step.params, scope);
         break;
       }
       case "loop":
@@ -355,29 +421,83 @@ function build(
           ids.push(id);
           // What a fan-out iterates over feeds each of its branches.
           if (step.kind === "fan_out" && step.input) {
-            refer(state, { id, scope }, { over: step.input }, scope);
+            refer(state, { id, holders }, { over: step.input }, scope);
           }
-          const inner = build(state, step.children, [...scope, [step.name, n]], id);
+          const inner = build(state, step.children, [...scope, [step.name, n]], [...holders, id]);
           const size = layoutLevel(state, inner, id);
-          node.width = Math.max(
-            size.width,
+          const title = Math.max(
             leafSize(`${step.name} ${instance}`, about).width,
             loop ? pickerWidth(loop) : 0,
           );
-          node.height = size.height;
-          // A title bar wider than what it holds: its children go in the middle.
-          for (const child of inner) {
-            state.byId.get(child)!.position.x += (node.width - size.width) / 2;
-          }
+          fit(state, node, inner, size, title);
         }
         if (step.kind === "fan_out") {
           state.fanOuts.set(parentId, [...(state.fanOuts.get(parentId) ?? []), ids]);
         }
         break;
       }
+      case "switch": {
+        // A switch is no iteration or branch: its cases, and their steps,
+        // are at the scope the switch is at.
+        const id = stepNodeId(step.name, scope);
+        const chosen = chosenCase(step, scope, state.done);
+        const about = `switch on ${step.on}`;
+        const instance = chosen === undefined ? "not chosen yet" : `case ${chosen}`;
+        const node = containerNode(id, step.name, "switch", about, instance, chosen !== undefined);
+        place(node);
+        // What a switch chooses on feeds the switch.
+        refer(state, { id, holders }, { on: step.on }, scope);
+        const cases: string[] = [];
+        for (const one of step.cases) {
+          const caseId = caseNodeId(step.name, scope, one.name);
+          const output = one.output === undefined ? "no output" : `output ${one.output}`;
+          const ran =
+            chosen === undefined ? "not chosen yet" : chosen === one.name ? "chosen" : "not chosen";
+          const caseNode = containerNode(
+            caseId,
+            one.name,
+            "case",
+            `case, ${output}`,
+            ran,
+            chosen === one.name,
+          );
+          add(state, caseNode, id);
+          cases.push(caseId);
+          const inner = build(state, one.children, scope, [...holders, id, caseId]);
+          const size = layoutLevel(state, inner, caseId);
+          fit(state, caseNode, inner, size, leafSize(`${one.name} ${ran}`, `case, ${output}`).width);
+        }
+        state.fanOuts.set(id, [cases]);
+        const size = layoutLevel(state, cases, id);
+        // Cases differ in height, and the layout centres a row: line their
+        // tops up, at the top of the tallest.
+        const top = Math.min(...cases.map((caseId) => state.byId.get(caseId)!.position.y));
+        for (const caseId of cases) state.byId.get(caseId)!.position.y = top;
+        fit(state, node, cases, size, leafSize(`${step.name} ${instance}`, about).width);
+        break;
+      }
     }
   }
   return level;
+}
+
+/** A container's node, sized once what it holds is laid out. */
+function containerNode(
+  id: string,
+  name: string,
+  container: "switch" | "case",
+  about: string,
+  instance: string,
+  entered: boolean,
+): GraphNode {
+  return {
+    id,
+    type: "container",
+    position: { x: 0, y: 0 },
+    width: 0,
+    height: 0,
+    data: { kind: "container", name, container, about, instance, entered },
+  };
 }
 
 /** What a loop's node shows of the loop at `scope`, drawn at iteration `n`. */
@@ -427,10 +547,11 @@ function refer(
 ): void {
   for (const [param, value] of Object.entries(params)) {
     const name = referencedStep(value);
-    const path = name === undefined ? undefined : state.leaves.get(name);
+    const path = name === undefined ? undefined : state.paths.get(name);
     if (name === undefined || path === undefined) continue;
-    for (const sourceScope of sourceScopes(state, path, scope)) {
-      const source = { id: stepNodeId(name, sourceScope), scope: sourceScope };
+    const containers = path.filter((around): around is Container => around.kind !== "case");
+    for (const sourceScope of sourceScopes(state, containers, scope)) {
+      const source = { id: stepNodeId(name, sourceScope), holders: holdersOf(path, sourceScope) };
       if (source.id === target.id) continue;
       connect(state, source, target, param);
     }
@@ -468,20 +589,17 @@ function connect(state: Build, source: End, target: End, param: string): void {
     return;
   }
   state.edges.set(id, { id, source: source.id, target: target.id, params: [param] });
-  // The nearest level holding both ends: the longest scope both are within.
+  // The nearest level holding both ends: the innermost node both are within.
   let shared = 0;
   while (
-    shared < Math.min(source.scope.length, target.scope.length) &&
-    source.scope[shared]?.[0] === target.scope[shared]?.[0] &&
-    source.scope[shared]?.[1] === target.scope[shared]?.[1]
+    shared < Math.min(source.holders.length, target.holders.length) &&
+    source.holders[shared] === target.holders[shared]
   ) {
     shared += 1;
   }
-  const level = levelId(source.scope.slice(0, shared));
-  const member = (end: End) => {
-    const below = end.scope[shared];
-    return below ? containerNodeId(below[0], end.scope.slice(0, shared), below[1]) : end.id;
-  };
+  const level = shared === 0 ? undefined : source.holders[shared - 1];
+  // At that level, an end is the node that holds it, or itself.
+  const member = (end: End) => end.holders[shared] ?? end.id;
   const edges = state.levelEdges.get(level) ?? [];
   edges.push([member(source), member(target)]);
   state.levelEdges.set(level, edges);

@@ -70,6 +70,48 @@ export const HELLO: Flow = {
   },
 };
 
+// A flow with a switch: examples/vip_booking, as the manager stores it.
+
+export const BOOKING: Flow = {
+  name: "vip_booking",
+  version: "1.0.0",
+  content: {
+    name: "vip_booking",
+    version: "1.0.0",
+    inputs: { booking_id: "number" },
+    output: "tasks.confirm",
+    steps: {
+      check_vip: { handler: "tasks:vip_case", params: { booking: "tasks.load_booking" } },
+      confirm: {
+        handler: "tasks:confirm",
+        params: { booking: "tasks.load_booking", notice: "switches.route" },
+      },
+      load_booking: { handler: "tasks:load_booking", params: { booking_id: "inputs.booking_id" } },
+      route: {
+        switch: {
+          cases: {
+            is_vip: {
+              output: "tasks.send_gift",
+              steps: {
+                compute_benefit: {
+                  handler: "tasks:vip_benefit",
+                  params: { booking: "tasks.load_booking" },
+                },
+                send_gift: {
+                  handler: "tasks:send_gift",
+                  params: { benefit: "tasks.compute_benefit", booking: "tasks.load_booking" },
+                },
+              },
+            },
+            not_vip: { output: null, steps: {} },
+          },
+          on: "tasks.check_vip",
+        },
+      },
+    },
+  },
+};
+
 export const SUCCEEDED: Run = {
   id: "5f3a1c2e-1111-4bbb-8ccc-000000000001",
   flow: "word_picker",

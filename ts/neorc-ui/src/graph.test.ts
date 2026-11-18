@@ -4,6 +4,7 @@ import { published, stepsOf } from "./definition";
 import {
   CONTAINER_HEADER,
   LOOP_HEADER,
+  caseNodeId,
   containerNodeId,
   loopKey,
   runGraph,
@@ -13,7 +14,7 @@ import {
   type Picked,
 } from "./graph";
 import type { Task } from "./api";
-import { SPLIT } from "./test/fixtures";
+import { BOOKING, SPLIT } from "./test/fixtures";
 import { RECORDED } from "./test/recorded";
 
 function recordedGraph(picked?: Picked): Graph {
@@ -494,5 +495,168 @@ describe("runGraph on nested containers", () => {
     const waiting = loop([{ ...task("done", [["trying", 1]]), status: "running", result: null }]);
     expect(waiting).toMatchObject([{ shown: 1, failed: false }]);
     expect(waiting[0]?.outcome).toBeUndefined();
+  });
+});
+
+describe("runGraph on a switch", () => {
+  const task = (step: string, result: unknown = null, scope: [string, number][] = []): Task => ({
+    ...SPLIT,
+    id: `${step}@${scope.map(([c, n]) => `${c}${n}`).join("/")}`,
+    address: { step, scope },
+    result,
+  });
+  const steps = stepsOf(BOOKING.content);
+  const route = stepNodeId("route", []);
+  const isVip = caseNodeId("route", [], "is_vip");
+  const notVip = caseNodeId("route", [], "not_vip");
+  const container = (graph: Graph, id: string) => {
+    const data = node(graph, id).data;
+    if (data.kind !== "container") throw new Error(`${id} is no container`);
+    return data;
+  };
+
+  it("draws a switch as a box holding a box per case, each with the case's steps", () => {
+    const graph = runGraph(steps, published([], []));
+
+    expect(graph.nodes.map((n) => [n.id, n.parentId])).toEqual([
+      [stepNodeId("load_booking", []), undefined],
+      [stepNodeId("check_vip", []), undefined],
+      [route, undefined],
+      [isVip, route],
+      [stepNodeId("compute_benefit", []), isVip],
+      [stepNodeId("send_gift", []), isVip],
+      [notVip, route],
+      [stepNodeId("confirm", []), undefined],
+    ]);
+    expect(container(graph, route)).toMatchObject({
+      name: "route",
+      container: "switch",
+      about: "switch on tasks.check_vip",
+      instance: "not chosen yet",
+      entered: false,
+    });
+    expect(container(graph, isVip)).toMatchObject({
+      name: "is_vip",
+      container: "case",
+      about: "case, output tasks.send_gift",
+      entered: false,
+    });
+    expect(container(graph, notVip)).toMatchObject({ about: "case, no output", entered: false });
+  });
+
+  it("joins what the switch chooses on to it, and the switch to what reads its output", () => {
+    const graph = runGraph(steps, published([], []));
+    const id = (source: string, target: string) =>
+      `${source.includes("@") ? source : stepNodeId(source, [])}->${stepNodeId(target, [])}`;
+
+    expect(edgeIds(graph)).toEqual(
+      [
+        id("load_booking", "check_vip"),
+        id("check_vip", "route"),
+        // A step of a case reads steps outside the switch, and of its case.
+        id("load_booking", "compute_benefit"),
+        id("load_booking", "send_gift"),
+        id("compute_benefit", "send_gift"),
+        id("load_booking", "confirm"),
+        id(route, "confirm"),
+      ].sort(),
+    );
+    const params = (edge: string) => graph.edges.find((e) => e.id === edge)?.params;
+    expect(params(id("check_vip", "route"))).toEqual(["on"]);
+    expect(params(id(route, "confirm"))).toEqual(["notice"]);
+  });
+
+  it("says which case the run chose, and which it did not", () => {
+    const chose = (result: string) =>
+      runGraph(steps, published([task("load_booking"), task("check_vip", result)], []));
+
+    const vip = chose("is_vip");
+    expect(container(vip, route)).toMatchObject({ instance: "case is_vip", entered: true });
+    expect(container(vip, isVip)).toMatchObject({ instance: "chosen", entered: true });
+    expect(container(vip, notVip)).toMatchObject({ instance: "not chosen", entered: false });
+    const other = chose("not_vip");
+    expect(container(other, route)).toMatchObject({ instance: "case not_vip", entered: true });
+    expect(container(other, isVip)).toMatchObject({ instance: "not chosen", entered: false });
+    expect(container(other, notVip)).toMatchObject({ instance: "chosen", entered: true });
+  });
+
+  it("positions the cases side by side inside the switch, their steps inside them", () => {
+    const graph = runGraph(steps, published([task("check_vip", "is_vip")], []));
+
+    for (const n of graph.nodes) {
+      expect(n.width).toBeGreaterThan(0);
+      expect(n.height).toBeGreaterThan(0);
+      const bounds = n.parentId ? node(graph, n.parentId) : { width: graph.width, height: graph.height };
+      expect(n.position.x).toBeGreaterThanOrEqual(0);
+      expect(n.position.y).toBeGreaterThanOrEqual(n.parentId ? CONTAINER_HEADER : 0);
+      expect(n.position.x + n.width).toBeLessThanOrEqual(bounds.width);
+      expect(n.position.y + n.height).toBeLessThanOrEqual(bounds.height);
+    }
+    for (const a of graph.nodes) {
+      for (const b of graph.nodes) {
+        if (a.id < b.id && a.parentId === b.parentId) {
+          expect(overlap(a, b), `${a.id} overlaps ${b.id}`).toBe(false);
+        }
+      }
+    }
+    const [left, right] = [node(graph, isVip), node(graph, notVip)];
+    expect(left.position.y).toBe(right.position.y);
+    expect(right.position.x).toBeGreaterThanOrEqual(left.position.x + left.width);
+    // The switch comes after what it chooses on, and before what reads it.
+    const y = (step: string) => node(graph, stepNodeId(step, [])).position.y;
+    expect(y("route")).toBeGreaterThan(y("check_vip"));
+    expect(y("confirm")).toBeGreaterThan(y("route"));
+  });
+
+  it("draws a switch in a loop at the iteration drawn, with the case chosen there", () => {
+    const looped = stepsOf({
+      steps: {
+        rounds: {
+          loop: { max_cycles: 3, exit_condition: "done" },
+          steps: {
+            check: { handler: "t:check" },
+            route: {
+              switch: {
+                on: "tasks.check",
+                cases: {
+                  a: { steps: { in_a: { handler: "t:a" } }, output: "tasks.in_a" },
+                  b: { steps: {}, output: null },
+                },
+              },
+            },
+            done: { handler: "t:done", params: { all: "switches.route" } },
+          },
+        },
+        after: { handler: "t:after", params: { all: "switches.route" } },
+      },
+    });
+    const done = published(
+      [
+        task("check", "b", [["rounds", 1]]),
+        task("done", false, [["rounds", 1]]),
+        task("check", "a", [["rounds", 2]]),
+      ],
+      [],
+    );
+    const at = (n: number): [string, number][] => [["rounds", n]];
+
+    const latest = runGraph(looped, done);
+    const loop = containerNodeId("rounds", [], 2);
+    expect(node(latest, stepNodeId("route", at(2))).parentId).toBe(loop);
+    expect(container(latest, stepNodeId("route", at(2))).instance).toBe("case a");
+    expect(node(latest, stepNodeId("in_a", at(2))).parentId).toBe(caseNodeId("route", at(2), "a"));
+    expect(edgeIds(latest)).toEqual(
+      [
+        `${stepNodeId("check", at(2))}->${stepNodeId("route", at(2))}`,
+        `${stepNodeId("route", at(2))}->${stepNodeId("done", at(2))}`,
+        // From after the loop: the switch of the iteration drawn stands for it.
+        `${stepNodeId("route", at(2))}->${stepNodeId("after", [])}`,
+      ].sort(),
+    );
+
+    const first = runGraph(looped, done, new Map([[loopKey("rounds", []), 1]]));
+    expect(container(first, stepNodeId("route", at(1))).instance).toBe("case b");
+    expect(container(first, caseNodeId("route", at(1), "b")).entered).toBe(true);
+    expect(first.nodes.some((n) => n.id === stepNodeId("route", at(2)))).toBe(false);
   });
 });

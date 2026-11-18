@@ -1,6 +1,6 @@
 // A flow definition as uploaded, read into the steps the run page draws, and
-// the addresses of a run's tasks and sub-runs read into loop iterations and
-// fan-out branches.
+// the addresses of a run's tasks and sub-runs read into loop iterations,
+// fan-out branches and the case a switch chose.
 import type { Address, Run, Task } from "./api";
 
 export type StepNode =
@@ -28,7 +28,22 @@ export type StepNode =
       /** The reference the branches are made from, if `over` is one. */
       input?: string;
       children: StepNode[];
+    }
+  | {
+      kind: "switch";
+      name: string;
+      /** The reference whose value names the case that runs. */
+      on: string;
+      cases: SwitchCase[];
     };
+
+/** One case of a switch: its steps, in the switch's own iteration and branch. */
+export interface SwitchCase {
+  name: string;
+  /** The step whose result is the case's output; none for `output: null`. */
+  output?: string;
+  children: StepNode[];
+}
 
 type Json = Record<string, unknown>;
 
@@ -58,10 +73,20 @@ export function stepsOf(content: unknown): StepNode[] {
   );
 }
 
-/** The step a `tasks.` or `flows.` reference names; nothing for the rest. */
+/**
+ * The step a `tasks.`, `flows.` or `switches.` reference names; nothing for
+ * the rest.
+ */
 export function referencedStep(value: string): string | undefined {
-  const match = /^(?:tasks|flows)\.([^.]+)/.exec(value);
+  const match = /^(?:tasks|flows|switches)\.([^.]+)/.exec(value);
   return match?.[1];
+}
+
+/** The steps directly inside a step: a container's, or those of every case. */
+function inside(step: StepNode): StepNode[] {
+  if (step.kind === "loop" || step.kind === "fan_out") return step.children;
+  if (step.kind === "switch") return step.cases.flatMap((one) => one.children);
+  return [];
 }
 
 /** Every step a step refers to, from anywhere inside it. */
@@ -71,23 +96,21 @@ function references(step: StepNode, into = new Set<string>()): Set<string> {
       ? Object.values(step.params)
       : step.kind === "fan_out" && step.input
         ? [step.input]
-        : [];
+        : step.kind === "switch"
+          ? [step.on]
+          : [];
   for (const value of values) {
     const name = referencedStep(value);
     if (name !== undefined) into.add(name);
   }
-  if (step.kind === "loop" || step.kind === "fan_out") {
-    for (const child of step.children) references(child, into);
-  }
+  for (const child of inside(step)) references(child, into);
   return into;
 }
 
 /** The names of a step and of every step inside it. */
 function names(step: StepNode, into = new Set<string>()): Set<string> {
   into.add(step.name);
-  if (step.kind === "loop" || step.kind === "fan_out") {
-    for (const child of step.children) names(child, into);
-  }
+  for (const child of inside(step)) names(child, into);
   return into;
 }
 
@@ -129,6 +152,22 @@ function inRunOrder(steps: StepNode[]): StepNode[] {
 }
 
 function stepOf(name: string, step: Json): StepNode {
+  if ("switch" in step) {
+    const config = record(step["switch"]);
+    return {
+      kind: "switch",
+      name,
+      on: String(config["on"] ?? ""),
+      cases: Object.entries(record(config["cases"])).map(([caseName, raw]) => {
+        const output = record(raw)["output"];
+        return {
+          name: caseName,
+          ...(typeof output === "string" && { output }),
+          children: stepsOf(raw),
+        };
+      }),
+    };
+  }
   if ("loop" in step) {
     const loop = record(step["loop"]);
     return {
@@ -180,9 +219,15 @@ export interface Published {
   subRuns: Map<string, Run>;
   /** Every address above, for finding a container's iterations and branches. */
   addresses: Address[];
+  /** The run's inputs, where a switch chooses its case on one. */
+  inputs?: Record<string, unknown>;
 }
 
-export function published(tasks: Task[], subRuns: Run[]): Published {
+export function published(
+  tasks: Task[],
+  subRuns: Run[],
+  inputs?: Record<string, unknown>,
+): Published {
   const addresses: Address[] = [];
   const byTask = new Map<string, Task>();
   for (const task of tasks) {
@@ -196,7 +241,52 @@ export function published(tasks: Task[], subRuns: Run[]): Published {
       addresses.push(run.parent_address);
     }
   }
-  return { tasks: byTask, subRuns: bySubRun, addresses };
+  return { tasks: byTask, subRuns: bySubRun, addresses, ...(inputs && { inputs }) };
+}
+
+/**
+ * The case the switch at `scope` chose, once the run says: the value its
+ * `on` reads there, when that is an input, a task's result or a sub-flow's
+ * output, or else the case a step of was published. The core decides it,
+ * from `on` alone; this reads what the manager stores of a run, tasks and
+ * sub-runs, so a switch choosing on another switch shows its case only
+ * once that case has published a step. Nothing while the run does not say.
+ */
+export function chosenCase(
+  step: Extract<StepNode, { kind: "switch" }>,
+  scope: Scope,
+  done: Published,
+): string | undefined {
+  const value = onValue(step.on, scope, done);
+  if (typeof value === "string" && step.cases.some((one) => one.name === value)) return value;
+  return step.cases.find((one) => {
+    const within = new Set(one.children.flatMap((child) => [...names(child)]));
+    return done.addresses.some(
+      (address) =>
+        within.has(address.step) &&
+        scope.every(([name, n], i) => address.scope[i]?.[0] === name && address.scope[i]?.[1] === n),
+    );
+  })?.name;
+}
+
+/**
+ * What `on` reads for a switch at `scope`: one value, in the switch's own
+ * iteration and branch. The step it reads is around the switch, so its
+ * address is the start of the switch's scope: the longest that has one.
+ */
+function onValue(on: string, scope: Scope, done: Published): unknown {
+  const input = /^inputs\.([^.]+)$/.exec(on)?.[1];
+  if (input !== undefined) return done.inputs?.[input];
+  const name = referencedStep(on);
+  if (name === undefined) return undefined;
+  for (let depth = scope.length; depth >= 0; depth -= 1) {
+    const key = addressKey(name, scope.slice(0, depth));
+    const task = done.tasks.get(key);
+    if (task) return task.status === "succeeded" ? task.result : undefined;
+    const run = done.subRuns.get(key);
+    if (run) return run.status === "succeeded" ? run.output : undefined;
+  }
+  return undefined;
 }
 
 /**
@@ -295,6 +385,10 @@ export function rawStep(content: unknown, name: string): Json | undefined {
       const step = record(raw);
       if (key === name) return step;
       if ("steps" in step) pending.push(record(step["steps"]));
+      // The steps of a switch are in its cases.
+      for (const one of Object.values(record(record(step["switch"])["cases"]))) {
+        pending.push(record(record(one)["steps"]));
+      }
     }
   }
   return undefined;
@@ -304,9 +398,7 @@ export function rawStep(content: unknown, name: string): Json | undefined {
 export function isExitCondition(content: unknown, name: string): boolean {
   const within = (steps: StepNode[]): boolean =>
     steps.some(
-      (step) =>
-        (step.kind === "loop" && step.exitCondition === name) ||
-        ((step.kind === "loop" || step.kind === "fan_out") && within(step.children)),
+      (step) => (step.kind === "loop" && step.exitCondition === name) || within(inside(step)),
     );
   return within(stepsOf(content));
 }

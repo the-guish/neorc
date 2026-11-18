@@ -60,9 +60,10 @@ function Loaded({
   // what the run did there are read again, and the graph laid out again,
   // only when the poll brings news.
   const steps = useMemo(() => flow.data && stepsOf(flow.data.content), [flow.data]);
+  // The inputs with them: a switch may choose its case on one.
   const done = useMemo(
-    () => tasks.data && subRuns.data && published(tasks.data, subRuns.data),
-    [tasks.data, subRuns.data],
+    () => tasks.data && subRuns.data && published(tasks.data, subRuns.data, run.inputs),
+    [tasks.data, subRuns.data, run.inputs],
   );
   return (
     <>
