@@ -52,6 +52,10 @@ class RunNotFoundError(NeorcError):
     """No run exists with the given id."""
 
 
+class QueueKindError(NeorcError):
+    """A queue is declared already, with another kind than the one asked."""
+
+
 class RunStateError(NeorcError):
     """A run cannot take the request: it is no longer active, or already finished."""
 

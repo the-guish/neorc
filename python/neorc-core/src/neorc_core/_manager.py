@@ -22,6 +22,7 @@ from neorc_core._errors import (
     FlowVersionError,
     InvalidValueError,
     PermissionDeniedError,
+    QueueKindError,
     RunStateError,
     TaskNotFoundError,
 )
@@ -549,6 +550,25 @@ class Manager:
         _queue(name)
         await self._store.declare_queue(name, kind)
 
+    async def add_queue(self, name: str, kind: QueueKind) -> bool:
+        """Declare a new queue of ``kind``; whether it is new.
+
+        A queue declared already with ``kind`` is left as it is. Raises
+        ``QueueKindError`` for one declared with another kind: changing a kind
+        is the operator's, with ``declare_queue``.
+        """
+        _queue(name)
+        declared = await self._store.queue_kind(name)
+        if declared is None:
+            await self._store.declare_queue(name, kind)
+            return True
+        if declared is not kind:
+            raise QueueKindError(
+                f"queue {name!r} is {_a(declared)} queue, and stays one: its operator"
+                " changes a kind, with neorc queues declare"
+            )
+        return False
+
     async def queues(self) -> list[Queue]:
         """Every declared queue, by name."""
         return await self._store.queues()
@@ -623,6 +643,11 @@ class Manager:
 
     async def _delivery(self, task: Task) -> TaskDelivery:
         return _delivered(task, *await self._context(task.run_id))
+
+
+def _a(kind: QueueKind) -> str:
+    """``kind`` with its article: "a worker", "an external"."""
+    return f"an {kind.value}" if kind.value[0] in "aeiou" else f"a {kind.value}"
 
 
 def _queue(name: str) -> None:

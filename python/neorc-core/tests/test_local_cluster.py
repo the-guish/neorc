@@ -352,6 +352,22 @@ async def test_uploading_declares_the_queues_the_files_name(tmp_path: Path) -> N
     ]
 
 
+async def test_uploading_declares_the_queues_of_queues_toml_with_their_kinds(
+    tmp_path: Path,
+) -> None:
+    flows_dir, _ = project(tmp_path, "def nothing(): pass", two=TWO_QUEUES)
+    (flows_dir / "queues.toml").write_text('[queues.elsewhere]\nkind = "external"\n')
+
+    async with LocalCluster(code_location=tmp_path) as cluster:
+        await cluster.upload(flows_dir)
+        declared = await cluster.manager.queues()
+
+    assert declared == [
+        Queue("default", QueueKind.WORKER),  # in no queues.toml: a worker queue
+        Queue("elsewhere", QueueKind.EXTERNAL),
+    ]
+
+
 async def test_flows_sent_to_the_manager_need_their_queues_declared(
     tmp_path: Path,
 ) -> None:

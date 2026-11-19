@@ -585,6 +585,45 @@ async def test_the_queues_are_listed_with_their_kinds(
     assert {"name": "default", "kind": "worker"} in queues
 
 
+async def test_a_queue_is_declared_once_over_http_and_keeps_its_kind(
+    manager: Manager, http: httpx.AsyncClient
+) -> None:
+    added = await http.put("/queues/editors", json={"kind": "external"})
+    again = await http.put("/queues/editors", json={"kind": "external"})
+    other_kind = await http.put("/queues/editors", json={"kind": "worker"})
+    flipped = await http.put("/queues/default", json={"kind": "external"})
+
+    assert (added.status_code, added.json()) == (
+        201,
+        {"name": "editors", "kind": "external"},
+    )
+    assert (again.status_code, again.json()) == (
+        200,
+        {"name": "editors", "kind": "external"},
+    )
+    assert (other_kind.status_code, _error(other_kind)) == (409, "QueueKindError")
+    assert (flipped.status_code, _error(flipped)) == (409, "QueueKindError")
+    assert await manager.queue_kind("editors") is QueueKind.EXTERNAL
+    assert await manager.queue_kind("default") is QueueKind.WORKER
+
+
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        ("/queues/editors", {"kind": "human"}),
+        ("/queues/editors", {}),
+        ("/queues/editors", {"kind": "external", "label": "x"}),
+        ("/queues/two%20words", {"kind": "worker"}),
+    ],
+)
+async def test_a_queue_declaration_is_validated(
+    http: httpx.AsyncClient, path: str, body: dict[str, str]
+) -> None:
+    refused = await http.put(path, json=body)
+
+    assert refused.status_code == 422, refused.text
+
+
 async def test_a_queues_tasks_are_listed_in_any_status_with_their_flow(
     http: httpx.AsyncClient,
 ) -> None:

@@ -294,6 +294,7 @@ ROUTE_PERMISSIONS = {
     ("GET", "/queues/{queue}/tasks/pending"): "queue:pending",
     ("POST", "/tasks/{task_id}/complete"): "tasks:complete",
     ("GET", "/queues"): "queues:read",
+    ("PUT", "/queues/{queue}"): "queues:declare",
     ("GET", "/queues/{queue}/tasks/recent"): "queues:read",
     ("GET", "/tasks/{task_id}/inputs"): "runs:read",
 }
@@ -309,7 +310,7 @@ ALLOWED = {
     },
     Role.RESPONDER: {"queue:pending", "tasks:complete"},
     Role.SCHEDULER: {"flows:read", "runs:read", "runs:schedule", "events:read"},
-    Role.CI: {"flows:upload"},
+    Role.CI: {"flows:upload", "queues:declare"},
     Role.USER: {
         "flows:read",
         "runs:start",

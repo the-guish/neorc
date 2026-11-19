@@ -12,8 +12,26 @@ of the queue.
   queue.
 - An external queue is served by responders. Its tasks end only by a
   completion.
-- A queue is declared on the database, as tokens are. A flow names only
+- A queue is declared with its kind before a flow names it. A flow names only
   declared queues.
+
+### Declaring queues
+
+Flows and queues are many to many. A flow names several queues, and a queue
+serves several flows. `queues.toml` names each queue once, with its kind. It
+sits beside the flow files.
+
+```toml
+[queues.editors]
+kind = "external"
+```
+
+- An upload declares the queues of `queues.toml`, then stores the flows. CI
+  declares a queue with `PUT /queues/{queue}`, with its token of `neorc/ci`.
+- A new queue gets its kind. A declared queue keeps its kind. An upload can run
+  again.
+- Another kind is refused, with a 409. The operator changes a kind with
+  `neorc queues declare`.
 
 ## Completing a task
 

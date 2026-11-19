@@ -35,6 +35,7 @@ from neorc_core.flows._loader import (
     read_flows,
     validate_flow_set,
 )
+from neorc_core.flows._queue_file import QUEUE_FILE, read_queues
 from neorc_core.flows._references import (
     Level,
     Resolved,
@@ -48,6 +49,7 @@ from neorc_core.flows._run_state import Address, Outcome, RunState, Scope, StepR
 __all__ = [
     "DEFAULT_QUEUE",
     "NEORC_METADATA",
+    "QUEUE_FILE",
     "Address",
     "Around",
     "Case",
@@ -81,6 +83,7 @@ __all__ = [
     "read_flow_json",
     "read_flow_yaml",
     "read_flows",
+    "read_queues",
     "resolve",
     "shape",
     "switch_case",

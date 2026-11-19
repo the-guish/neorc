@@ -24,6 +24,7 @@ from neorc_core import (
     Queue,
     QueueDeclarations,
     QueueKind,
+    QueueKindError,
     Role,
     RunStateError,
     RunStatus,
@@ -362,6 +363,23 @@ async def test_queues_are_declared_and_listed(manager: Manager) -> None:
         Queue("default", QueueKind.WORKER),
         Queue("editors", QueueKind.EXTERNAL),
     ]
+
+
+async def test_a_queue_is_added_once_and_keeps_its_kind(manager: Manager) -> None:
+    """What an upload declares: a new queue, or one again with the kind it has."""
+    assert await manager.add_queue("billing", QueueKind.EXTERNAL) is True
+    assert await manager.add_queue("billing", QueueKind.EXTERNAL) is False
+    assert await manager.add_queue("default", QueueKind.WORKER) is False
+
+    with pytest.raises(QueueKindError, match="'billing' is an external queue"):
+        await manager.add_queue("billing", QueueKind.WORKER)
+    with pytest.raises(QueueKindError, match="'default' is a worker queue"):
+        await manager.add_queue("default", QueueKind.EXTERNAL)
+    with pytest.raises(InvalidValueError, match="not a queue name"):
+        await manager.add_queue("two words", QueueKind.WORKER)
+
+    assert await manager.queue_kind("billing") is QueueKind.EXTERNAL
+    assert await manager.queue_kind("default") is QueueKind.WORKER
 
 
 # Tokens and queue kinds.

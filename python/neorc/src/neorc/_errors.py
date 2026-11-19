@@ -35,6 +35,7 @@ from neorc_core import (
     NeorcError,
     PayloadTooLargeError,
     PermissionDeniedError,
+    QueueKindError,
     ResolutionError,
     RunNotFoundError,
     RunStateError,
@@ -54,6 +55,7 @@ STATUS_OF: dict[type[NeorcError], int] = {
     UnsupportedMediaTypeError: 415,
     # What was asked does not fit where things are.
     FlowVersionError: 409,
+    QueueKindError: 409,
     RunStateError: 409,
     TaskStateError: 409,
     # Who is asking is not known, or not let in.
