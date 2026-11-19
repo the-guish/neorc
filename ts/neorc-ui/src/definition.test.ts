@@ -238,8 +238,119 @@ describe("chosenCase", () => {
     expect(chosenCase(by("flows.classify"), [], published([], [active]))).toBeUndefined();
   });
 
-  it("falls back on the case a step of was published, for a switch on a switch", () => {
-    const second = {
+  // A switch that chooses on another switch: `second` on `first`.
+  const second = {
+    switch: {
+      on: "switches.first",
+      cases: {
+        left: { steps: { go_left: { handler: "t:l" } }, output: "tasks.go_left" },
+        right: { steps: {}, output: null },
+      },
+    },
+  };
+  const chained = {
+    steps: {
+      classify: { handler: "t:classify" },
+      first: {
+        switch: {
+          on: "tasks.classify",
+          cases: {
+            a: { steps: { in_a: { handler: "t:a" } }, output: "tasks.in_a" },
+            b: { steps: {}, output: null },
+          },
+        },
+      },
+      second,
+    },
+  };
+
+  it("reads a switch as the core does: the output of the case it chose", () => {
+    const chosen = (...tasks: Task[]) =>
+      chosenCase(route(chained, "second"), [], published(tasks, []));
+
+    // A case with no steps publishes nothing, and is chosen all the same.
+    expect(chosen(task("classify", "a"), task("in_a", "right"))).toBe("right");
+    expect(chosen(task("classify", "a"), task("in_a", "left"))).toBe("left");
+    // Not yet: the case of the other switch has not given its output, and a
+    // task that has not succeeded gives none, whatever it holds.
+    expect(chosen(task("classify", "a"))).toBeUndefined();
+    expect(chosen(task("classify", "a"), task("in_a", "right", [], "running"))).toBeUndefined();
+    // The other switch's output is null, which names no case.
+    expect(chosen(task("classify", "b"))).toBeUndefined();
+  });
+
+  it("reads the other switch at its own scope, and through a switch inside its case", () => {
+    const inner = {
+      switch: {
+        on: "tasks.kind",
+        cases: { x: { steps: { name: { handler: "t:n" } }, output: "tasks.name" } },
+      },
+    };
+    const looped = {
+      steps: {
+        classify: { handler: "t:classify" },
+        first: {
+          switch: {
+            on: "tasks.classify",
+            cases: {
+              // The case's output is the switch inside it.
+              a: { steps: { kind: { handler: "t:kind" }, inner }, output: "switches.inner" },
+            },
+          },
+        },
+        // `first` is outside the loop `second` is in.
+        rounds: {
+          loop: { max_cycles: 3, exit_condition: "done" },
+          steps: { second, done: { handler: "t:done" } },
+        },
+      },
+    };
+    const before = [task("classify", "a"), task("kind", "x"), task("done", false, [["rounds", 1]])];
+
+    const at = (tasks: Task[]) =>
+      chosenCase(route(looped, "second"), [["rounds", 1]], published(tasks, []));
+    expect(at(before)).toBeUndefined();
+    expect(at([...before, task("name", "right")])).toBe("right");
+  });
+
+  it("does not read a list: the output of a step in a fan-out of the case", () => {
+    const listed = {
+      steps: {
+        first: {
+          switch: {
+            on: "inputs.x",
+            cases: {
+              a: {
+                steps: { fan: { fan_out: { range: 2 }, steps: { each: { handler: "t:e" } } } },
+                output: "tasks.each",
+              },
+            },
+          },
+        },
+        second,
+      },
+    };
+    const done = published(
+      [task("each", "right", [["fan", 1]]), task("each", "right", [["fan", 2]])],
+      [],
+      { x: "a" },
+    );
+
+    // The core fails the run on it: a list names no case.
+    expect(chosenCase(route(listed, "second"), [], done)).toBeUndefined();
+  });
+
+  it("chooses nothing for switches that choose on each other, which the core refuses", () => {
+    const one = (on: string) => ({ switch: { on, cases: { a: { steps: {}, output: null } } } });
+    const circle = { steps: { first: one("switches.second"), second: one("switches.first") } };
+
+    expect(chosenCase(route(circle, "second"), [], published([], []))).toBeUndefined();
+    expect(chosenCase(route({ steps: { first: one("switches.first") } }, "first"), [], published([], []))).toBeUndefined();
+  });
+
+  it("falls back on the case a step of was published, when it cannot read the choice", () => {
+    // `first` has no output to choose on, and a step of `left` is there all the same.
+    const unread = {
       steps: {
         first: { switch: { on: "inputs.x", cases: { a: { steps: {}, output: null } } } },
         route: {
@@ -259,10 +370,34 @@ describe("chosenCase", () => {
       },
     };
 
-    expect(chosenCase(route(second), [], published([], []))).toBeUndefined();
-    expect(chosenCase(route(second), [], published([task("go_left", 1)], []))).toBe("left");
+    expect(chosenCase(route(unread), [], published([], []))).toBeUndefined();
+    expect(chosenCase(route(unread), [], published([task("go_left", 1)], []))).toBe("left");
     const inBranch = task("go_right", 1, [["fan", 2]]);
-    expect(chosenCase(route(second), [], published([inBranch], []))).toBe("right");
+    expect(chosenCase(route(unread), [], published([inBranch], []))).toBe("right");
+  });
+
+  it("chooses nothing in a loop or fan-out the run has not entered", () => {
+    const inLoop = (on: string) =>
+      route({
+        steps: {
+          tier: { handler: "t:tier" },
+          rounds: {
+            loop: { max_cycles: 3, exit_condition: "done" },
+            steps: {
+              route: { switch: { on, cases: { gold: { steps: {}, output: null } } } },
+              done: { handler: "t:done" },
+            },
+          },
+        },
+      });
+    const done = published([task("tier", "gold")], [], { plan: "gold" });
+
+    // What the switch chooses on is there already: an input, a task outside the loop.
+    for (const on of ["inputs.plan", "tasks.tier"]) {
+      // Not entered, the loop is drawn at instance 0.
+      expect(chosenCase(inLoop(on), [["rounds", 0]], done), on).toBeUndefined();
+      expect(chosenCase(inLoop(on), [["rounds", 1]], done), on).toBe("gold");
+    }
   });
 });
 

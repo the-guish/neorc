@@ -89,9 +89,9 @@ one version, cut from a single tag on `main`.
   switch is a box that holds one box per case, with the steps of the case
   inside. An edge joins what `on` reads to the switch, and the switch to each
   step that reads `switches.<name>`. In the outline a switch lists its cases.
-  A run's page says which case the run chose: it reads the input, the task's
-  result or the sub-flow's output that `on` names. For a switch on another
-  switch, it shows the case once a step of that case is published.
+  A run's page says which case the run chose: it reads what `on` names, an
+  input, a task's result, a sub-flow's output or another switch's output. In
+  a loop or fan-out the run has not entered, no case is chosen yet.
 - `neorc-core`: a task's handler may be an executable file, so a task can be
   written in any language. The file is in the `executables` directory of the
   worker's code location, and the handler names its path:

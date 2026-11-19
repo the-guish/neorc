@@ -29,13 +29,20 @@ export type StepNode =
       input?: string;
       children: StepNode[];
     }
-  | {
-      kind: "switch";
-      name: string;
-      /** The reference whose value names the case that runs. */
-      on: string;
-      cases: SwitchCase[];
-    };
+  | SwitchNode;
+
+export interface SwitchNode {
+  kind: "switch";
+  name: string;
+  /** The reference whose value names the case that runs. */
+  on: string;
+  cases: SwitchCase[];
+  /**
+   * The switch `on` reads, when it reads one, with the number of loops and
+   * fan-outs around that switch: its scope is the start of this one's.
+   */
+  onSwitch?: { step: SwitchNode; depth: number };
+}
 
 /** One case of a switch: its steps, in the switch's own iteration and branch. */
 export interface SwitchCase {
@@ -66,11 +73,36 @@ function strings(value: unknown): Record<string, string> {
  * references are what is left to say which step comes first.
  */
 export function stepsOf(content: unknown): StepNode[] {
+  return linked(parsed(content));
+}
+
+function parsed(content: unknown): StepNode[] {
   return inRunOrder(
     Object.entries(record(record(content)["steps"])).map(([name, raw]) =>
       stepOf(name, record(raw)),
     ),
   );
+}
+
+/**
+ * The steps, each switch that chooses on another switch given that switch:
+ * a step's name is its own within a flow, so it is found by its name.
+ */
+function linked(steps: StepNode[]): StepNode[] {
+  const switches = new Map<string, { step: SwitchNode; depth: number }>();
+  const walk = (level: StepNode[], depth: number) => {
+    for (const step of level) {
+      if (step.kind === "switch") switches.set(step.name, { step, depth });
+      // A case adds no level to a scope; a loop and a fan-out add one.
+      walk(inside(step), step.kind === "switch" ? depth : depth + 1);
+    }
+  };
+  walk(steps, 0);
+  for (const { step } of switches.values()) {
+    const read = switches.get(/^switches\.([^.]+)$/.exec(step.on)?.[1] ?? "");
+    if (read && read.step !== step) step.onSwitch = read;
+  }
+  return steps;
 }
 
 /**
@@ -163,7 +195,7 @@ function stepOf(name: string, step: Json): StepNode {
         return {
           name: caseName,
           ...(typeof output === "string" && { output }),
-          children: stepsOf(raw),
+          children: parsed(raw),
         };
       }),
     };
@@ -175,16 +207,16 @@ function stepOf(name: string, step: Json): StepNode {
       name,
       maxCycles: Number(loop["max_cycles"] ?? 0),
       exitCondition: String(loop["exit_condition"] ?? ""),
-      children: stepsOf(step),
+      children: parsed(step),
     };
   }
   if ("fan_out" in step) {
     const fanOut = record(step["fan_out"]);
     if ("range" in fanOut) {
-      return { kind: "fan_out", name, over: `range ${String(fanOut["range"])}`, children: stepsOf(step) };
+      return { kind: "fan_out", name, over: `range ${String(fanOut["range"])}`, children: parsed(step) };
     }
     const input = String(fanOut["over"] ?? "");
-    return { kind: "fan_out", name, over: `over ${input}`, input, children: stepsOf(step) };
+    return { kind: "fan_out", name, over: `over ${input}`, input, children: parsed(step) };
   }
   if ("flow" in step) {
     return {
@@ -246,28 +278,26 @@ export function published(
 
 /**
  * The case the switch at `scope` chose, once the run says: the value its
- * `on` reads there, when that is an input, a task's result or a sub-flow's
- * output, or else the case a step of was published. The core decides it,
- * from `on` alone; this reads what the manager stores of a run, tasks and
- * sub-runs, so a switch choosing on another switch shows its case only
- * once that case has published a step. Nothing while the run does not say.
+ * `on` reads there, an input, a task's result, a sub-flow's output or
+ * another switch's, or else the case a step of was published. The core
+ * decides it, from `on` alone. The manager stores tasks and sub-runs, not
+ * switches, so another switch is read as the core reads it: from the case
+ * it chose. Nothing while the run does not say, and nothing in a loop or
+ * fan-out the run has not entered.
  *
- * Known limitation: a switch that chooses on another switch (`on:
- * switches.x`) is read only from the steps its case published. If the
- * chosen case has no steps, it stays "not chosen yet", after the run
- * succeeded too. If it causes trouble: read `switches.x` as the core does,
- * from the case x chose and the step that case's output names.
+ * `seen` are the switches this one is being read for: a flow the core
+ * refuses can have switches that choose on each other.
  */
 export function chosenCase(
-  step: Extract<StepNode, { kind: "switch" }>,
+  step: SwitchNode,
   scope: Scope,
   done: Published,
+  seen: ReadonlySet<string> = new Set(),
 ): string | undefined {
-  // Known limitation: inside a loop or fan-out the run has not entered,
-  // drawn at instance 0, a switch still shows a case as chosen when `on` is
-  // an input or a task outside that container. If it causes trouble: choose
-  // nothing while any level of `scope` is 0.
-  const value = onValue(step.on, scope, done);
+  // A loop or fan-out the run has not entered is drawn at instance 0:
+  // nothing inside it has chosen anything yet.
+  if (seen.has(step.name) || scope.some(([, n]) => n === 0)) return undefined;
+  const value = onValue(step, scope, done, new Set([...seen, step.name]));
   if (typeof value === "string" && step.cases.some((one) => one.name === value)) return value;
   return step.cases.find((one) => {
     const within = new Set(one.children.flatMap((child) => [...names(child)]));
@@ -284,10 +314,19 @@ export function chosenCase(
  * iteration and branch. The step it reads is around the switch, so its
  * address is the start of the switch's scope: the longest that has one.
  */
-function onValue(on: string, scope: Scope, done: Published): unknown {
-  const input = /^inputs\.([^.]+)$/.exec(on)?.[1];
+function onValue(
+  step: SwitchNode,
+  scope: Scope,
+  done: Published,
+  seen: ReadonlySet<string>,
+): unknown {
+  if (step.onSwitch) {
+    const { step: read, depth } = step.onSwitch;
+    return outputOf(read, scope.slice(0, depth), done, seen);
+  }
+  const input = /^inputs\.([^.]+)$/.exec(step.on)?.[1];
   if (input !== undefined) return done.inputs?.[input];
-  const name = referencedStep(on);
+  const name = referencedStep(step.on);
   if (name === undefined) return undefined;
   for (let depth = scope.length; depth >= 0; depth -= 1) {
     const key = addressKey(name, scope.slice(0, depth));
@@ -297,6 +336,32 @@ function onValue(on: string, scope: Scope, done: Published): unknown {
     if (run) return run.status === "succeeded" ? run.output : undefined;
   }
   return undefined;
+}
+
+/**
+ * The output of the switch at `scope`, `switches.<name>`, as the core reads
+ * it: the result of the step the chosen case's output names, in the
+ * switch's own iteration and branch. Nothing for a case with no output, and
+ * for a step in a loop or fan-out of the case, whose results are a list:
+ * neither names a case.
+ */
+function outputOf(
+  step: SwitchNode,
+  scope: Scope,
+  done: Published,
+  seen: ReadonlySet<string>,
+): unknown {
+  const chosen = chosenCase(step, scope, done, seen);
+  const ran = step.cases.find((one) => one.name === chosen);
+  const name = referencedStep(ran?.output ?? "");
+  if (ran === undefined || name === undefined) return undefined;
+  const inner = ran.children.find((child) => child.name === name);
+  if (inner?.kind === "switch") return outputOf(inner, scope, done, seen);
+  const key = addressKey(name, scope);
+  const task = done.tasks.get(key);
+  if (task) return task.status === "succeeded" ? task.result : undefined;
+  const run = done.subRuns.get(key);
+  return run?.status === "succeeded" ? run.output : undefined;
 }
 
 /**
