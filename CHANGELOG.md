@@ -59,6 +59,10 @@ one version, cut from a single tag on `main`.
   when the client leaves and when the backend begins to stop. The answer then
   says that nothing came yet. A backend with a waiting client stops at once,
   instead of waiting out the server's grace.
+- `neorc`: oneberth is at `822e025`. A backend that does not start says why
+  in its last line, where it said that the front listener did not start: the
+  component that failed with its error, or oneberth's own part, such as a
+  store that will not open.
 
 ### Removed
 

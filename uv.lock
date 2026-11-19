@@ -754,9 +754,9 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'http'", specifier = ">=0.28" },
     { name = "neorc-core", editable = "python/neorc-core" },
     { name = "neorc-ui", marker = "extra == 'manager'", editable = "python/neorc-ui" },
-    { name = "oneberth", git = "https://github.com/open-shipyard/oneberth?subdirectory=python%2Foneberth&rev=fa01925048ce845218e00cca10eb77ab50a846f8" },
-    { name = "oneberth", extras = ["postgres"], marker = "extra == 'postgres'", git = "https://github.com/open-shipyard/oneberth?subdirectory=python%2Foneberth&rev=fa01925048ce845218e00cca10eb77ab50a846f8" },
-    { name = "oneberth", extras = ["web"], marker = "extra == 'manager'", git = "https://github.com/open-shipyard/oneberth?subdirectory=python%2Foneberth&rev=fa01925048ce845218e00cca10eb77ab50a846f8" },
+    { name = "oneberth", git = "https://github.com/open-shipyard/oneberth?subdirectory=python%2Foneberth&rev=822e025a692d8f5d2ec39c2738cd7d9235936ee8" },
+    { name = "oneberth", extras = ["postgres"], marker = "extra == 'postgres'", git = "https://github.com/open-shipyard/oneberth?subdirectory=python%2Foneberth&rev=822e025a692d8f5d2ec39c2738cd7d9235936ee8" },
+    { name = "oneberth", extras = ["web"], marker = "extra == 'manager'", git = "https://github.com/open-shipyard/oneberth?subdirectory=python%2Foneberth&rev=822e025a692d8f5d2ec39c2738cd7d9235936ee8" },
 ]
 provides-extras = ["http", "manager", "postgres"]
 
@@ -776,8 +776,8 @@ source = { editable = "python/neorc-ui" }
 
 [[package]]
 name = "oneberth"
-version = "0.1.dev11+gfa0192504"
-source = { git = "https://github.com/open-shipyard/oneberth?subdirectory=python%2Foneberth&rev=fa01925048ce845218e00cca10eb77ab50a846f8#fa01925048ce845218e00cca10eb77ab50a846f8" }
+version = "0.1.dev13+g822e025a6"
+source = { git = "https://github.com/open-shipyard/oneberth?subdirectory=python%2Foneberth&rev=822e025a692d8f5d2ec39c2738cd7d9235936ee8#822e025a692d8f5d2ec39c2738cd7d9235936ee8" }
 
 [package.optional-dependencies]
 postgres = [
