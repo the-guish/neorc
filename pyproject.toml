@@ -9,7 +9,7 @@ neorc = { workspace = true }
 neorc-core = { workspace = true }
 neorc-ui = { workspace = true }
 # Pinned by commit; uv builds it from that commit. See docs/specs/core.md.
-oneberth = { git = "https://github.com/open-shipyard/oneberth", rev = "fa01925048ce845218e00cca10eb77ab50a846f8", subdirectory = "python/oneberth" }
+oneberth = { git = "https://github.com/open-shipyard/oneberth", rev = "1a6f63ce10c1904ac91958dbe2065c5c8a683362", subdirectory = "python/oneberth" }
 
 [dependency-groups]
 dev = [
