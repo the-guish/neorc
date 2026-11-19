@@ -150,6 +150,14 @@ def _switch_output(
     definition: FlowDefinition, state: RunState, switch: SwitchStep, scope: Scope
 ) -> Resolved | None:
     """The output of the case ``switch`` chose within ``scope``: ``switches.<name>``."""
+    # Known limitation: this evaluates switch_case twice for the same switch,
+    # here and again at the case's own level when its output is read. For
+    # switches that each choose on the previous one's output, the cost of one
+    # plan() doubles with every switch in the chain: about 1 s at 16 in a row,
+    # 13 s at 20, and half a second at 10 inside a loop at its 100th iteration.
+    # The scheduler plans runs one after another, so a slow plan holds the
+    # others back. If it causes trouble: keep the chosen case per switch and
+    # scope on RunState, as RunState keeps _last.
     case = switch_case(definition, state, switch, scope)
     if case is None:
         return None

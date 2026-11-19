@@ -251,12 +251,22 @@ export function published(
  * from `on` alone; this reads what the manager stores of a run, tasks and
  * sub-runs, so a switch choosing on another switch shows its case only
  * once that case has published a step. Nothing while the run does not say.
+ *
+ * Known limitation: a switch that chooses on another switch (`on:
+ * switches.x`) is read only from the steps its case published. If the
+ * chosen case has no steps, it stays "not chosen yet", after the run
+ * succeeded too. If it causes trouble: read `switches.x` as the core does,
+ * from the case x chose and the step that case's output names.
  */
 export function chosenCase(
   step: Extract<StepNode, { kind: "switch" }>,
   scope: Scope,
   done: Published,
 ): string | undefined {
+  // Known limitation: inside a loop or fan-out the run has not entered,
+  // drawn at instance 0, a switch still shows a case as chosen when `on` is
+  // an input or a task outside that container. If it causes trouble: choose
+  // nothing while any level of `scope` is 0.
   const value = onValue(step.on, scope, done);
   if (typeof value === "string" && step.cases.some((one) => one.name === value)) return value;
   return step.cases.find((one) => {
