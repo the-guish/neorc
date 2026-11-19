@@ -258,3 +258,58 @@ async def test_a_run_waits_for_a_responder_deployed(
     assert finished.status is RunStatus.SUCCEEDED
     assert finished.output == {"approved": True, "by": "ada"}
     assert after.json() == {"tasks": []}
+
+
+# Queues, declared from the flow files' own folder.
+
+QUEUED_FLOW = """\
+name: approval_e2e
+version: 1.0.0
+output: tasks.review
+steps:
+  review:
+    queue: editors_e2e
+    handler: review
+"""
+
+
+async def test_an_upload_declares_the_queues_of_queues_toml_then_stores_the_flows(
+    manager_address: str,
+    tokens: Tokens,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``neorc flows upload``, with CI's token, on a folder naming an external queue.
+
+    The command runs in a thread of its own, as a process of its own would: the
+    manager serves on this test's event loop.
+    """
+    from neorc import _cli
+
+    (tmp_path / "approval_e2e.yaml").write_text(QUEUED_FLOW)
+    (tmp_path / "queues.toml").write_text('[queues.editors_e2e]\nkind = "external"\n')
+    monkeypatch.setenv("NEORC_API_TOKEN", tokens.ci)
+    upload = ["flows", "upload", str(tmp_path), "--manager-address", manager_address]
+
+    first = await asyncio.to_thread(_cli.main, upload)
+    first_out, first_err = capsys.readouterr()
+    assert first == 0, first_err
+    again = await asyncio.to_thread(_cli.main, upload)
+    again_out = capsys.readouterr().out
+    (tmp_path / "queues.toml").write_text('[queues.editors_e2e]\nkind = "worker"\n')
+    flipped = await asyncio.to_thread(_cli.main, upload)
+    flipped_err = capsys.readouterr().err
+    async with httpx.AsyncClient(base_url=f"{manager_address}/neorc") as http:
+        listed = await http.get(
+            "/queues", headers={"authorization": f"Bearer {tokens.user}"}
+        )
+
+    assert first_out == "declared editors_e2e external\nstored approval_e2e 1.0.0\n"
+    assert (again, again_out) == (
+        0,
+        "unchanged editors_e2e external\nunchanged approval_e2e 1.0.0\n",
+    )
+    assert flipped == 1
+    assert "'editors_e2e' is an external queue" in flipped_err
+    assert {"name": "editors_e2e", "kind": "external"} in listed.json()["queues"]

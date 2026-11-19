@@ -66,7 +66,7 @@ Each token has a role, and may do only what its role allows
 
 | Role                     | May                                                                        |
 | ------------------------ | -------------------------------------------------------------------------- |
-| `neorc/ci`               | upload flows                                                               |
+| `neorc/ci`               | upload flows; declare the queues they name                                 |
 | `neorc/scheduler`        | read flows, runs and events; publish tasks, start sub-runs, end runs       |
 | `neorc/worker`           | fetch, receive, claim, heartbeat and finish the tasks of its one queue     |
 | `neorc/responder`        | list and complete the pending tasks of its one queue                       |
@@ -121,6 +121,15 @@ the manager, with the code the handlers import from, each with its token in
     NEORC_API_TOKEN=<github-actions> neorc flows upload flows
     NEORC_API_TOKEN=<scheduler>      neorc scheduler start
     NEORC_API_TOKEN=<worker-1>       neorc worker start --code-location .
+
+A `queues.toml` beside the flow files names each queue with its kind, and the
+upload declares those queues first. A queue declared already keeps its kind
+([task-completion.md](docs/specs/task-completion.md)):
+
+```toml
+[queues.editors]
+kind = "external"
+```
 
 Start a run from anywhere, with a token that may:
 

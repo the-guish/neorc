@@ -14,6 +14,7 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime
 
 from neorc_core._manager import Manager
+from neorc_core._queues import QueueKind
 from neorc_core._runs import Event, Run, RunId, RunStarter, TaskDelivery
 from neorc_core._task import TaskId
 from neorc_core._values import JsonValue
@@ -122,6 +123,13 @@ class DirectManagerClient(ManagerClient):
         request = transmit({"flows": list(contents)})
         stored = await self._manager.upload_flows(request["flows"])
         return list(transmit(stored))
+
+    async def declare_queue(self, name: str, kind: QueueKind) -> bool:
+        request = transmit({"name": name, "kind": kind.value})
+        added = await self._manager.add_queue(
+            request["name"], QueueKind(request["kind"])
+        )
+        return bool(transmit(added))
 
     async def get_flow(
         self, name: str, version: Version | None = None

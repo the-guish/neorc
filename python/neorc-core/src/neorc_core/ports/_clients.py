@@ -17,6 +17,7 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime
 
 from neorc_core._errors import InvalidValueError
+from neorc_core._queues import QueueKind
 from neorc_core._runs import Event, Run, RunId, TaskDelivery
 from neorc_core._task import TaskId
 from neorc_core._values import JsonValue
@@ -105,6 +106,15 @@ class ManagerClient(ABC):
     @abstractmethod
     async def upload_flows(self, contents: Sequence[JsonValue]) -> list[bool]:
         """Upload flows deployed together; per flow, whether a version was stored."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def declare_queue(self, name: str, kind: QueueKind) -> bool:
+        """Declare a new queue of ``kind``; whether it is new.
+
+        A queue declared already with ``kind`` is left as it is; one declared
+        with another kind raises ``QueueKindError``.
+        """
         raise NotImplementedError
 
     @abstractmethod

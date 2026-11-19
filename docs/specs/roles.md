@@ -61,6 +61,7 @@ It should not be able to create, modify or delete flows, start top-level runs or
 ### CI
 
 The CI, `neorc/ci`, should be able to post new versions of a flow.
+It declares the queues those flows name, from `queues.toml` (see [task-completion.md](task-completion.md), "Declaring queues"). A queue declared already keeps its kind.
 Uploading a new version cancels that flow's active runs (see [core.md](core.md), "Cancellation and failure"). CI has no permission to cancel runs otherwise.
 
 ### User

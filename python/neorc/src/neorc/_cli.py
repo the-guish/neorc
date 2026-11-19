@@ -55,7 +55,7 @@ from neorc_core import (
     Worker,
     _values,
 )
-from neorc_core.flows import DEFAULT_QUEUE, is_queue_name, read_flows
+from neorc_core.flows import DEFAULT_QUEUE, is_queue_name, read_flows, read_queues
 from neorc_core.local import run_local
 
 MANAGER_ADDRESS_ENV = "NEORC_MANAGER_ADDRESS"
@@ -525,10 +525,12 @@ def _on_queues(args: argparse.Namespace, act: Callable[..., Awaitable[int]]) -> 
 
 
 def flows_upload_command(args: argparse.Namespace) -> int:
-    """Upload the flow files in a directory as one set, and say what was stored.
+    """Declare the queues of a directory's ``queues.toml``, then upload its flow
+    files as one set, and say what was declared and stored.
 
     The files are read and validated as ``neorc run`` reads them; the manager
-    checks the set and the version rules. Exits 1 when it refuses.
+    checks the set and the version rules. A queue declared already keeps its
+    kind. Exits 1 when the manager refuses.
     """
     with _needs("http"):
         from neorc.http import HttpManagerClient
@@ -537,6 +539,7 @@ def flows_upload_command(args: argparse.Namespace) -> int:
     if not args.directory.is_dir():
         raise SystemExit(f"no such directory: {str(args.directory)!r}")
     try:
+        queues = read_queues(args.directory)
         contents = read_flows(args.directory)
     except FlowDefinitionError as exc:
         raise SystemExit(
@@ -547,12 +550,15 @@ def flows_upload_command(args: argparse.Namespace) -> int:
     if not contents:
         raise SystemExit(f"no flow files in {str(args.directory)!r}")
 
-    async def upload() -> list[bool]:
+    async def upload() -> tuple[list[bool], list[bool]]:
         async with _client(HttpManagerClient, address) as client:
-            return await client.upload_flows(contents)
+            declared = [
+                await client.declare_queue(name, kind) for name, kind in queues.items()
+            ]
+            return declared, await client.upload_flows(contents)
 
     try:
-        stored = asyncio.run(upload())
+        declared, stored = asyncio.run(upload())
     except AccessError as exc:
         print(_refused(exc), file=sys.stderr)
         return 1
@@ -564,6 +570,9 @@ def flows_upload_command(args: argparse.Namespace) -> int:
     except NeorcError as exc:
         print(f"upload refused: {exc}", file=sys.stderr)
         return 1
+    for (name, kind), is_new in zip(queues.items(), declared, strict=True):
+        state = "declared" if is_new else "unchanged"
+        print(f"{state} {name} {kind.value}")
     for content, is_new in zip(contents, stored, strict=True):
         state = "stored" if is_new else "unchanged"
         print(f"{state} {content['name']} {content['version']}")

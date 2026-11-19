@@ -36,6 +36,7 @@ from neorc_core import (
     ManagerUnavailableError,
     NeorcError,
     QueueClient,
+    QueueKind,
     Run,
     RunId,
     TaskDelivery,
@@ -119,7 +120,7 @@ class _HttpClient:
         kwargs: dict[str, Any] = {"params": params}
         if body is not None:
             kwargs["content"] = _encoded(body)
-        if method == "POST":
+        if method != "GET":  # oneberth takes a write only as JSON, body or not
             kwargs["headers"] = {"content-type": "application/json"}
         if read_timeout is not None:
             kwargs["timeout"] = httpx.Timeout(10.0, read=read_timeout + _POLL_GRACE)
@@ -288,6 +289,12 @@ class HttpManagerClient(_HttpClient, ManagerClient):
     async def upload_flows(self, contents: Sequence[JsonValue]) -> list[bool]:
         response = await self._request("POST", "/flows", body={"flows": list(contents)})
         return _parsed(response, lambda body: [bool(s) for s in body["stored"]])
+
+    async def declare_queue(self, name: str, kind: QueueKind) -> bool:
+        response = await self._request(
+            "PUT", f"/queues/{_queue_segment(name)}", body={"kind": kind.value}
+        )
+        return _parsed(response, lambda body: response.status_code == 201)
 
     async def get_flow(
         self, name: str, version: Version | None = None

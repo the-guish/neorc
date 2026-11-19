@@ -37,7 +37,7 @@ class Role(StrEnum):
     """Lists and completes the pending tasks of the one queue its token is bound to."""
     SCHEDULER = "neorc/scheduler"
     CI = "neorc/ci"
-    """Uploads flows."""
+    """Uploads flows, and declares the queues they name."""
     USER = "neorc/user"
     """A person, signed in or with a personal token for their scripts.
 
@@ -71,6 +71,8 @@ class Permission(StrEnum):
     """End a pending task by its id, with no lease before."""
     QUEUES_READ = "neorc/queues:read"
     """The declared queues, and the tasks of any of them in any status."""
+    QUEUES_DECLARE = "neorc/queues:declare"
+    """Declare a new queue with its kind, or one again with the kind it has."""
 
 
 WORKER_PERMISSIONS: frozenset[Permission] = frozenset(
@@ -113,7 +115,7 @@ PERMISSIONS: Mapping[Role, frozenset[Permission]] = MappingProxyType(
                 Permission.EVENTS_READ,
             }
         ),
-        Role.CI: frozenset({Permission.FLOWS_UPLOAD}),
+        Role.CI: frozenset({Permission.FLOWS_UPLOAD, Permission.QUEUES_DECLARE}),
         Role.USER: frozenset(
             {
                 Permission.FLOWS_READ,

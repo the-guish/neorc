@@ -377,6 +377,8 @@ def role_tokens_transport(
 
         async def _role_token(self, request: httpx.Request) -> str:
             path, method = request.url.path.removeprefix("/neorc"), request.method
+            if path.startswith("/queues/") and method == "PUT":
+                return await self._token(Role.CI)
             worker = _WORKER_PATHS.match(path + "/")
             if worker and worker["queue"] and not path.endswith("/recent"):
                 if path.endswith("/pending"):

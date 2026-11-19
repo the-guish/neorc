@@ -27,7 +27,7 @@ ALLOWED = {
     },
     "neorc/responder": {"queue:pending", "tasks:complete"},
     "neorc/scheduler": {"flows:read", "runs:read", "runs:schedule", "events:read"},
-    "neorc/ci": {"flows:upload"},
+    "neorc/ci": {"flows:upload", "queues:declare"},
     "neorc/user": {
         "flows:read",
         "runs:start",

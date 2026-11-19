@@ -10,6 +10,17 @@ one version, cut from a single tag on `main`.
 
 ## [Unreleased]
 
+### Added
+
+- `neorc-core`, `neorc`: `queues.toml` beside the flow files names each queue
+  with its kind. `neorc flows upload` declares those queues, then uploads the
+  flows; `LocalCluster.upload` does too. The new route `PUT /queues/{queue}`,
+  with the permission `neorc/queues:declare` of `neorc/ci`, declares a new
+  queue, and takes one again with the kind it has. A queue declared with
+  another kind is refused with a 409, `QueueKindError`: its operator changes a
+  kind. `ManagerClient.declare_queue` and `Manager.add_queue` do the same.
+- `neorc`: the HTTP clients send every write as JSON, as oneberth asks.
+
 ### Changed
 
 - `neorc`, `neorc-core`, `neorc-ui`: neorc is built on oneberth, pinned by

@@ -19,7 +19,7 @@ from neorc_core._runs import Run, RunId, RunStatus
 from neorc_core._scheduler import Scheduler
 from neorc_core._values import JsonValue
 from neorc_core._worker import Worker
-from neorc_core.flows import parse_flow, read_flows
+from neorc_core.flows import parse_flow, read_flows, read_queues
 from neorc_core.local._direct_clients import DirectManagerClient, DirectQueueClient
 from neorc_core.local._memory_store import MemoryStore
 from neorc_core.local._notifier import MemoryTaskNotifier
@@ -79,11 +79,14 @@ class LocalCluster:
     async def upload(self, flows_dir: Path) -> list[bool]:
         """Upload every ``*.yaml`` and ``*.yml`` flow file in ``flows_dir`` as a set.
 
-        A deployment's queues are declared by its operator. Here there is
-        none, so the queues the files name are declared first, as worker
-        queues, unless they are declared already: declare an external queue
-        with ``manager.declare_queue`` before uploading.
+        The queues of the folder's ``queues.toml`` are declared first, with
+        their kinds, as ``neorc flows upload`` declares them. A deployment's
+        other queues are declared by its operator. Here there is none, so the
+        other queues the files name are declared as worker queues, unless they
+        are declared already.
         """
+        for name, kind in read_queues(flows_dir).items():
+            await self.client.declare_queue(name, kind)
         contents = read_flows(flows_dir)
         for content in contents:
             try:

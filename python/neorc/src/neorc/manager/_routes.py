@@ -35,13 +35,13 @@ import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Annotated, Any, TypeVar
+from typing import Annotated, Any, Literal, TypeVar
 
 from fastapi import APIRouter, Depends, Query, Request, Response, status
 from fastapi.responses import JSONResponse
 from oneberth.identity import Principal
 from oneberth.web import permit, while_connected
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from neorc.manager._schemas import (
     DeliveryResponse,
@@ -53,6 +53,7 @@ from neorc.manager._schemas import (
     LatestEventResponse,
     PendingTasksResponse,
     QueueListResponse,
+    QueueResponse,
     QueueTasksResponse,
     RunListResponse,
     RunResponse,
@@ -68,6 +69,7 @@ from neorc_core import (
     Manager,
     PayloadTooLargeError,
     Permission,
+    QueueKind,
     RunId,
     RunStarter,
     RunStatus,
@@ -201,6 +203,12 @@ class UploadRequest(BaseModel):
 
 class StartRunRequest(BaseModel):
     inputs: dict[str, Any]
+
+
+class DeclareQueueRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["worker", "external"]
 
 
 class ErrorResponse(BaseModel):
@@ -764,6 +772,26 @@ async def complete_task(
 async def list_queues(manager: Managed) -> dict[str, list[dict[str, Any]]]:
     """Every declared queue, by name, with its kind."""
     return {"queues": [wire.queue_to(queue) for queue in await manager.queues()]}
+
+
+@router.put(
+    "/queues/{queue}",
+    dependencies=[permit(Permission.QUEUES_DECLARE)],
+    response_model=None,
+    responses=documented(QueueResponse),
+)
+async def declare_queue(request: Request, manager: Managed, queue: str) -> JSONResponse:
+    """Declare a new queue with its kind, 201; or one again with the kind it has, 200.
+
+    A queue declared with another kind is a 409: its operator changes a kind.
+    """
+    body = await read_body(request, DeclareQueueRequest)
+    kind = QueueKind(body.kind)
+    added = await manager.add_queue(queue, kind)
+    return JSONResponse(
+        {"name": queue, "kind": kind.value},
+        status_code=status.HTTP_201_CREATED if added else status.HTTP_200_OK,
+    )
 
 
 @router.get(
