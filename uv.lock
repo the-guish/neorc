@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -754,9 +754,9 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'http'", specifier = ">=0.28" },
     { name = "neorc-core", editable = "python/neorc-core" },
     { name = "neorc-ui", marker = "extra == 'manager'", editable = "python/neorc-ui" },
-    { name = "oneberth", git = "https://github.com/open-shipyard/oneberth?subdirectory=python%2Foneberth&rev=52da9dfb0499426c5265316378c89d405455a4a0" },
-    { name = "oneberth", extras = ["postgres"], marker = "extra == 'postgres'", git = "https://github.com/open-shipyard/oneberth?subdirectory=python%2Foneberth&rev=52da9dfb0499426c5265316378c89d405455a4a0" },
-    { name = "oneberth", extras = ["web"], marker = "extra == 'manager'", git = "https://github.com/open-shipyard/oneberth?subdirectory=python%2Foneberth&rev=52da9dfb0499426c5265316378c89d405455a4a0" },
+    { name = "oneberth", git = "https://github.com/open-shipyard/oneberth?subdirectory=python%2Foneberth&rev=fa01925048ce845218e00cca10eb77ab50a846f8" },
+    { name = "oneberth", extras = ["postgres"], marker = "extra == 'postgres'", git = "https://github.com/open-shipyard/oneberth?subdirectory=python%2Foneberth&rev=fa01925048ce845218e00cca10eb77ab50a846f8" },
+    { name = "oneberth", extras = ["web"], marker = "extra == 'manager'", git = "https://github.com/open-shipyard/oneberth?subdirectory=python%2Foneberth&rev=fa01925048ce845218e00cca10eb77ab50a846f8" },
 ]
 provides-extras = ["http", "manager", "postgres"]
 
@@ -776,8 +776,8 @@ source = { editable = "python/neorc-ui" }
 
 [[package]]
 name = "oneberth"
-version = "0.1.dev9+g52da9dfb0"
-source = { git = "https://github.com/open-shipyard/oneberth?subdirectory=python%2Foneberth&rev=52da9dfb0499426c5265316378c89d405455a4a0#52da9dfb0499426c5265316378c89d405455a4a0" }
+version = "0.1.dev11+gfa0192504"
+source = { git = "https://github.com/open-shipyard/oneberth?subdirectory=python%2Foneberth&rev=fa01925048ce845218e00cca10eb77ab50a846f8#fa01925048ce845218e00cca10eb77ab50a846f8" }
 
 [package.optional-dependencies]
 postgres = [
