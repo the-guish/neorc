@@ -1,5 +1,6 @@
 node_modules/
 dist/
+dist-mcp-view/
 # Generated from openapi.json by `npm run generate`.
 src/api/schema.d.ts
 # Packed by scripts/oneberth-ui-from-source.sh from the pinned oneberth commit.

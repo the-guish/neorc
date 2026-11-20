@@ -4,7 +4,7 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist", "src/api/schema.d.ts"] },
+  { ignores: ["dist", "dist-mcp-view", "src/api/schema.d.ts"] },
   {
     files: ["**/*.{ts,tsx}"],
     extends: [

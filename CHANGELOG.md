@@ -12,6 +12,15 @@ one version, cut from a single tag on `main`.
 
 ### Added
 
+- `neorc-mcp`: a new distribution, the manager as an MCP server over
+  streamable HTTP, behind a key. Each route a person or CI may call is a tool
+  of its name, so a host gives an agent the routes it chooses. An MCP App,
+  `neorc_panel` with `show_flow` and `show_run`, draws a flow or a run as the
+  UI does, with what failed. `docs/specs/mcp.md`.
+- `neorc-ui`: the wheel carries the MCP App's view, built from
+  `ts/neorc-ui/src/mcp-view/` into one HTML document;
+  `neorc_ui.mcp_view_html()` reads it.
+
 - `neorc-core`, `neorc`: `queues.toml` beside the flow files names each queue
   with its kind. `neorc flows upload` declares those queues, then uploads the
   flows; `LocalCluster.upload` does too. The new route `PUT /queues/{queue}`,

@@ -1,7 +1,8 @@
 # Copyright 2026 The neorc Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Build the UI into ``src/neorc_ui/static`` when it is not there.
+"""Build the UI into ``src/neorc_ui/static``, and the MCP App's view into
+``src/neorc_ui/mcp_view``, when either is not there.
 
 Runs before hatchling collects files, for a wheel or an sdist. From a checkout
 that means ``scripts/oneberth-ui-from-source.sh`` when ``@oneberth/ui`` is not
@@ -23,6 +24,8 @@ from typing import Any
 from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 
 STATIC = Path("src", "neorc_ui", "static")
+MCP_VIEW = Path("src", "neorc_ui", "mcp_view")
+MCP_VIEW_PAGE = "mcp-view.html"
 
 
 class UiBuildHook(BuildHookInterface):  # type: ignore[type-arg]
@@ -33,7 +36,8 @@ class UiBuildHook(BuildHookInterface):  # type: ignore[type-arg]
             return
         root = Path(self.root)
         static = root / STATIC
-        if (static / "index.html").is_file():
+        view = root / MCP_VIEW
+        if (static / "index.html").is_file() and (view / MCP_VIEW_PAGE).is_file():
             return
         source = root.parents[1] / "ts" / "neorc-ui"
         if not (source / "package.json").is_file():
@@ -42,15 +46,16 @@ class UiBuildHook(BuildHookInterface):  # type: ignore[type-arg]
                 "it from: build from a checkout of the repository, or from an "
                 "sdist, which carries the assets"
             )
-        build(source, static)
+        build(source, static, view)
 
 
 #: Where ``scripts/oneberth-ui-from-source.sh`` packs ``@oneberth/ui``.
 ONEBERTH_UI = Path("vendor", "oneberth-ui-0.0.0.tgz")
 
 
-def build(source: Path, static: Path) -> None:
-    """``npm ci && npm run build`` in ``source``; its ``dist`` becomes ``static``.
+def build(source: Path, static: Path, view: Path) -> None:
+    """``npm ci && npm run build`` in ``source``; its ``dist`` becomes ``static``,
+    and its ``dist-mcp-view`` becomes ``view``.
 
     ``@oneberth/ui`` comes from the oneberth commit the root ``pyproject.toml``
     pins: the script packs it first when it is not there.
@@ -76,6 +81,7 @@ def build(source: Path, static: Path) -> None:
         subprocess.run(["sh", str(script)], check=True, env=env)
     subprocess.run([npm, "ci"], cwd=source, check=True, env=env)
     subprocess.run([npm, "run", "build"], cwd=source, check=True, env=env)
-    if static.exists():
-        shutil.rmtree(static)
-    shutil.copytree(source / "dist", static)
+    for built, target in ((source / "dist", static), (source / "dist-mcp-view", view)):
+        if target.exists():
+            shutil.rmtree(target)
+        shutil.copytree(built, target)

@@ -2,7 +2,7 @@
 // checked on what `npm pack` would ship: React, React DOM and @oneberth/ui
 // are the peers, the other runtime dependencies are pinned, no install
 // script runs, and the TypeScript source ships without its tests and
-// without standalone neorc's page.
+// without standalone neorc's page or the MCP view.
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
@@ -39,7 +39,7 @@ const [packed] = JSON.parse(
 );
 const files = packed.files.map((file) => file.path);
 for (const path of files) {
-  if (/\.test\.tsx?$/.test(path) || path.startsWith("src/test/") || path.startsWith("src/standalone/")) {
+  if (/\.test\.tsx?$/.test(path) || path.startsWith("src/test/") || path.startsWith("src/standalone/") || path.startsWith("src/mcp-view/")) {
     failures.push(`${path} is shipped`);
   }
 }

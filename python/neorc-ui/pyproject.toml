@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "neorc-ui"
 dynamic = ["version"]
-description = "The built web UI of the neorc manager: static assets, no code to run"
+description = "The built web UI of the neorc manager, and its MCP App's view: static assets, no code to run"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE", "AUTHORS"]
@@ -39,7 +39,7 @@ raw-options = { root = "../.." }
 # The built assets are gitignored, so they must be named as artifacts to be
 # packaged; in the sdist too, so a wheel built from it needs no Node.js.
 [tool.hatch.build]
-artifacts = ["src/neorc_ui/static/**"]
+artifacts = ["src/neorc_ui/static/**", "src/neorc_ui/mcp_view/**"]
 
 # Builds ts/neorc-ui when the assets are missing. See hatch_build.py.
 [tool.hatch.build.hooks.custom]

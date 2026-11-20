@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        package: [neorc-core, neorc-ui, neorc]
+        package: [neorc-core, neorc-ui, neorc, neorc-mcp]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -43,7 +43,7 @@ jobs:
       # neorc, which depends on them.
       max-parallel: 1
       matrix:
-        package: [neorc-core, neorc-ui, neorc]
+        package: [neorc-core, neorc-ui, neorc, neorc-mcp]
     environment:
       name: pypi
       url: https://pypi.org/project/${{ matrix.package }}/
