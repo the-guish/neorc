@@ -63,6 +63,10 @@ one version, cut from a single tag on `main`.
   in its last line, where it said that the front listener did not start: the
   component that failed with its error, or oneberth's own part, such as a
   store that will not open.
+- `neorc-ui`: `package-lock.json` holds the hash of `@oneberth/ui` packed
+  from that oneberth. It held the hash from `52da9df`, so `npm ci` refused
+  the tarball wherever npm had no cache, and `scripts/neorc-ui-pack.sh`
+  failed there.
 
 ### Removed
 
