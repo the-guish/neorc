@@ -49,6 +49,25 @@ def test_static_dir_is_where_index_html_is(
     assert neorc_ui.static_dir() == static
 
 
+def test_mcp_view_html_names_the_fix_when_the_view_is_not_built(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(neorc_ui, "MCP_VIEW", tmp_path / "mcp-view.html")
+
+    with pytest.raises(FileNotFoundError, match="dist-mcp-view"):
+        neorc_ui.mcp_view_html()
+
+
+def test_mcp_view_html_is_the_built_page(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    page = tmp_path / "mcp-view.html"
+    page.write_text("<!doctype html><title>view</title>", encoding="utf-8")
+    monkeypatch.setattr(neorc_ui, "MCP_VIEW", page)
+
+    assert neorc_ui.mcp_view_html() == "<!doctype html><title>view</title>"
+
+
 @pytest.fixture(scope="module")
 def built(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """The wheel and sdist of a copy of the package holding stand-in assets.
@@ -68,13 +87,19 @@ def built(tmp_path_factory: pytest.TempPathFactory) -> Path:
     for name in ("LICENSE", "NOTICE", "AUTHORS"):
         shutil.copy(PACKAGE / name, copy / name)
     shutil.copytree(
-        PACKAGE / "src", copy / "src", ignore=shutil.ignore_patterns("static")
+        PACKAGE / "src",
+        copy / "src",
+        ignore=shutil.ignore_patterns("static", "mcp_view"),
     )
     static = copy / "src" / "neorc_ui" / "static"
     (static / "assets").mkdir(parents=True)
     (static / "index.html").write_text("<!doctype html><title>stand-in</title>")
     (static / "assets" / "index-abc123.js").write_text("console.log(1)")
     (static / "THIRD_PARTY_LICENSES.txt").write_text("none: a stand-in")
+    view = copy / "src" / "neorc_ui" / "mcp_view"
+    view.mkdir()
+    (view / "mcp-view.html").write_text("<!doctype html><title>view</title>")
+    (view / "THIRD_PARTY_LICENSES.txt").write_text("none: a stand-in")
     out = tmp_path_factory.mktemp("dist")
     subprocess.run(
         [uv, "build", "--no-cache", "--out-dir", str(out), str(copy)],
@@ -94,6 +119,8 @@ def test_the_wheel_carries_the_assets_and_the_license_files(built: Path) -> None
     assert "neorc_ui/static/index.html" in names
     assert "neorc_ui/static/assets/index-abc123.js" in names
     assert "neorc_ui/static/THIRD_PARTY_LICENSES.txt" in names
+    assert "neorc_ui/mcp_view/mcp-view.html" in names
+    assert "neorc_ui/mcp_view/THIRD_PARTY_LICENSES.txt" in names
     assert "neorc_ui/py.typed" in names
     for licence in ("LICENSE", "NOTICE", "AUTHORS"):
         assert f"neorc_ui-0.0.1.dist-info/licenses/{licence}" in names
@@ -109,4 +136,5 @@ def test_the_sdist_carries_the_assets_so_its_wheel_needs_no_node(
 
     assert "src/neorc_ui/static/index.html" in names
     assert "src/neorc_ui/static/THIRD_PARTY_LICENSES.txt" in names
+    assert "src/neorc_ui/mcp_view/mcp-view.html" in names
     assert "hatch_build.py" in names

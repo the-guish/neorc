@@ -26,6 +26,7 @@ is released from a single tag, so all packages share one version.
     python/neorc-core/    core primitives
     python/neorc/         top-level package, builds on neorc-core
     python/neorc-ui/      the built web UI as a distribution: assets, no code
+    python/neorc-mcp/     the manager as an MCP server, with its MCP App
     ts/neorc-ui/          the web UI's source, and @neorc/ui: React, TypeScript, Vite
 
 The Python packages form a [uv workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/)
@@ -39,7 +40,8 @@ with their own tooling. Dependencies under `ts/` follow
 [contributing/js-dependencies.md](contributing/js-dependencies.md).
 
 The web UI is built from `ts/neorc-ui` into `python/neorc-ui`, whose wheel
-carries the assets and nothing else. CI and the release build it; a wheel
+carries the assets and nothing else, and the view of neorc-mcp's MCP App
+beside them ([docs/specs/mcp.md](docs/specs/mcp.md)). CI and the release build it; a wheel
 built from a checkout builds it too, which needs Node.js. Python work never
 does: `uv sync` installs `neorc-ui` without assets, and the manager's tests
 mount a stand-in directory.

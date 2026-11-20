@@ -1,0 +1,52 @@
+[build-system]
+requires = ["hatchling>=1.27", "hatch-vcs>=0.4"]
+build-backend = "hatchling.build"
+
+[project]
+name = "neorc-mcp"
+dynamic = ["version"]
+description = "neorc's manager as an MCP server, with an MCP App that draws flows and runs"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE", "AUTHORS"]
+authors = [{ name = "The neorc Authors" }]
+maintainers = [{ name = "Luis Castro", email = "dev@guish.in" }]
+requires-python = ">=3.11"
+classifiers = [
+    "Development Status :: 1 - Planning",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: System :: Distributed Computing",
+    "Typing :: Typed",
+]
+# A client of the manager's API, over HTTP: it imports nothing of the manager.
+# neorc-core checks a flow before it is sent; neorc-ui holds the view.
+dependencies = [
+    "httpx>=0.28",
+    # The MCP SDK at the version Robinauts' lock pins: the host this serves
+    # first runs the same one. docs/specs/mcp.md, "Dependencies".
+    "mcp==1.30.0",
+    "neorc-core",
+    "neorc-ui",
+    "uvicorn>=0.30",
+]
+
+[project.scripts]
+neorc-mcp = "neorc_mcp._cli:main"
+
+[project.urls]
+Homepage = "https://github.com/open-shipyard/neorc"
+Issues = "https://github.com/open-shipyard/neorc/issues"
+Changelog = "https://github.com/open-shipyard/neorc/blob/main/CHANGELOG.md"
+
+[tool.hatch.version]
+source = "vcs"
+raw-options = { root = "../.." }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/neorc_mcp"]
