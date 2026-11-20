@@ -3,4 +3,5 @@
 // from this file and nothing else here; the whole of it, and how to take it
 // out, is in docs/architecture/forms.md.
 export { FlowForm } from "./FlowForm";
+export type { Search } from "./SearchChoice";
 export { answered, formOf, type Answers, type Form } from "./subset";

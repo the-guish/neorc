@@ -158,6 +158,43 @@ start a run.
 - The form sends the flow's inputs, whoever described it. The manager holds
   every start to the flow's own form, if the flow has one.
 
+### Options the host gives
+
+A host's form may have a choice whose options are too many to list, or that
+change while the server runs: a repository's branches, a person's projects.
+The choice names a source of the host's in the place of `options`, and the
+page asks the host for the options as the person types.
+
+```json
+{ "id": "branch", "component": "ChoicePicker", "label": "Branch",
+  "value": { "path": "/branch" },
+  "optionsFrom": { "source": "branch", "after": { "path": "/repo" } } }
+```
+
+- `source` is a name the host gives a meaning to. neorc reads nothing in it.
+- `after` is optional. It names another choice of the form, whose value
+  narrows the options: the branches of the repository chosen.
+- The host gives the root component `options`, a function. The page calls it
+  with the flow, the source, the value of `after`, the text typed, a limit
+  and an abort signal. The host answers the options that match, and whether
+  more do.
+- The page draws a text box with the options under it. The box waits while
+  the choice it comes after has no value. A new value of that choice empties
+  it.
+- A host's form with such a choice is drawn only when the host gives
+  `options`. Otherwise the page says so, and draws its own form.
+- A choice of a form of the manager's lists its options. The manager refuses
+  `optionsFrom` there: that form has no host to ask.
+
+The manager cannot hold a start to options it never saw. The host may give
+the root component `start`, a function, for that:
+
+- A run of a flow the host gave the form for starts through `start`, with
+  the flow's name and its inputs. The host checks them, starts the run, and
+  answers its id.
+- A refusal the host throws is shown as the manager's would be.
+- Without `start`, the run starts at the manager's route, as before.
+
 ## What the manager does
 
 - **At upload**, a form outside the subset is refused, with every reason, and
@@ -332,7 +369,7 @@ is a piece of work that was not needed to start a run.
 | a list index in a path, and indexing from the end | a path that picks one item of a list in the inputs |
 | a control or a check bound to another item | checks across items of a list |
 | a theme, `sendDataModel`, `deleteSurface` | nothing a form of a flow needs |
-| options from another service | a route of the manager's that asks it, and its configuration |
+| options from another service, in a form of the manager's | a route of the manager's that asks it, and its configuration; a host's form has them ("Options the host gives") |
 
 ## Where it is
 

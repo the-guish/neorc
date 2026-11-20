@@ -8,7 +8,13 @@ import { useMemo, useState } from "react";
 import { createApi } from "./api";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Layout } from "./components/Layout";
-import { NeorcContext, type FormSource, type Neorc } from "./context";
+import {
+  NeorcContext,
+  type FormSource,
+  type Neorc,
+  type OptionSource,
+  type RunStarter,
+} from "./context";
 import { FlowPage } from "./pages/FlowPage";
 import { FlowsPage } from "./pages/FlowsPage";
 import { QueuePage } from "./pages/QueuePage";
@@ -28,6 +34,16 @@ export interface NeorcOptions {
    * a flow the source has no form for, and for every flow without a source.
    */
   forms?: FormSource | undefined;
+  /**
+   * The options of a choice in the host's form that names a source
+   * (`optionsFrom`). A host form with such a choice is drawn only with it.
+   */
+  options?: OptionSource | undefined;
+  /**
+   * How a run of a flow the host gave the form for starts: through the host,
+   * which checks what its form asked for. Without it, the manager's route.
+   */
+  start?: RunStarter | undefined;
 }
 
 export type NeorcAppProps = AppProps & NeorcOptions;
@@ -50,13 +66,23 @@ function newQueryClient(): QueryClient {
 /**
  * The whole neorc application: its left panel of runs, flows and queues, and
  * its pages. The shell gives it the route, `navigate`, `href` and `visible`;
- * the host gives it the address of neorc's API and, if it likes, its forms.
+ * the host gives it the address of neorc's API and, if it likes, its forms,
+ * their options and how a run of one starts.
  */
-export function NeorcApp({ route, navigate, href, visible, api, forms }: NeorcAppProps) {
+export function NeorcApp({
+  route,
+  navigate,
+  href,
+  visible,
+  api,
+  forms,
+  options,
+  start,
+}: NeorcAppProps) {
   const [client] = useState(newQueryClient);
   const neorc = useMemo<Neorc>(
-    () => ({ api: createApi(api), visible, forms }),
-    [api, visible, forms],
+    () => ({ api: createApi(api), visible, forms, options, start }),
+    [api, visible, forms, options, start],
   );
   const nav = useMemo(() => navOf({ href, navigate }), [href, navigate]);
   const shown = parseRoute(route);

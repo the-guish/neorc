@@ -1,6 +1,7 @@
 import { Fragment, type ReactNode } from "react";
 
-import { textOf, type Answers, type Control, type Form, type Held } from "./subset";
+import { SearchChoice, type Search } from "./SearchChoice";
+import { dependents, textOf, type Answers, type Control, type Form, type Held } from "./subset";
 import "./forms.css";
 
 /** A choice of up to this many options is radio buttons; of more, a list. */
@@ -19,6 +20,7 @@ interface Scope {
  * `answers`. A flow's form has no button of its own; the page around it
  * starts the run (`answered`, in ./subset). A task's form may have buttons,
  * which complete the task: `onPress` is given the value the button sets.
+ * A host's form may have searches, whose options `search` asks the host for.
  */
 export function FlowForm({
   form,
@@ -26,6 +28,7 @@ export function FlowForm({
   onChange,
   onPress,
   pressing = false,
+  search,
 }: {
   form: Form;
   answers: Answers;
@@ -33,7 +36,11 @@ export function FlowForm({
   onPress?: (value: string) => void;
   /** While a press is being sent, the buttons wait. */
   pressing?: boolean;
+  /** The host's options, for a form with a search: `formOf` reads one only then. */
+  search?: Search | undefined;
 }) {
+  /** The label of each field's control, for a search that waits for one. */
+  const labels = labelsOf(form.root);
   /** What a control holds, in its item when it is in a template. */
   function held(input: string, scope: Scope | undefined): Held | undefined {
     const value = answers[input];
@@ -41,7 +48,12 @@ export function FlowForm({
   }
   function set(input: string, scope: Scope | undefined, value: Held) {
     if (scope === undefined) {
-      onChange({ ...answers, [input]: value });
+      // A search after this field may hold what is no longer one of its options.
+      const emptied =
+        answers[input] === value
+          ? {}
+          : Object.fromEntries(dependents(form, input).map((name) => [name, ""]));
+      onChange({ ...answers, ...emptied, [input]: value });
       return;
     }
     const before = answers[input];
@@ -202,7 +214,52 @@ export function FlowForm({
           </fieldset>
         );
       }
+      case "search": {
+        if (search === undefined) return null;
+        const after = control.after === null ? undefined : String(answers[control.after] ?? "");
+        return (
+          <SearchChoice
+            // Anew for each value of the choice it comes after.
+            key={`${control.id}:${after ?? ""}`}
+            id={id}
+            label={control.label}
+            source={control.source}
+            after={after}
+            afterLabel={control.after === null ? undefined : labels.get(control.after)}
+            value={String(held(control.input, scope) ?? "")}
+            onChoose={(value) => set(control.input, scope, value)}
+            search={search}
+          />
+        );
+      }
     }
   }
   return <div className="neorc-flow-form">{draw(form.root)}</div>;
+}
+
+/** The label of the control of each field, by the field's name. */
+function labelsOf(control: Control): Map<string, string> {
+  const labels = new Map<string, string>();
+  function walk(each: Control) {
+    switch (each.kind) {
+      case "column":
+      case "row":
+      case "list":
+        each.children.forEach(walk);
+        return;
+      case "card":
+        walk(each.child);
+        return;
+      case "repeat":
+        walk(each.template);
+        return;
+      case "text":
+      case "button":
+        return;
+      default:
+        labels.set(each.input, each.label);
+    }
+  }
+  walk(control);
+  return labels;
 }

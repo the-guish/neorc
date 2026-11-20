@@ -3,10 +3,19 @@ import { detailOf } from "@oneberth/ui";
 import { useMemo, useState, type FormEvent } from "react";
 
 import type { Flow } from "../api";
-import { useApi, useFormSource, type FormMessages } from "../context";
-import { answered, FlowForm, formOf, type Answers, type Form } from "../forms";
+import {
+  useApi,
+  useFormSource,
+  useOptionSource,
+  useRunStarter,
+  type FormMessages,
+} from "../context";
+import { answered, FlowForm, formOf, type Answers, type Form, type Search } from "../forms";
 import { localToIso } from "../format";
 import { useNav } from "../router";
+
+/** The most options a search shows at once. */
+const SEARCH_LIMIT = 50;
 
 const INPUT_TYPES = ["string", "number", "boolean", "datetime"] as const;
 type InputType = (typeof INPUT_TYPES)[number];
@@ -86,6 +95,7 @@ export function jsonBodyOf(
  */
 function useHostForm(flow: Flow): { pending: boolean; form: Form | null; failed: string | null } {
   const source = useFormSource();
+  const search = useOptionSource() !== undefined;
   const asked = useQuery({
     queryKey: ["host-form", flow.name, flow.version],
     queryFn: async (): Promise<FormMessages | null> =>
@@ -97,19 +107,21 @@ function useHostForm(flow: Flow): { pending: boolean; form: Form | null; failed:
     if (source === undefined || asked.data === null) return { pending: false, form: null, failed: null };
     if (asked.isPending) return { pending: true, form: null, failed: null };
     if (asked.isError) return { pending: false, form: null, failed: detailOf(asked.error) };
-    const form = formOf({ form: asked.data });
+    const form = formOf({ form: asked.data }, undefined, { search });
     return form === null
       ? { pending: false, form: null, failed: "it is outside what neorc draws" }
       : { pending: false, form, failed: null };
-  }, [source, asked.data, asked.isPending, asked.isError, asked.error]);
+  }, [source, search, asked.data, asked.isPending, asked.isError, asked.error]);
 }
 
 /**
  * Start a run of a flow's latest version. The host's form comes first, when
  * the host gives one for the flow (`forms` on the root component); then the
  * flow's own form (../forms); then one field per declared input; and a JSON
- * editor for what none can say. The manager's refusal is shown as it came;
- * a started run is opened.
+ * editor for what none can say. A run of a flow the host gave the form for
+ * starts through the host when it says how (`start` on the root component),
+ * since the host checks what its form asked for. The refusal is shown as it
+ * came; a started run is opened.
  */
 export function StartRunForm({ flow }: { flow: Flow }) {
   const host = useHostForm(flow);
@@ -126,6 +138,16 @@ export function StartRunForm({ flow }: { flow: Flow }) {
 
 function StartRun({ flow, hostForm }: Readonly<{ flow: Flow; hostForm: Form | null }>) {
   const api = useApi();
+  const options = useOptionSource();
+  const host = useRunStarter();
+  const starter = hostForm !== null ? host : undefined;
+  const search = useMemo<Search | undefined>(
+    () =>
+      options === undefined
+        ? undefined
+        : (asked) => options({ ...asked, flow: flow.name, limit: SEARCH_LIMIT }),
+    [options, flow.name],
+  );
   const { navigate } = useNav();
   const inputs = inputsOf(flow.content);
   const names = Object.keys(inputs);
@@ -136,7 +158,8 @@ function StartRun({ flow, hostForm }: Readonly<{ flow: Flow; hostForm: Form | nu
   const [json, setJson] = useState("{}");
   const [problem, setProblem] = useState<string | null>(null);
   const start = useMutation({
-    mutationFn: (body: Record<string, unknown>) => api.startRun(flow.name, body),
+    mutationFn: (body: Record<string, unknown>) =>
+      starter !== undefined ? starter(flow.name, body) : api.startRun(flow.name, body),
   });
 
   function submit(event: FormEvent) {
@@ -173,7 +196,12 @@ function StartRun({ flow, hostForm }: Readonly<{ flow: Flow; hostForm: Form | nu
       </p>
       {mode === "form" ? (
         form ? (
-          <FlowForm form={form} answers={answers} onChange={setAnswers} />
+          <FlowForm
+            form={form}
+            answers={answers}
+            onChange={setAnswers}
+            search={hostForm !== null ? search : undefined}
+          />
         ) : names.length === 0 ? (
           <p className="neorc-muted">This flow declares no inputs.</p>
         ) : (

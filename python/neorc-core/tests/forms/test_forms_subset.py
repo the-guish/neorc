@@ -95,6 +95,11 @@ REFUSED: list[tuple[str, Callable[[list[Any]], object], str]] = [
         "form.repo: ChoicePicker has no 'filterable' in the subset",
     ),
     (
+        "options a host gives, which a form of the manager's has no host for",
+        lambda f: component(f, "repo").update(optionsFrom={"source": "repo"}),
+        "form.repo: ChoicePicker has no 'optionsFrom' in the subset",
+    ),
+    (
         "a choice of several",
         lambda f: component(f, "repo").update(variant="multipleSelection"),
         "form.repo: variant must be 'mutuallyExclusive'",
