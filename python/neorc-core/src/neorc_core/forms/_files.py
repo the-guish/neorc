@@ -42,6 +42,14 @@ def inline_form(
     return read
 
 
+def flow_form(content: Any) -> Any:
+    """The form a flow holds for starting a run of it; ``None`` with none.
+
+    ``content`` is a flow as it is uploaded and stored.
+    """
+    return content.get("form") if isinstance(content, Mapping) else None
+
+
 def step_forms(content: Any) -> dict[str, Any]:
     """The form of each step of a flow that has one, by the step's name.
 

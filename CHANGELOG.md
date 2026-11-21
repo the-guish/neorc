@@ -12,6 +12,19 @@ one version, cut from a single tag on `main`.
 
 ### Added
 
+- `neorc-core`, `neorc`, `neorc-ui`: a form may hold a `FlowPicker`, a choice
+  of one of the manager's flows, for a `string` input of a flow or a field of
+  a task's result. It is the catalog's own component, beside the nine of
+  A2UI's. The page lists no option of its own: it asks the manager for the
+  flows as the person types, with that person's credential. The manager
+  refuses a start or a completion that names a flow it does not hold:
+  `launcher: input 'target' names no flow 'nope'`.
+  [docs/architecture/forms.md](docs/architecture/forms.md), "A choice of a
+  flow".
+- `neorc-core`, `neorc`: `GET /flows` takes `search` and `limit`.
+  `search` keeps the flows whose name holds the text, in any case, those that
+  start with it first; `limit` keeps the first that many, at most 500.
+  `Manager.latest_flows` takes both. Without them the listing is as it was.
 - `neorc-core`, `neorc`: `queues.toml` beside the flow files names each queue
   with its kind. `neorc flows upload` declares those queues, then uploads the
   flows; `LocalCluster.upload` does too. The new route `PUT /queues/{queue}`,

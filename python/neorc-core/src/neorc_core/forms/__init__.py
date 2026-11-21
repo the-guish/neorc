@@ -17,13 +17,16 @@ the rest of neorc meets it in these places only:
   task completed: which steps have a form, and is the result what the form
   of its step submits, whoever sends it? A task's form may read the task's
   inputs, so the check is given them.
+- ``flow_form`` and ``picked_flows``, beside both checks: which flows does a
+  form's choice of a flow name? The checks are given the ones the manager
+  holds.
 
 Nothing here imports the rest of ``neorc_core`` but its errors, and nothing
 outside this package knows what a form holds. The whole of it, and how to take
 it out, is in docs/architecture/forms.md.
 """
 
-from neorc_core.forms._files import inline_form, step_forms
+from neorc_core.forms._files import flow_form, inline_form, step_forms
 from neorc_core.forms._subset import (
     CATALOG_ID,
     VERSION,
@@ -31,6 +34,7 @@ from neorc_core.forms._subset import (
     check_form_result,
     form_fields,
     form_problems,
+    picked_flows,
 )
 
 __all__ = [
@@ -38,8 +42,10 @@ __all__ = [
     "VERSION",
     "check_form_inputs",
     "check_form_result",
+    "flow_form",
     "form_fields",
     "form_problems",
     "inline_form",
+    "picked_flows",
     "step_forms",
 ]

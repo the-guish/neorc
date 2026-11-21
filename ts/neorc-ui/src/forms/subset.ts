@@ -11,6 +11,10 @@
 // List repeats a template once per item of a list in one. In the template, a
 // path with no leading slash is relative to the item. A control there holds
 // one value per item, and a Button completes the task, setting one field.
+//
+// A FlowPicker is the catalog's own: a choice of one of the manager's flows,
+// which the page searches as a person types (./FlowPicker). It holds the name
+// of the flow chosen.
 
 /** A rule a control's value must keep, with what to say when it does not. */
 export interface Check {
@@ -75,7 +79,8 @@ export type Control =
       options: Option[];
       display: (typeof DISPLAY_STYLES)[number];
       checks: Check[];
-    });
+    })
+  | (Bound & { kind: "flow"; checks: Check[] });
 
 /** What one control holds: a text, or a check box's yes or no. */
 export type Held = string | boolean;
@@ -341,6 +346,12 @@ export function formOf(content: unknown, inputs?: Record<string, unknown>): Form
           checks,
         };
       }
+      case "FlowPicker": {
+        const checks = checksOf(component.checks);
+        if (typeof label !== "string" || input === null || checks === null) return null;
+        begin(input, typeof given === "string" ? given : "");
+        return { kind: "flow", id, input, label, perItem, checks };
+      }
       default:
         return null;
     }
@@ -391,8 +402,8 @@ function perItemFields(control: Control): string[] {
 /**
  * The inputs a run is started with, or the result a task is completed with,
  * from a filled-in form; or the first thing wrong with it. A field left
- * without a number and a choice left unmade are refused here: every input of
- * a flow is needed, and every field of a result. The rest is the form's own
+ * without a number and a choice left unmade, of a flow too, are refused here:
+ * every input of a flow is needed, and every field of a result. The rest is the form's own
  * checks, which the manager keeps as well. `pressed` is the value of the
  * button that completes a task, set in the field its form's buttons set.
  */
@@ -441,9 +452,10 @@ export function answered(
     }
     const text = String(answer ?? "");
     let value: string | number = text;
-    if (control.kind === "choice" && text === "") {
+    if ((control.kind === "choice" || control.kind === "flow") && text === "") {
       const required = control.checks.find((check) => check.call === "required");
-      return `${label}: ${required?.message ?? "choose one"}`;
+      const otherwise = control.kind === "flow" ? "choose a flow" : "choose one";
+      return `${label}: ${required?.message ?? otherwise}`;
     }
     if (control.kind === "field" && control.variant === "number") {
       value = text.trim() === "" ? NaN : Number(text);

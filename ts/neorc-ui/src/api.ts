@@ -63,6 +63,16 @@ export function createApi(base: string) {
       return (await get<{ flows: Flow[] }>("/flows")).flows;
     },
 
+    /**
+     * The flows whose name holds `text`, those that start with it first, and
+     * at most `limit` of them: what a form asks while a person types a flow's
+     * name. An empty text lists the first flows by name.
+     */
+    async searchFlows(text: string, limit: number, signal?: AbortSignal): Promise<Flow[]> {
+      const found = await get<{ flows: Flow[] }>("/flows", { search: text, limit }, signal);
+      return found.flows;
+    },
+
     getFlow(name: string, version?: string): Promise<Flow> {
       const path = version
         ? `/flows/${encodeURIComponent(name)}/versions/${encodeURIComponent(version)}`

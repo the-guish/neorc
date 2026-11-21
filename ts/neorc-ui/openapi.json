@@ -1045,8 +1045,45 @@
     },
     "/neorc/flows": {
       "get": {
-        "description": "The latest version of every flow, by name.",
+        "description": "The latest version of every flow, by name.\n\n``search`` keeps the flows whose name holds that text, those that start\nwith it first, and ``limit`` the first that many: what a page asks while\na person types a flow's name.",
         "operationId": "list_flows_neorc_flows_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 500,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {

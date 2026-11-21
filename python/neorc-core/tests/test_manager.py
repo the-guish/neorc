@@ -347,3 +347,47 @@ async def test_a_flow_naming_a_queue_nobody_declared_is_refused(
 
     await flows.declare_queue("gpu", QueueKind.EXTERNAL)
     assert await flows.upload_flows([on_gpu, fine]) == [True, True]
+
+
+# The listing of the flows, and a search of it.
+
+
+async def test_a_search_keeps_the_flows_whose_name_holds_the_text(
+    flows: Manager,
+) -> None:
+    names = ["review_loop", "code_review", "Reviewer", "hello", "preview"]
+    await flows.upload_flows([single(name) for name in names])
+
+    async def found(search: str | None, limit: int | None = None) -> list[str]:
+        latest = await flows.latest_flows(search=search, limit=limit)
+        return [flow.name for flow in latest]
+
+    # Every flow by name, as the store lists them, without a text to hold.
+    assert await found(None) == sorted(names)
+    assert await found("") == sorted(names)
+    # Those that start with the text first, then the others, each by name,
+    # and in any case.
+    assert await found("review") == [
+        "Reviewer",
+        "review_loop",
+        "code_review",
+        "preview",
+    ]
+    assert await found("REVIEW_") == ["review_loop"]
+    assert await found("nothing") == []
+    assert await found("review", limit=2) == ["Reviewer", "review_loop"]
+    assert await found(None, limit=1) == ["Reviewer"]
+
+
+async def test_a_search_gives_the_latest_version_of_each_flow(flows: Manager) -> None:
+    await flows.upload_flows([single("hello")])
+    await flows.upload_flows([single("hello", "1.1.0")])
+
+    (latest,) = await flows.latest_flows(search="hell")
+
+    assert latest.version == Version.parse("1.1.0")
+
+
+async def test_a_listing_of_no_flow_is_refused(flows: Manager) -> None:
+    with pytest.raises(InvalidValueError, match="limit is at least 1, not 0"):
+        await flows.latest_flows(limit=0)

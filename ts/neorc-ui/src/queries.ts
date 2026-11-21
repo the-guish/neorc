@@ -1,5 +1,6 @@
 // Data fetching on TanStack Query, and the event poll that keeps it fresh.
 import {
+  keepPreviousData,
   useInfiniteQuery,
   useQuery,
   useQueryClient,
@@ -20,6 +21,8 @@ import { useApi, useVisible } from "./context";
 
 export const keys = {
   flows: ["flows"] as const,
+  // An object after "flows", where a flow's own queries have its name.
+  flowSearch: (text: string) => ["flows", { search: text }] as const,
   flow: (name: string, version?: string) =>
     ["flows", name, version ?? "latest"] as const,
   versions: (name: string) => ["flows", name, "versions"] as const,
@@ -45,6 +48,25 @@ export function useFlows() {
   return useQuery({
     queryKey: keys.flows,
     queryFn: api.listFlows,
+    staleTime: FLOWS_STALE_MS,
+  });
+}
+
+/** The most flows a search of them lists under a form's field. */
+export const FLOW_SEARCH_LIMIT = 8;
+
+/**
+ * The flows whose name holds `text`, asked while `enabled`: a form's choice
+ * of a flow asks as a person types. The last answer stays while the next is
+ * on its way, so the list does not empty at every letter.
+ */
+export function useFlowSearch(text: string, enabled: boolean) {
+  const api = useApi();
+  return useQuery({
+    queryKey: keys.flowSearch(text),
+    queryFn: ({ signal }) => api.searchFlows(text, FLOW_SEARCH_LIMIT, signal),
+    enabled,
+    placeholderData: keepPreviousData,
     staleTime: FLOWS_STALE_MS,
   });
 }

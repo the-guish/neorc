@@ -6,7 +6,7 @@
 A form is the list of messages an A2UI agent would send to draw a surface:
 one ``createSurface``, the components, and optionally the data to start from.
 Of A2UI's basic catalog a form may use these components, and nothing they do
-not need:
+not need; ``FlowPicker`` is this catalog's own:
 
 ================  ========================================  ==================
 component         properties                                submits
@@ -25,6 +25,8 @@ component         properties                                submits
                   ``displayStyle``, ``checks``
 ``Button``        ``child``, ``variant``, ``action``;       the value its
                   for a task                                action sets
+``FlowPicker``    ``label``, ``value``, ``checks``          a string: the name
+                                                            of the flow chosen
 ================  ========================================  ==================
 
 What a form submits is the surface's data: an input named ``repo`` is what
@@ -41,9 +43,13 @@ submits a list, one value per item, as the result's ``decision``. A
 ``Button`` completes the task, setting the one field its action's context
 names: ``{"verdict": "ready"}``.
 
+A ``FlowPicker`` is a choice of the manager's own flows, which the page
+searches as a person types. What it submits names a flow the manager holds:
+the checks are given those names (``picked_flows``).
+
 A check is one the manager can keep by itself: ``required`` and ``length`` on
 a text field, ``required`` and ``numeric`` on a number field, ``required`` on
-a choice. Each is about the control's own value.
+a choice and on a choice of a flow. Each is about the control's own value.
 
 Labels and options are plain strings: no binding, and no function call
 outside a check.
@@ -56,6 +62,7 @@ from dataclasses import dataclass, field
 from typing import Any, TypeGuard
 
 from neorc_core._errors import InvalidValueError
+from neorc_core.forms._files import flow_form
 
 VERSION = "v0.9"
 """The A2UI version every message of a form states."""
@@ -81,6 +88,7 @@ _PROPERTIES = {
     "CheckBox": {"label", "value"},
     "ChoicePicker": {"label", "value", "variant", "displayStyle", "options", "checks"},
     "Button": {"child", "variant", "action"},
+    "FlowPicker": {"label", "value", "checks"},
 }
 _TEXT_VARIANTS = ("h1", "h2", "h3", "h4", "h5", "caption", "body")
 _FIELD_VARIANTS = ("shortText", "longText", "number")
@@ -94,12 +102,14 @@ _SUBMITS = {
     "number": "number",
     "boolean": "boolean",
     "choice": "string",
+    "flow": "string",
 }
 _CHECKS = {
     "text": ("required", "length"),
     "number": ("required", "numeric"),
     "boolean": (),
     "choice": ("required",),
+    "flow": ("required",),
 }
 _PLURAL = {"string": "strings", "number": "numbers", "boolean": "booleans"}
 
@@ -113,6 +123,8 @@ def _kind(component: Mapping[str, Any]) -> str | None:
             return "boolean"
         case "ChoicePicker":
             return "choice"
+        case "FlowPicker":
+            return "flow"
     return None
 
 
@@ -788,21 +800,41 @@ def _data_problems(
     return problems
 
 
-def check_form_inputs(flow: str, content: Any, inputs: Mapping[str, Any]) -> None:
+def picked_flows(form: Any, values: Any) -> set[str]:
+    """The flows ``values`` name where ``form`` has a FlowPicker.
+
+    ``values`` are a run's inputs for a flow's form, and a result for a
+    task's. A check of them is given the ones of these names the manager
+    holds, as its ``flows``: the form cannot look a flow up by itself.
+    """
+    picked: set[str] = set()
+    for control in _controls(form):
+        if control.kind != "flow" or not isinstance(values, Mapping):
+            continue
+        value = values.get(control.name)
+        for each in value if isinstance(value, list) else [value]:
+            if isinstance(each, str):
+                picked.add(each)
+    return picked
+
+
+def check_form_inputs(
+    flow: str, content: Any, inputs: Mapping[str, Any], *, flows: Collection[str] = ()
+) -> None:
     """Raise ``InvalidValueError`` unless ``inputs`` keep what the form asks.
 
     ``content`` is the flow as it is stored, and ``inputs`` a run's inputs,
     already of their declared types. A flow with no form asks nothing here.
     What is asked is what the form's controls say: a choice is one of its
-    options, and each check holds.
+    options, a choice of a flow names one of ``flows``, and each check holds.
+    ``flows`` are the flows the manager holds, of those ``picked_flows`` names.
     """
-    form = content.get("form") if isinstance(content, Mapping) else None
     problems: list[str] = []
-    for control in _controls(form):
+    for control in _controls(flow_form(content)):
         if control.name in inputs:
             problems.extend(
                 f"input {control.name!r} {problem}"
-                for problem in _unkept(control, inputs[control.name])
+                for problem in _unkept(control, inputs[control.name], flows)
             )
     if problems:
         raise InvalidValueError(f"{flow}: " + "; ".join(problems))
@@ -821,7 +853,12 @@ def _items_of(segments: list[str], inputs: Mapping[str, Any]) -> list[Any] | Non
 
 
 def check_form_result(
-    step: str, form: Any, result: Any, inputs: Mapping[str, Any] | None = None
+    step: str,
+    form: Any,
+    result: Any,
+    inputs: Mapping[str, Any] | None = None,
+    *,
+    flows: Collection[str] = (),
 ) -> None:
     """Raise ``InvalidValueError`` unless ``result`` is what a task's form submits.
 
@@ -829,9 +866,11 @@ def check_form_result(
     completion gives, in its JSON form, and ``inputs`` the task's inputs, as a
     worker would receive them. The result is a mapping with the form's fields
     and no other, each of the type its control submits; a choice is one of
-    its options, and each check holds. A control in a List's template submits
-    one value per item of the list in ``inputs``. The field the buttons set is
-    one of their values. That is for every completion, whoever sends it.
+    its options, a choice of a flow names one of ``flows``, and each check
+    holds. A control in a List's template submits one value per item of the
+    list in ``inputs``. The field the buttons set is one of their values. That
+    is for every completion, whoever sends it. ``flows`` are the flows the
+    manager holds, of those ``picked_flows`` names.
     """
     fields = form_fields(form)
     if not isinstance(result, Mapping):
@@ -854,7 +893,7 @@ def check_form_result(
             else:
                 problems.extend(
                     f"field {control.name!r} {problem}"
-                    for problem in _unkept(control, value)
+                    for problem in _unkept(control, value, flows)
                 )
             continue
         where = "/" + "/".join(control.items)
@@ -875,7 +914,7 @@ def check_form_result(
             problems.extend(
                 f"field {control.name!r}, item {index}, {problem}"
                 for index, each in enumerate(value, start=1)
-                for problem in _unkept(control, each)
+                for problem in _unkept(control, each, flows)
             )
     buttons = _buttons(form)
     if (
@@ -897,9 +936,14 @@ def _is_a(value: Any, submits: str) -> bool:
     return isinstance(value, str)
 
 
-def _unkept(control: _Control, value: Any) -> list[str]:
-    """How one value breaks what its control says, each the end of a sentence."""
+def _unkept(control: _Control, value: Any, flows: Collection[str]) -> list[str]:
+    """How one value breaks what its control says, each the end of a sentence.
+
+    ``flows`` are the flows the manager holds, for a choice of one.
+    """
     component = control.component
+    if control.kind == "flow":
+        return [] if value in flows else [f"names no flow {value!r}"]
     if control.kind == "choice":
         options = [
             option.get("value")
