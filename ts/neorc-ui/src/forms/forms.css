@@ -95,17 +95,18 @@
   color: var(--on-accent);
 }
 
-/* A choice of one of the manager's flows: a text box, and under it the list
-   of the flows found, over what follows. The list is under the box itself:
-   a line said below the box is under the list. */
+/* A choice of one of the manager's flows: a text box, and the list of the
+   flows found hanging from it, over what follows. The list is placed from
+   the box's own wrapper, so a line said below the box is under the list. */
 
 .neorc-start-run .neorc-flow-form .neorc-flow-form-picker {
   display: grid;
   gap: 0.25rem;
 }
 
-.neorc-start-run .neorc-flow-form .neorc-flow-form-picker label {
+.neorc-start-run .neorc-flow-form .neorc-flow-form-picker-box {
   position: relative;
+  display: grid;
 }
 
 .neorc-start-run .neorc-flow-form .neorc-flow-form-picker ul {

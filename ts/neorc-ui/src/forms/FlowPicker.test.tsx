@@ -172,17 +172,21 @@ describe("a form's choice of a flow, drawn", () => {
     type("re");
     type("rev");
 
-    // Those whose name starts with the text first, as the manager lists them.
+    // Not once per letter: the list first shown, then the text as it rested.
     await waitFor(() =>
-      expect(screen.getAllByRole("option").map((each) => each.textContent)).toEqual([
-        "review_loop 2.1.0",
-        "code_review 1.0.0",
+      expect(searches()).toEqual([
+        `?search=&limit=${FLOW_SEARCH_LIMIT}`,
+        `?search=rev&limit=${FLOW_SEARCH_LIMIT}`,
       ]),
     );
-    // Not once per letter: the list first shown, then the text as it rested.
-    expect(searches()).toEqual([
-      `?search=&limit=${FLOW_SEARCH_LIMIT}`,
-      `?search=rev&limit=${FLOW_SEARCH_LIMIT}`,
+    // The manager's answer, as it lists them: those that start with the text
+    // first.
+    await waitFor(() =>
+      expect(screen.getByRole("listbox")).toHaveAttribute("aria-busy", "false"),
+    );
+    expect(screen.getAllByRole("option").map((each) => each.textContent)).toEqual([
+      "review_loop 2.1.0",
+      "code_review 1.0.0",
     ]);
   });
 
@@ -205,6 +209,11 @@ describe("a form's choice of a flow, drawn", () => {
     renderWithClient(<StartRunForm flow={launcher()} />);
     type("rev");
     await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(2));
+    // Enter would pick the first flow found; the arrow moves to the next.
+    expect(box()).toHaveAttribute(
+      "aria-activedescendant",
+      screen.getByRole("option", { name: /review_loop/ }).id,
+    );
     fireEvent.keyDown(box(), { key: "ArrowDown" });
     expect(box()).toHaveAttribute(
       "aria-activedescendant",
@@ -219,24 +228,44 @@ describe("a form's choice of a flow, drawn", () => {
     await waitFor(() => expect(posted).toEqual([{ inputs: { target: "review_loop" } }]));
   });
 
-  it("picks nothing from a list that is not yet the one for what was typed", async () => {
-    const { posted } = serve();
+  it("narrows the list it has at once, before the manager answers for the text", async () => {
+    const { posted, searches } = serve();
 
     renderWithClient(<StartRunForm flow={launcher()} />);
     fireEvent.focus(box());
     await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(3));
-    // The list still holds every flow, code_review first, when Enter comes.
-    type("hel");
-    fireEvent.keyDown(box(), { key: "Enter" });
+    type("REV");
 
-    expect(box()).toHaveValue("hel");
+    // The manager was not asked yet: these are the flows it listed before
+    // that hold the text, in its own order, those that start with it first.
+    expect(searches()).toHaveLength(1);
+    expect(screen.getAllByRole("option").map((each) => each.textContent)).toEqual([
+      "review_loop 2.1.0",
+      "code_review 1.0.0",
+    ]);
     expect(screen.getByRole("listbox")).toHaveAttribute("aria-busy", "true");
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    // Once it is the list for the text, Enter picks its first flow.
-    await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(1));
+    // So Enter picks a flow the person sees, and never one of another text.
     fireEvent.keyDown(box(), { key: "Enter" });
-    expect(box()).toHaveValue("hello");
+    expect(box()).toHaveValue("review_loop");
     expect(posted).toEqual([]);
+  });
+
+  it("keeps Enter from the form while the manager's answer is on its way", async () => {
+    serve();
+
+    renderWithClient(<StartRunForm flow={launcher()} />);
+    fireEvent.focus(box());
+    await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(3));
+    type("nothing like it");
+
+    // No flow listed before holds the text: there is no list, and the form
+    // is not submitted with a text the manager has yet to answer for.
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Searching…");
+    expect(fireEvent.keyDown(box(), { key: "Enter" })).toBe(false);
+    // Once the manager said that no flow matches, Enter is the form's again.
+    expect(await screen.findByText("No flow matches.")).toBeInTheDocument();
+    expect(fireEvent.keyDown(box(), { key: "Enter" })).toBe(true);
   });
 
   it("takes a name typed in full as the flow chosen", async () => {

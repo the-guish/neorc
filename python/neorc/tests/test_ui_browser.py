@@ -815,11 +815,27 @@ async def test_a_form_picks_one_of_the_managers_flows_in_the_browser(
     await box.press_sequentially("BOOK")
     await expect(found).to_have_text(["booking_report 1.0.0", "vip_booking 1.0.0"])
 
-    # The arrow and Enter pick one, and the run starts with its name.
+    # The list hangs from the box: right under it, as wide, over what follows.
+    listed = page.get_by_role("listbox", name="Flows for Flow")
+    at_box, at_list = await box.bounding_box(), await listed.bounding_box()
+    assert at_box is not None and at_list is not None
+    gap = at_list["y"] - (at_box["y"] + at_box["height"])
+    assert 0 <= gap <= 8, (at_box, at_list)
+    assert abs(at_list["x"] - at_box["x"]) <= 1, (at_box, at_list)
+    assert abs(at_list["width"] - at_box["width"]) <= 1, (at_box, at_list)
+
+    # A click picks one, and the list goes; the arrow and Enter pick another.
+    await found.filter(has_text="booking_report").click()
+    await expect(box).to_have_value("booking_report")
+    await expect(found).to_have_count(0)
+    await box.fill("book")
+    await expect(found).to_have_text(["booking_report 1.0.0", "vip_booking 1.0.0"])
     await box.press("ArrowDown")
     await box.press("Enter")
     await expect(box).to_have_value("vip_booking")
     await expect(found).to_have_count(0)
+
+    # The run starts with the name of the flow picked last.
     await page.get_by_role("button", name="Start run").click()
     await page.wait_for_url(re.compile(r"#/neorc/runs/[0-9a-f-]{36}$"))
     await expect(page.locator("pre", has_text='"target"')).to_contain_text(

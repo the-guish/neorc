@@ -5,6 +5,7 @@
 import { detailOf } from "@oneberth/ui";
 import { useEffect, useState, type KeyboardEvent } from "react";
 
+import type { Flow } from "../api";
 import { useFlowSearch } from "../queries";
 
 /** How long the box waits after a letter before it asks the manager. */
@@ -21,6 +22,17 @@ function useSettled<T>(value: T, ms: number): T {
 }
 
 /**
+ * Of `flows`, those whose name holds `text`, in the manager's order: in any
+ * case, those that start with it first.
+ */
+function holding(flows: readonly Flow[], text: string): Flow[] {
+  const held = text.toLowerCase();
+  const found = flows.filter((flow) => flow.name.toLowerCase().includes(held));
+  const starts = (flow: Flow) => flow.name.toLowerCase().startsWith(held);
+  return [...found.filter(starts), ...found.filter((flow) => !starts(flow))];
+}
+
+/**
  * The box holds what the person types, and `value` the flow chosen: a flow
  * picked from the list, or one whose name was typed in full. Typing anything
  * else leaves no flow chosen, so a form submits the name of a flow or
@@ -30,6 +42,10 @@ function useSettled<T>(value: T, ms: number): T {
  * nothing else: while the box has the focus and does not hold the flow
  * chosen. What there is to say without a flow to pick is a line under the
  * box, which covers nothing.
+ *
+ * The list always fits the text. While the manager's answer for a text is
+ * on its way, the list is the answer before it, narrowed here to the flows
+ * that hold the text: what Enter picks is a flow the person sees.
  */
 export function FlowPicker({
   id,
@@ -57,10 +73,11 @@ export function FlowPicker({
   // flow chosen yet: a person may type a name in full and leave the box.
   const asked = useSettled(typed, SEARCH_DELAY_MS);
   const search = useFlowSearch(asked, looking || unchosen);
-  const flows = search.data ?? [];
-  // Whether the flows are the answer for what the box holds now: while the
-  // typing rests and the manager answers, they are still the ones before.
+  // Whether the manager's answer is for what the box holds now: while the
+  // typing rests and the manager answers, it is still the one before.
   const current = asked === typed && search.isSuccess && !search.isPlaceholderData;
+  const answer = search.data ?? [];
+  const flows = current ? answer : holding(answer, typed);
   const open = looking && !away && flows.length > 0;
 
   // A name typed in full is the flow chosen, as if picked from the list.
@@ -95,14 +112,16 @@ export function FlowPicker({
         if (open) setActive(Math.max(at - 1, 0));
         break;
       case "Enter": {
-        // With no list, Enter is the form's: it submits.
-        if (!open) break;
-        // A list for an earlier text is not picked from, and the form is
-        // not submitted under it: the answer for this text is on its way.
-        const flow = current ? flows[at] : undefined;
-        if (flow !== undefined) pick(flow.name);
-        // With no option under the keys, Enter is the form's too.
-        if (flow !== undefined || !current) event.preventDefault();
+        const flow = open ? flows[at] : undefined;
+        if (flow !== undefined) {
+          event.preventDefault();
+          pick(flow.name);
+        } else if (looking && !current && !search.isError) {
+          // The answer for this text is on its way: the form is not
+          // submitted before it comes.
+          event.preventDefault();
+        }
+        // Otherwise Enter is the form's: it submits.
         break;
       }
       case "Escape":
@@ -128,8 +147,10 @@ export function FlowPicker({
   }
   return (
     <div className="neorc-flow-form-picker">
-      <label htmlFor={id}>
-        {label}
+      <label htmlFor={id}>{label}</label>
+      {/* The box and its list, apart from the label: the list hangs from the
+          box, and its flows are no part of the box's name. */}
+      <div className="neorc-flow-form-picker-box">
         <input
           id={id}
           type="text"
@@ -153,25 +174,25 @@ export function FlowPicker({
           }}
           onKeyDown={onKeyDown}
         />
-      </label>
-      {open && (
-        <ul id={list} role="listbox" aria-label={`Flows for ${label}`} aria-busy={!current}>
-          {flows.map((flow, index) => (
-            <li
-              key={flow.name}
-              id={`${list}-${index}`}
-              role="option"
-              aria-selected={index === at}
-              className={index === at ? "neorc-flow-form-picker-active" : undefined}
-              // The box keeps the focus, so the list stays for the click.
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => pick(flow.name)}
-            >
-              {flow.name} <small className="neorc-muted">{flow.version}</small>
-            </li>
-          ))}
-        </ul>
-      )}
+        {open && (
+          <ul id={list} role="listbox" aria-label={`Flows for ${label}`} aria-busy={!current}>
+            {flows.map((flow, index) => (
+              <li
+                key={flow.name}
+                id={`${list}-${index}`}
+                role="option"
+                aria-selected={index === at}
+                className={index === at ? "neorc-flow-form-picker-active" : undefined}
+                // The box keeps the focus, so the list stays for the click.
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => pick(flow.name)}
+              >
+                {flow.name} <small className="neorc-muted">{flow.version}</small>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
       {said !== null && (
         <small role="status" className="neorc-muted">
           {said}
