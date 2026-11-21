@@ -186,14 +186,30 @@ page asks the host for the options as the person types.
 - A choice of a form of the manager's lists its options. The manager refuses
   `optionsFrom` there: that form has no host to ask.
 
-The manager cannot hold a start to options it never saw. The host may give
-the root component `start`, a function, for that:
+The manager knows nothing of these options, so by itself it holds no start
+to them. A host that wants every start held to its form checks the start
+itself, in one of two places:
 
-- A run of a flow the host gave the form for starts through `start`, with
-  the flow's name and its inputs. The host checks them, starts the run, and
-  answers its id.
-- A refusal the host throws is shown as the manager's would be.
-- Without `start`, the run starts at the manager's route, as before.
+- **In the manager it composes.** A host that builds the manager in its own
+  process checks the inputs there, before `Manager.start_run` starts the
+  run. Every start is then checked: the page's, and one that reaches the
+  manager's route from a script. Such a host gives no `start`.
+- **Through `start`.** The host gives the root component `start`, a
+  function. A run of a flow the host gave the form for starts through it,
+  with the flow's name and its inputs. The host checks them, starts the run,
+  and answers its id. A refusal the host throws is shown as the manager's
+  would be.
+
+`start` holds the page alone, and only where the page drew the host's form:
+
+- The manager's route, `POST /flows/<name>/runs`, starts the same run
+  unchecked for whoever may start runs.
+- A host's form the page could not draw gives way to the page's own form,
+  which starts at the manager's route.
+
+With neither, the run starts at the manager's route, as before, and the
+host's options are a help to the person and no check. `options` asks for no
+`start`: a host that checks in the manager has no use for one.
 
 ## What the manager does
 
@@ -391,11 +407,16 @@ for a task's:
 | `neorc_core/flows/_loader.py`, `_TOP_KEYS` and `_Parser.flow` | a flow may have a `form`, and `form_problems` says what is wrong with it |
 | `neorc_core/flows/_loader.py`, `load_flow_yaml`, `load_flow_file`, `read_flows` | `inline_form` reads the files a flow file names, the tasks' too |
 | `neorc_core/_manager.py`, `_start_latest` | `check_form_inputs`, after `check_inputs` |
-| `ts/neorc-ui/src/components/StartRunForm.tsx` | `formOf`, `answered` and `<FlowForm>`, in the place of the fields; `useHostForm`, the host's form, before the flow's own |
+| `ts/neorc-ui/src/components/StartRunForm.tsx` | `formOf`, `answered` and `<FlowForm>`, in the place of the fields; `useHostForm`, the host's form, before the flow's own; `useOptionSource`, the search `<FlowForm>` is given for a host's form; `useRunStarter`, the host's start of a run of such a form |
 | `neorc_core/flows/_loader.py`, `_STEP_KEYS`, `_Parser.step` and `_Parser.loop` | a task may have a `form`, which reads only the task's params, and an exit condition may not |
 | `neorc_core/_manager.py`, `upload_flows` | `step_forms`: a form is for a task of an external queue |
 | `neorc_core/_manager.py`, `complete_task` | `check_form_result`, with the task's inputs, before the completion is stored |
 | `ts/neorc-ui/src/components/TaskPanel.tsx` | `formOf` with the task's inputs, `answered` and `<FlowForm>` with its buttons, in the place of the text field |
+
+A host's form comes in at the root component, in three files:
+`ts/neorc-ui/src/context.ts` holds `forms`, `options` and `start` and their
+types, `NeorcApp.tsx` takes them, and `index.tsx` takes them in `neorcApp` and
+exports the types.
 
 Nothing else knows what a form holds. The store keeps it as part of the flow's
 content, the HTTP routes carry that content as they did, and the adapters in
@@ -413,8 +434,9 @@ read; a test in `python/neorc-core/tests/forms/` fails when a copy differs.
    `_Parser.loop`; make the three readers of `_loader.py` read a file's
    structure as it is; take the lines out of `_start_latest`, `upload_flows`
    and `complete_task`; give `StartRunForm` back its fields alone, and
-   `TaskPanel` its text field. Take `forms` off the root component
-   (`ts/neorc-ui/src/context.ts`, `NeorcApp.tsx`).
+   `TaskPanel` its text field. Take `forms`, `options` and `start` off the
+   root component, with their types and hooks (`ts/neorc-ui/src/context.ts`,
+   `NeorcApp.tsx`, `index.tsx`), and their tests out of `NeorcApp.test.tsx`.
 3. Take the journey on `examples/review_loop` out of
    `python/neorc/tests/test_ui_browser.py`.
 4. Take the entries out of `CHANGELOG.md` and the paragraphs out of
