@@ -1,2 +1,3 @@
 # Built by CI, or by hatch_build.py when missing; never committed.
 src/neorc_ui/static/
+src/neorc_ui/mcp_view/

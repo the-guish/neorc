@@ -7,6 +7,7 @@ members = ["python/*"]
 [tool.uv.sources]
 neorc = { workspace = true }
 neorc-core = { workspace = true }
+neorc-mcp = { workspace = true }
 neorc-ui = { workspace = true }
 # Pinned by commit; uv builds it from that commit. See docs/specs/core.md.
 oneberth = { git = "https://github.com/open-shipyard/oneberth", rev = "822e025a692d8f5d2ec39c2738cd7d9235936ee8", subdirectory = "python/oneberth" }
@@ -18,6 +19,7 @@ dev = [
     "mypy>=2",
     "neorc[http,manager,postgres]",
     "neorc-core",
+    "neorc-mcp",
     "neorc-ui",
     "pytest>=9",
     "pytest-asyncio>=1.3",
@@ -59,6 +61,7 @@ testpaths = [
     "python/neorc-core/tests",
     "python/neorc/tests",
     "python/neorc-ui/tests",
+    "python/neorc-mcp/tests",
 ]
 addopts = [
     "--strict-config",

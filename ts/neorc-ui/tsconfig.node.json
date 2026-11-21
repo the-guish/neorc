@@ -10,5 +10,5 @@
     "types": ["node"],
     "tsBuildInfoFile": "node_modules/.tmp/node.tsbuildinfo"
   },
-  "include": ["vite.config.ts"]
+  "include": ["vite.config.ts", "vite.mcp-view.config.ts"]
 }

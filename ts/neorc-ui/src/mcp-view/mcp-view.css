@@ -1,0 +1,78 @@
+/* The MCP App's page: a narrow side panel, so a graph and a task's details
+   stack, one above the other. */
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+}
+
+:where(.neorc-mcp-view) main {
+  padding: 0 0.75rem 1.5rem;
+}
+
+:where(.neorc-mcp-view) h1 {
+  font-size: 1.15rem;
+  margin: 0.75rem 0;
+}
+
+.neorc-mcp-view .neorc-run-graph {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* A run's graph; a flow's is as tall as its steps need, set on it. */
+.neorc-mcp-view .neorc-run-graph:not(.neorc-flow-graph) .neorc-run-graph-canvas {
+  height: 60vh;
+  min-height: 18rem;
+}
+
+.neorc-mcp-view .neorc-run-graph-panel {
+  width: auto;
+  max-height: none;
+}
+
+.neorc-mcp-list {
+  padding-left: 1.25rem;
+}
+
+.neorc-mcp-failure {
+  margin: 0.5rem 0 1rem;
+}
+
+.neorc-mcp-failure pre {
+  white-space: pre-wrap;
+  max-height: 16rem;
+  overflow: auto;
+}
+
+.neorc-mcp-error {
+  color: var(--danger, #dc2626);
+}
+
+/* React Flow follows the system's scheme; the panel follows the host's theme,
+   which the view sets on <html>. Its controls, minimap and attribution take
+   the theme's colours here, the ones React Flow gives each scheme. */
+:root[data-theme="dark"] .neorc-mcp-view .react-flow {
+  --xy-controls-button-background-color: #2b2b2b;
+  --xy-controls-button-background-color-hover: #3e3e3e;
+  --xy-controls-button-color: #f8f8f8;
+  --xy-controls-button-color-hover: #fff;
+  --xy-controls-button-border-color: #5b5b5b;
+  --xy-minimap-background-color: #141414;
+  --xy-minimap-mask-background-color: rgba(60, 60, 60, 0.6);
+  --xy-minimap-node-background-color: #2b2b2b;
+  --xy-attribution-background-color: rgba(150, 150, 150, 0.25);
+}
+
+:root[data-theme="light"] .neorc-mcp-view .react-flow {
+  --xy-controls-button-background-color: #fefefe;
+  --xy-controls-button-background-color-hover: #f4f4f4;
+  --xy-controls-button-color: inherit;
+  --xy-controls-button-color-hover: inherit;
+  --xy-controls-button-border-color: #eee;
+  --xy-minimap-background-color: #fff;
+  --xy-minimap-mask-background-color: rgba(240, 240, 240, 0.6);
+  --xy-minimap-node-background-color: #e2e2e2;
+  --xy-attribution-background-color: rgba(255, 255, 255, 0.5);
+}
