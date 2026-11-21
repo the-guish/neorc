@@ -7,7 +7,15 @@ import type { AppModule, AppProps, CountStore, ShellApp } from "@oneberth/ui";
 import type { NeorcOptions } from "./NeorcApp";
 
 export type { NeorcAppProps, NeorcOptions } from "./NeorcApp";
-export type { FormMessages, FormRequest, FormSource } from "./context";
+export type {
+  FormMessages,
+  FormRequest,
+  FormSource,
+  OptionPage,
+  OptionRequest,
+  OptionSource,
+  RunStarter,
+} from "./context";
 // The reader of a form, for a host's tests: a host checks the form it gives
 // neorc against the subset neorc draws. A host's bundle leaves it out unless
 // the host calls it; neorc's own chunk holds it.
@@ -25,9 +33,17 @@ export interface NeorcShellOptions extends NeorcOptions {
 
 /**
  * neorc as an application of oneberth's shell: its name, title and icon, and
- * the loader of its root component, given `api` and `forms`.
+ * the loader of its root component, given `api`, `forms`, `options` and `start`.
  */
-export function neorcApp({ api, forms, name = "neorc", title = "neorc", count }: NeorcShellOptions): ShellApp {
+export function neorcApp({
+  api,
+  forms,
+  options,
+  start,
+  name = "neorc",
+  title = "neorc",
+  count,
+}: NeorcShellOptions): ShellApp {
   const app: ShellApp = {
     name,
     title,
@@ -36,7 +52,7 @@ export function neorcApp({ api, forms, name = "neorc", title = "neorc", count }:
       const { NeorcApp } = await import("./NeorcApp");
       return {
         default: function Neorc(props: AppProps) {
-          return <NeorcApp {...props} api={api} forms={forms} />;
+          return <NeorcApp {...props} api={api} forms={forms} options={options} start={start} />;
         },
       };
     },

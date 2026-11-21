@@ -3,7 +3,7 @@ import { loadSession, Shell, type ShellApp } from "@oneberth/ui";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { Flow } from "./api";
-import type { FormSource } from "./context";
+import type { FormSource, OptionRequest, OptionSource, RunStarter } from "./context";
 import { neorcApp } from "./index";
 import { ACTIVE, HELLO, SIGNED_IN, SUCCEEDED, WORD_PICKER } from "./test/fixtures";
 import { mockApi, neverAnswers, refusal } from "./test/render";
@@ -54,12 +54,65 @@ const SHIP_FORM = [
   },
 ];
 
+/** A flow with a repository and a branch of it, which the host has a form for. */
+const DEPLOY: Flow = {
+  name: "deploy",
+  version: "1.0.0",
+  content: {
+    name: "deploy",
+    version: "1.0.0",
+    inputs: { repo: "string", branch: "string" },
+    steps: { work: { handler: "tasks:work" } },
+  },
+};
+
+/** The host's form for `deploy`: a choice of repository, then a search of its branches. */
+const DEPLOY_FORM = [
+  {
+    version: "v0.9",
+    createSurface: { surfaceId: "deploy", catalogId: "https://github.com/open-shipyard/neorc/forms/v1" },
+  },
+  {
+    version: "v0.9",
+    updateComponents: {
+      surfaceId: "deploy",
+      components: [
+        { id: "root", component: "Column", children: ["repo", "branch"] },
+        {
+          id: "repo",
+          component: "ChoicePicker",
+          label: "Repository",
+          variant: "mutuallyExclusive",
+          value: { path: "/repo" },
+          options: [
+            { label: "billing", value: "acme/billing" },
+            { label: "search", value: "acme/search" },
+          ],
+        },
+        {
+          id: "branch",
+          component: "ChoicePicker",
+          label: "Branch",
+          variant: "mutuallyExclusive",
+          value: { path: "/branch" },
+          optionsFrom: { source: "branch", after: { path: "/repo" } },
+        },
+      ],
+    },
+  },
+];
+
+const BRANCHES: Record<string, string[]> = {
+  "acme/billing": ["main", "feature/a", "feature/b"],
+  "acme/search": ["main", "release/1"],
+};
+
 function routes(session: unknown = SIGNED_IN) {
   const shared: Record<string, unknown> = {
     "/auth/session": session,
     "/events/latest": { sequence: 0 },
     "/events": () => neverAnswers(),
-    "/flows": { flows: [HELLO, SHIP] },
+    "/flows": { flows: [HELLO, SHIP, DEPLOY] },
     "/runs?root_only=true&limit=6": { runs: [] },
     "/runs?root_only=true&limit=50": { runs: [ACTIVE] },
     "/flows/hello": HELLO,
@@ -68,6 +121,9 @@ function routes(session: unknown = SIGNED_IN) {
     "/flows/ship": SHIP,
     "/flows/ship/versions": { versions: [SHIP] },
     "/flows/ship/versions/1.0.0": SHIP,
+    "/flows/deploy": DEPLOY,
+    "/flows/deploy/versions": { versions: [DEPLOY] },
+    "/flows/deploy/versions/1.0.0": DEPLOY,
     "/flows/word_picker": WORD_PICKER,
     "/flows/word_picker/versions": { versions: [WORD_PICKER] },
     [`/flows/word_picker/versions/${WORD_PICKER.version}`]: WORD_PICKER,
@@ -89,9 +145,24 @@ const NOTES: ShellApp = {
 };
 
 /** neorc in oneberth's shell, as a host mounts it, once the session is read. */
-async function renderInShell(options: { forms?: FormSource; beside?: ShellApp[] } = {}) {
+async function renderInShell(
+  options: {
+    forms?: FormSource;
+    options?: OptionSource;
+    start?: RunStarter;
+    beside?: ShellApp[];
+  } = {},
+) {
   await loadSession();
-  const apps = [neorcApp({ api: "/neorc/", forms: options.forms }), ...(options.beside ?? [])];
+  const apps = [
+    neorcApp({
+      api: "/neorc/",
+      forms: options.forms,
+      options: options.options,
+      start: options.start,
+    }),
+    ...(options.beside ?? []),
+  ];
   return render(<Shell apps={apps} title="neorc" />);
 }
 
@@ -229,5 +300,81 @@ describe("neorc in the shell", () => {
     );
     const start = screen.getByRole("form", { name: "Start ship" });
     expect(within(start).getByLabelText(/repo/)).toBeInTheDocument();
+  });
+
+  it("searches the host's options after the choice it comes after, and starts the run through the host", async () => {
+    const { calls } = mockApi(routes());
+    const asked: Omit<OptionRequest, "signal">[] = [];
+    const started: unknown[] = [];
+    const options: OptionSource = async (request) => {
+      const { signal, ...rest } = request;
+      expect(signal).toBeInstanceOf(AbortSignal);
+      asked.push(rest);
+      const matching = (BRANCHES[request.after ?? ""] ?? []).filter((name) =>
+        name.includes(request.query),
+      );
+      return { items: matching.map((name) => ({ label: name, value: name })), more: false };
+    };
+    const start: RunStarter = async (flow, inputs) => {
+      started.push([flow, inputs]);
+      return { id: SUCCEEDED.id };
+    };
+    location.hash = "#/neorc/flows/deploy";
+
+    await renderInShell({ forms: () => DEPLOY_FORM, options, start });
+    const form = await screen.findByRole("form", { name: "Start deploy" });
+    const branch = await within(form).findByRole("combobox", { name: "Branch" });
+    expect(branch).toBeDisabled();
+    expect(branch).toHaveAttribute("placeholder", "Choose Repository first");
+
+    fireEvent.click(within(form).getByRole("radio", { name: "billing" }));
+    fireEvent.focus(within(form).getByRole("combobox", { name: "Branch" }));
+    // Opened, it lists every branch; once the typing rests, those that match.
+    expect(await within(form).findByRole("option", { name: "main" })).toBeInTheDocument();
+    fireEvent.change(within(form).getByRole("combobox", { name: "Branch" }), {
+      target: { value: "feat" },
+    });
+    await waitFor(() =>
+      expect(within(form).queryByRole("option", { name: "main" })).not.toBeInTheDocument(),
+    );
+    fireEvent.mouseDown(within(form).getByRole("option", { name: "feature/b" }));
+    expect(asked.at(-1)).toEqual({
+      flow: "deploy",
+      source: "branch",
+      after: "acme/billing",
+      query: "feat",
+      limit: 50,
+    });
+    expect(within(form).getByRole("combobox", { name: "Branch" })).toHaveValue("feature/b");
+
+    // Another repository: the branch chosen is not one of its own.
+    fireEvent.click(within(form).getByRole("radio", { name: "search" }));
+    expect(within(form).getByRole("combobox", { name: "Branch" })).toHaveValue("");
+    fireEvent.click(within(form).getByRole("button", { name: "Start run" }));
+    expect(await within(form).findByRole("alert")).toHaveTextContent("Branch");
+
+    fireEvent.focus(within(form).getByRole("combobox", { name: "Branch" }));
+    fireEvent.change(within(form).getByRole("combobox", { name: "Branch" }), {
+      target: { value: "rel" },
+    });
+    fireEvent.mouseDown(await within(form).findByRole("option", { name: "release/1" }));
+    fireEvent.click(within(form).getByRole("button", { name: "Start run" }));
+
+    await waitFor(() => expect(location.hash).toBe(`#/neorc/runs/${SUCCEEDED.id}`));
+    expect(started).toEqual([["deploy", { repo: "acme/search", branch: "release/1" }]]);
+    expect(calls.some(({ url }) => url.pathname.endsWith("/flows/deploy/runs"))).toBe(false);
+  });
+
+  it("draws its own form when the host's has a search and the host gives no options", async () => {
+    mockApi(routes());
+    location.hash = "#/neorc/flows/deploy";
+
+    await renderInShell({ forms: () => DEPLOY_FORM });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The host's form for deploy could not be drawn",
+    );
+    const start = screen.getByRole("form", { name: "Start deploy" });
+    expect(within(start).getByLabelText(/branch/)).toBeInTheDocument();
   });
 });

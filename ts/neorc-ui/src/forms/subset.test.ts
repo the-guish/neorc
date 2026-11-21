@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import example from "./code_task.form.json";
 import triage from "./triage.form.json";
-import { answered, formOf, textOf, type Answers, type Form } from "./subset";
+import { answered, dependents, formOf, textOf, type Answers, type Form } from "./subset";
 
 /** The example's form, with one change to the messages before it is read. */
 function changed(change: (messages: typeof example) => void): unknown {
@@ -287,6 +287,89 @@ describe("a task's form", () => {
 
     expect(answered(empty, empty.start, "ready")).toEqual({
       inputs: { decision: [], verdict: "ready" },
+    });
+  });
+});
+
+/** A host's form: a choice of repository, then the searches `rest` adds. */
+function hosted(...rest: Record<string, unknown>[]): unknown {
+  return {
+    form: [
+      {
+        updateComponents: {
+          components: [
+            { id: "root", component: "Column", children: ["repo", ...rest.map((each) => each.id)] },
+            {
+              id: "repo",
+              component: "ChoicePicker",
+              label: "Repository",
+              value: { path: "/repo" },
+              options: [{ label: "billing", value: "acme/billing" }],
+            },
+            ...rest,
+          ],
+        },
+      },
+    ],
+  };
+}
+
+function searchOf(id: string, optionsFrom: unknown): Record<string, unknown> {
+  return { id, component: "ChoicePicker", label: id, value: { path: `/${id}` }, optionsFrom };
+}
+
+describe("a search", () => {
+  const branch = searchOf("branch", { source: "branch", after: { path: "/repo" } });
+
+  it("is read only when the page has the host's options", () => {
+    expect(formOf(hosted(branch))).toBeNull();
+
+    const form = formOf(hosted(branch), undefined, { search: true });
+    const kinds =
+      form?.root.kind === "column" ? form.root.children.map((each) => each.kind) : [];
+    expect(kinds).toEqual(["choice", "search"]);
+    expect(form?.start).toEqual({ repo: "", branch: "" });
+  });
+
+  it.each([
+    ["a source that comes after nothing", searchOf("project", { source: "project" }), true],
+    ["a search after a search", searchOf("commit", { source: "commit", after: { path: "/branch" } }), true],
+    ["a source with no name", searchOf("x", { source: "" }), false],
+    ["a source with a key it does not know", searchOf("x", { source: "x", url: "/x" }), false],
+    ["options beside a source", { ...searchOf("x", { source: "x" }), options: [] }, false],
+    ["after a field that is not there", searchOf("x", { source: "x", after: { path: "/nowhere" } }), false],
+    ["after itself", searchOf("x", { source: "x", after: { path: "/x" } }), false],
+    ["after a field given as relative", searchOf("x", { source: "x", after: { path: "repo" } }), false],
+  ])("reads %s: %s", (_case, extra, read) => {
+    const form = formOf(hosted(branch, extra), undefined, { search: true });
+    expect(form !== null).toBe(read);
+  });
+
+  it("refuses two searches that come after each other", () => {
+    const a = searchOf("a", { source: "a", after: { path: "/b" } });
+    const b = searchOf("b", { source: "b", after: { path: "/a" } });
+    expect(formOf(hosted(a, b), undefined, { search: true })).toBeNull();
+  });
+
+  it.each([
+    ["repo", ["branch", "commit"]],
+    ["branch", ["commit"]],
+    ["commit", []],
+  ])("empties what comes after %s", (changed, emptied) => {
+    const commit = searchOf("commit", { source: "commit", after: { path: "/branch" } });
+    const form = formOf(hosted(branch, commit), undefined, { search: true });
+    if (form === null) throw new Error("the form was not read");
+    expect(dependents(form, changed).sort()).toEqual(emptied);
+  });
+
+  it("needs its choice made", () => {
+    const form = formOf(hosted(branch), undefined, { search: true });
+    if (form === null) throw new Error("the form was not read");
+    expect(answered(form, { repo: "acme/billing", branch: "" })).toEqual({
+      problem: "branch: choose one",
+    });
+    expect(answered(form, { repo: "acme/billing", branch: "main" })).toEqual({
+      inputs: { repo: "acme/billing", branch: "main" },
     });
   });
 });

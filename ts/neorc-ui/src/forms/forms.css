@@ -94,3 +94,39 @@
   background: var(--accent);
   color: var(--on-accent);
 }
+
+/* A search: a box, and the options the host found under it. */
+
+.neorc-start-run .neorc-flow-form .neorc-flow-form-search {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.neorc-start-run .neorc-flow-form .neorc-flow-form-search-found {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--paper);
+  padding: 0.25rem 0;
+}
+
+.neorc-start-run .neorc-flow-form .neorc-flow-form-search-found p {
+  padding: 0.25rem 0.6rem;
+}
+
+.neorc-start-run .neorc-flow-form .neorc-flow-form-search-found ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 16rem;
+  overflow-y: auto;
+}
+
+.neorc-start-run .neorc-flow-form .neorc-flow-form-search-found li {
+  padding: 0.25rem 0.6rem;
+  cursor: pointer;
+}
+
+.neorc-start-run .neorc-flow-form .neorc-flow-form-search-found li[aria-selected="true"],
+.neorc-start-run .neorc-flow-form .neorc-flow-form-search-found li:hover {
+  background: var(--hover);
+}

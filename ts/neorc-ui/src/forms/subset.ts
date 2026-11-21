@@ -11,6 +11,11 @@
 // List repeats a template once per item of a list in one. In the template, a
 // path with no leading slash is relative to the item. A control there holds
 // one value per item, and a Button completes the task, setting one field.
+//
+// A host's form may also have a choice whose options the host gives as the
+// person types (`optionsFrom`), rather than listing them: a search. It is
+// read only when the page has the host's source of options, `formOf`'s
+// `search`; the manager refuses one in a form of its own.
 
 /** A rule a control's value must keep, with what to say when it does not. */
 export interface Check {
@@ -74,6 +79,14 @@ export type Control =
       kind: "choice";
       options: Option[];
       display: (typeof DISPLAY_STYLES)[number];
+      checks: Check[];
+    })
+  | (Bound & {
+      kind: "search";
+      /** The host's name for where the options come from. */
+      source: string;
+      /** The field of the choice whose value narrows the options; null for none. */
+      after: string | null;
       checks: Check[];
     });
 
@@ -192,12 +205,94 @@ function actionOf(value: unknown): [string, string] | null {
   return typeof set === "string" ? [name, set] : null;
 }
 
+/** `{source, after}` of a choice's `optionsFrom`, or null when it is not one. */
+function sourceOf(value: unknown): { source: string; after: string | null } | null {
+  if (!isObject(value) || typeof value.source !== "string" || value.source === "") return null;
+  if (Object.keys(value).some((key) => key !== "source" && key !== "after")) return null;
+  if (value.after === undefined) return { source: value.source, after: null };
+  const after = inputOf(value.after, false);
+  return after === null ? null : { source: value.source, after };
+}
+
+/** Every control under `control` that fills a field, in the order drawn. */
+function boundUnder(control: Control): Extract<Control, Bound>[] {
+  switch (control.kind) {
+    case "column":
+    case "row":
+    case "list":
+      return control.children.flatMap(boundUnder);
+    case "card":
+      return boundUnder(control.child);
+    case "repeat":
+      return boundUnder(control.template);
+    case "text":
+    case "button":
+      return [];
+    default:
+      return [control];
+  }
+}
+
+/**
+ * Whether each search's `after` names another choice of the form, outside a
+ * List's template, without a search coming after itself.
+ */
+function aftersHold(root: Control): boolean {
+  const bound = boundUnder(root);
+  const choices = new Map(
+    bound
+      .filter((each) => (each.kind === "choice" || each.kind === "search") && !each.perItem)
+      .map((each) => [each.input, each]),
+  );
+  for (const each of bound) {
+    if (each.kind !== "search" || each.after === null) continue;
+    const seen = new Set([each.input]);
+    let after: string | null = each.after;
+    while (after !== null) {
+      const target = choices.get(after);
+      if (target === undefined || seen.has(after)) return false;
+      seen.add(after);
+      after = target.kind === "search" ? target.after : null;
+    }
+  }
+  return true;
+}
+
+/**
+ * The fields of the searches that come after `input`, directly or through
+ * another: when it changes, what they hold may no longer be one of their
+ * options, so the page empties them.
+ */
+export function dependents(form: Form, input: string): string[] {
+  const searches = boundUnder(form.root).filter(
+    (each): each is Extract<Control, { kind: "search" }> => each.kind === "search",
+  );
+  const found: string[] = [];
+  const pending = [input];
+  while (pending.length > 0) {
+    const changed = pending.pop();
+    for (const each of searches) {
+      if (each.after === changed && !found.includes(each.input)) {
+        found.push(each.input);
+        pending.push(each.input);
+      }
+    }
+  }
+  return found;
+}
+
 /**
  * A flow's form, or a task's, as far as this page can draw it; null when it
  * cannot. `inputs` are the task's, which a task's form reads; a flow's form
- * is read without, and reads nothing.
+ * is read without, and reads nothing. `search` is whether the page has the
+ * host's source of options: without it, a choice that names a source cannot
+ * be drawn.
  */
-export function formOf(content: unknown, inputs?: Record<string, unknown>): Form | null {
+export function formOf(
+  content: unknown,
+  inputs?: Record<string, unknown>,
+  { search = false }: { search?: boolean } = {},
+): Form | null {
   const messages = isObject(content) ? content.form : undefined;
   if (!Array.isArray(messages)) return null;
   const components = new Map<string, Json>();
@@ -323,6 +418,16 @@ export function formOf(content: unknown, inputs?: Record<string, unknown>): Form
         return { kind: "checkbox", id, input, label, perItem };
       }
       case "ChoicePicker": {
+        if (component.optionsFrom !== undefined) {
+          const from = sourceOf(component.optionsFrom);
+          const checks = checksOf(component.checks);
+          if (!search || perItem || component.options !== undefined) return null;
+          if (typeof label !== "string" || input === null) return null;
+          if (from === null || checks === null) return null;
+          const first: unknown = Array.isArray(given) ? given[0] : undefined;
+          begin(input, typeof first === "string" ? first : "");
+          return { kind: "search", id, input, label, perItem, ...from, checks };
+        }
         const options = optionsOf(component.options);
         const checks = checksOf(component.checks);
         const display = oneOf(component.displayStyle, DISPLAY_STYLES, "checkbox");
@@ -346,7 +451,7 @@ export function formOf(content: unknown, inputs?: Record<string, unknown>): Form
     }
   }
   const drawn = control("root", null);
-  if (drawn === null || drawn.kind !== "column") return null;
+  if (drawn === null || drawn.kind !== "column" || !aftersHold(drawn)) return null;
   return { root: drawn, start, buttons };
 }
 
@@ -441,7 +546,7 @@ export function answered(
     }
     const text = String(answer ?? "");
     let value: string | number = text;
-    if (control.kind === "choice" && text === "") {
+    if ((control.kind === "choice" || control.kind === "search") && text === "") {
       const required = control.checks.find((check) => check.call === "required");
       return `${label}: ${required?.message ?? "choose one"}`;
     }
