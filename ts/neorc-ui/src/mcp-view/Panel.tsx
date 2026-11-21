@@ -1,5 +1,6 @@
-// What the panel shows: a flow, a run, or nothing yet, as neorc-mcp's
-// `neorc_panel` answers. The graphs are the UI's own, FlowGraph and RunGraph.
+// What the panel draws: a flow, a run, or the flows and latest runs to choose
+// from, as neorc-mcp's `neorc_panel` answers. The graphs are the UI's own,
+// FlowGraph and RunGraph.
 import { useMemo } from "react";
 
 import type { Flow, Run, Task } from "../api";
@@ -10,12 +11,12 @@ import { formatDuration, formatTime, formatValue, shortId } from "../format";
 import { useNav } from "../router";
 
 export type PanelData =
-  | { shows: "nothing"; flows: string[] }
+  | { shows: "choices"; flows: string[]; runs: Run[] }
   | { shows: "flow"; flow: Flow; versions: string[] }
   | { shows: "run"; run: Run; flow: Flow; tasks: Task[]; sub_runs: Run[] }
   | { shows: "missing"; detail: string };
 
-const SHOWN = new Set(["nothing", "flow", "run", "missing"]);
+const SHOWN = new Set(["choices", "flow", "run", "missing"]);
 
 /** The structured content of the panel's tool, if it is the panel's. */
 export function panelData(structured: Record<string, unknown> | undefined): PanelData | undefined {
@@ -27,8 +28,8 @@ export function panelData(structured: Record<string, unknown> | undefined): Pane
 
 export function Panel({ data }: { data: PanelData }) {
   switch (data.shows) {
-    case "nothing":
-      return <Nothing flows={data.flows} />;
+    case "choices":
+      return <Choices flows={data.flows} runs={data.runs} />;
     case "flow":
       return <FlowShown flow={data.flow} versions={data.versions} />;
     case "run":
@@ -38,13 +39,29 @@ export function Panel({ data }: { data: PanelData }) {
   }
 }
 
-function Nothing({ flows }: { flows: string[] }) {
+function Choices({ flows, runs }: { flows: string[]; runs: Run[] }) {
   const { href } = useNav();
+  if (flows.length === 0 && runs.length === 0) {
+    return <p className="neorc-muted">neorc has no flows yet.</p>;
+  }
   return (
     <>
-      <p className="neorc-muted">
-        Nothing shown yet. Ask the agent to show a flow or a run.
-      </p>
+      {runs.length > 0 && (
+        <>
+          <h2>Latest runs</h2>
+          <ul className="neorc-mcp-list">
+            {runs.map((run) => (
+              <li key={run.id}>
+                <a href={href({ name: "run", id: run.id })}>
+                  {run.flow} <span className="neorc-mono">{shortId(run.id)}</span>
+                </a>{" "}
+                <StatusBadge status={run.status} />{" "}
+                <span className="neorc-muted">{formatTime(run.created_at)}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
       {flows.length > 0 && (
         <>
           <h2>Flows</h2>

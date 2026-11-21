@@ -16,7 +16,8 @@ one version, cut from a single tag on `main`.
   streamable HTTP, behind a key. Each route a person or CI may call is a tool
   of its name, so a host gives an agent the routes it chooses. An MCP App,
   `neorc_panel` with `show_flow` and `show_run`, draws a flow or a run as the
-  UI does, with what failed. `docs/specs/mcp.md`.
+  UI does, with what failed. The server keeps no state: each view keeps its
+  own choice. `docs/specs/mcp.md`.
 - `neorc-ui`: the wheel carries the MCP App's view, built from
   `ts/neorc-ui/src/mcp-view/` into one HTML document;
   `neorc_ui.mcp_view_html()` reads it.

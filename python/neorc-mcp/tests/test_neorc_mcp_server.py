@@ -159,7 +159,7 @@ async def test_every_route_a_person_or_ci_may_call_is_a_tool_with_the_panel(
     }
 
     assert set(tools) == READS | WRITES | CI_TOOLS | PANEL_TOOLS
-    for name in READS | {PANEL_TOOL}:
+    for name in READS | PANEL_TOOLS:
         assert tools[name]["annotations"]["readOnlyHint"] is True, name
     for name in {"cancel_run", "complete_task", "upload_flows"}:
         assert tools[name]["annotations"]["destructiveHint"] is True, name
@@ -332,7 +332,7 @@ async def test_an_agent_deploys_runs_troubleshoots_and_shows_a_flow(
     }
     assert "review_draft: failed" in shown["content"][0]["text"]
     assert "error: the draft is off-topic" in shown["content"][0]["text"]
-    assert ok(await call(PANEL_TOOL)) == panel
+    assert ok(await call(PANEL_TOOL, run_id=run["id"])) == panel
 
     flow = ok(await call("show_flow", name="approval"))
     assert (flow["shows"], flow["flow"]["version"], flow["versions"]) == (
@@ -340,7 +340,12 @@ async def test_an_agent_deploys_runs_troubleshoots_and_shows_a_flow(
         "1.0.0",
         ["1.0.0"],
     )
-    assert ok(await call(PANEL_TOOL))["shows"] == "flow"
+    assert ok(await call(PANEL_TOOL, flow="approval", version="1.0.0")) == flow
+
+    # Nothing was kept: the panel's tool, with no arguments, still offers choices.
+    choices = ok(await call(PANEL_TOOL))
+    assert choices["shows"] == "choices"
+    assert [r["id"] for r in choices["runs"]] == [run["id"]]
 
 
 async def test_reads_and_a_cancellation(mcp: tuple[str, str, Call]) -> None:
@@ -376,16 +381,46 @@ async def test_the_manager_s_refusals_reach_the_model_in_its_words(
     assert nothing["shows"] == "missing"
 
 
-async def test_the_panel_lists_the_flows_before_anything_is_shown(
+async def test_with_no_arguments_the_panel_offers_the_flows_and_the_latest_runs(
     mcp: tuple[str, str, Call],
 ) -> None:
     _, _, call = mcp
     ok(await call("upload_flows", flows=[FLOW_A]))
+    run = ok(await call("start_run", flow="a", inputs={}))
 
     shown = await call(PANEL_TOOL)
 
-    assert ok(shown) == {"shows": "nothing", "flows": ["a"]}
-    assert shown["content"][0]["text"] == "The panel shows nothing yet. Flows: a."
+    assert ok(shown) == {"shows": "choices", "flows": ["a"], "runs": [run]}
+    assert shown["content"][0]["text"] == (
+        f"Flows: a.\nLatest runs:\n- run {run['id']} of a: active"
+    )
+
+
+async def test_the_panel_keeps_nothing_between_callers(
+    mcp: tuple[str, str, Call],
+) -> None:
+    """Two conversations, or two people, each show a run: neither moves the
+    other's panel, and a call with no arguments shows neither."""
+    _, _, call = mcp
+    ok(await call("upload_flows", flows=[FLOW_A]))
+    first = ok(await call("start_run", flow="a", inputs={}))
+    second = ok(await call("start_run", flow="a", inputs={}))
+
+    ok(await call("show_run", run_id=first["id"]))
+    ok(await call("show_run", run_id=second["id"]))
+
+    assert ok(await call(PANEL_TOOL, run_id=first["id"]))["run"]["id"] == first["id"]
+    assert ok(await call(PANEL_TOOL))["shows"] == "choices"
+
+
+async def test_the_panel_refuses_a_run_and_a_flow_together(
+    mcp: tuple[str, str, Call],
+) -> None:
+    _, _, call = mcp
+    unknown = "00000000-0000-4000-8000-000000000000"
+
+    assert "not both" in refused(await call(PANEL_TOOL, run_id=unknown, flow="a"))
+    assert "name the flow" in refused(await call(PANEL_TOOL, version="1.0.0"))
 
 
 async def test_the_sdk_s_own_client_reaches_it(mcp: tuple[str, str, Call]) -> None:

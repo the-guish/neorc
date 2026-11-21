@@ -6,17 +6,19 @@ and the panel, an MCP App that draws a flow or a run as neorc's UI does.
 
 Each API tool sends one request and answers with the manager's JSON twice: as
 text for the model, and as structured content. Its name is the route's, so a
-host can let an agent have one route and not another. ``show_flow`` and
-``show_run`` say what the panel shows; ``neorc_panel`` is the panel's own tool,
-which a host calls with no arguments, and which names the view. The view may
-call those three and nothing else. docs/specs/mcp.md.
+host can let an agent have one route and not another.
+
+The panel keeps no state. ``neorc_panel`` is the panel's own tool and names the
+view; it answers for the run or the flow its arguments name, and with none, the
+choices. ``show_flow`` and ``show_run`` answer the same, for the model and for a
+host that hands their result to the view. The view keeps its own choice, and
+may call those three tools and nothing else. docs/specs/mcp.md.
 """
 
 from __future__ import annotations
 
 import json
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
 from typing import Annotated, Any, Literal
 
 from mcp.server.fastmcp import FastMCP
@@ -40,9 +42,8 @@ MODEL_AND_VIEW: dict[str, Any] = {"ui": {"visibility": ["model", "app"]}}
 READ = ToolAnnotations(readOnlyHint=True, idempotentHint=True, openWorldHint=False)
 WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False)
 DESTROY = ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=False)
-SHOW = ToolAnnotations(
-    readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False
-)
+RECENT_RUNS = 20
+"""How many of the latest runs the panel offers when nothing is named."""
 
 INSTRUCTIONS = """\
 neorc runs flows: steps of tasks, which workers or people complete. These tools \
@@ -54,8 +55,8 @@ To troubleshoot a run, read it (get_run: its status and reason), then its tasks 
 (list_run_tasks): a failed task's `error` holds the exit code and the end of \
 the handler's log. list_runs with status "failed" finds failed runs.
 
-The user sees a panel beside the chat. show_flow and show_run choose what it \
-draws: a flow's steps as a graph, or a run on that graph, live while it runs."""
+show_flow and show_run show the user a flow's steps as a graph, or a run on \
+that graph: a host that shows MCP Apps draws them in a panel beside the chat."""
 
 FlowName = Annotated[str, Field(description="The flow's name: letters, digits and _.")]
 RunId = Annotated[str, Field(description="The run's id, a UUID.")]
@@ -64,15 +65,6 @@ QueueName = Annotated[
     str, Field(description="The queue's name: letters, digits, _ and -.")
 ]
 Limit = Annotated[int, Field(ge=1, le=500, description="The most items to return.")]
-
-
-@dataclass
-class Focus:
-    """What the panel shows: a flow, at a version or its latest, or a run."""
-
-    kind: Literal["flow", "run"]
-    name: str
-    version: str | None = None
 
 
 def answer(value: Any) -> CallToolResult:
@@ -100,8 +92,6 @@ def build_server(
         json_response=True,
         log_level="WARNING",
     )
-    focus: list[Focus] = []
-    """At most one: what the panel shows, for every conversation this server serves."""
 
     async def call(request: Awaitable[Any]) -> CallToolResult:
         try:
@@ -378,40 +368,52 @@ def build_server(
         )
         return answer({"completed": task_id})
 
-    # The panel.
+    # The panel. It keeps nothing: each answer is what its arguments name, so
+    # the panels of other conversations and other people never move with it.
 
-    async def panel() -> dict[str, Any]:
-        """What the panel shows now, read from the manager."""
-        shown = focus[0] if focus else None
+    async def panel(
+        run_id: str | None = None, flow: str | None = None, version: str | None = None
+    ) -> dict[str, Any]:
+        """What the panel draws for a run, a flow, or neither, read from the manager."""
+        if run_id is not None and flow is not None:
+            raise ToolError("name a run or a flow, not both")
+        if version is not None and flow is None:
+            raise ToolError("a version is a flow's: name the flow too")
         try:
-            if shown is None:
+            if run_id is None and flow is None:
                 flows = (await api.get("/flows"))["flows"]
-                return {"shows": "nothing", "flows": [flow["name"] for flow in flows]}
-            if shown.kind == "flow":
-                name = segment(shown.name)
+                runs = (await api.get("/runs", {"limit": RECENT_RUNS}))["runs"]
+                return {
+                    "shows": "choices",
+                    "flows": [each["name"] for each in flows],
+                    "runs": runs,
+                }
+            if flow is not None:
+                name = segment(flow)
                 path = (
                     f"/flows/{name}"
-                    if shown.version is None
-                    else f"/flows/{name}/versions/{segment(shown.version)}"
+                    if version is None
+                    else f"/flows/{name}/versions/{segment(version)}"
                 )
-                flow = await api.get(path)
+                shown = await api.get(path)
                 versions = (await api.get(f"/flows/{name}/versions"))["versions"]
                 return {
                     "shows": "flow",
-                    "flow": flow,
+                    "flow": shown,
                     "versions": [v["version"] for v in versions],
                 }
-            run_id = segment(shown.name)
-            run = await api.get(f"/runs/{run_id}")
-            flow = await api.get(
+            assert run_id is not None
+            run_path = f"/runs/{segment(run_id)}"
+            run = await api.get(run_path)
+            of_run = await api.get(
                 f"/flows/{segment(run['flow'])}/versions/{segment(run['version'])}"
             )
-            tasks = (await api.get(f"/runs/{run_id}/tasks"))["tasks"]
-            sub_runs = (await api.get(f"/runs/{run_id}/sub-runs"))["runs"]
+            tasks = (await api.get(f"{run_path}/tasks"))["tasks"]
+            sub_runs = (await api.get(f"{run_path}/sub-runs"))["runs"]
             return {
                 "shows": "run",
                 "run": run,
-                "flow": flow,
+                "flow": of_run,
                 "tasks": tasks,
                 "sub_runs": sub_runs,
             }
@@ -435,37 +437,40 @@ def build_server(
     @server.tool(
         name=PANEL_TOOL,
         title="neorc panel",
-        description="What the user's panel shows now: a flow, a run, or the flows. "
-        "The panel calls it; show_flow and show_run change it.",
+        description="What the panel draws: a run, a flow at its latest version or "
+        "the one named, or, with no arguments, the flows and the latest runs to "
+        "choose from.",
         annotations=READ,
         meta={"ui": {"resourceUri": VIEW_URI, "visibility": ["model", "app"]}},
     )
-    async def neorc_panel() -> CallToolResult:
-        return shown(await panel())
+    async def neorc_panel(
+        run_id: RunId | None = None,
+        flow: FlowName | None = None,
+        version: str | None = None,
+    ) -> CallToolResult:
+        return shown(await panel(run_id, flow, version))
 
     @server.tool(
         name="show_flow",
         title="Show a flow",
-        description="Draw a flow's steps as a graph in the user's panel: its latest "
-        "version, or the one named.",
-        annotations=SHOW,
+        description="Show the user a flow's steps as a graph: its latest version, or "
+        "the one named. A host that shows MCP Apps draws the answer in its panel.",
+        annotations=READ,
         meta=MODEL_AND_VIEW,
     )
     async def show_flow(name: FlowName, version: str | None = None) -> CallToolResult:
-        focus[:] = [Focus("flow", name, version)]
-        return shown(await panel())
+        return shown(await panel(flow=name, version=version))
 
     @server.tool(
         name="show_run",
         title="Show a run",
-        description="Draw a run on its flow's graph in the user's panel, with what "
-        "failed, live while it runs.",
-        annotations=SHOW,
+        description="Show the user a run on its flow's graph, with what failed. A host "
+        "that shows MCP Apps draws the answer in its panel, live while the run runs.",
+        annotations=READ,
         meta=MODEL_AND_VIEW,
     )
     async def show_run(run_id: RunId) -> CallToolResult:
-        focus[:] = [Focus("run", run_id)]
-        return shown(await panel())
+        return shown(await panel(run_id=run_id))
 
     return server
 
@@ -473,9 +478,13 @@ def build_server(
 def describe(data: dict[str, Any]) -> str:
     """The panel in words, for the model: what it shows, and what failed."""
     match data["shows"]:
-        case "nothing":
+        case "choices":
             flows = ", ".join(data["flows"]) or "none"
-            return f"The panel shows nothing yet. Flows: {flows}."
+            runs = "".join(
+                f"\n- run {run['id']} of {run['flow']}: {run['status']}"
+                for run in data["runs"]
+            )
+            return f"Flows: {flows}.\nLatest runs:{runs or ' none'}"
         case "missing":
             return f"The panel shows nothing: {data['detail']}"
         case "flow":

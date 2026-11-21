@@ -1,5 +1,6 @@
-// The view's page: the panel's data from neorc-mcp, the links that show
-// another run or flow, and a run in progress read again until it ends.
+// The view's page. neorc-mcp keeps nothing, so the view keeps its own choice:
+// the run or the flow it draws. It reads that choice again while a run is in
+// progress, and a link changes it. docs/specs/mcp.md, "The view".
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { NavContext, parseRoute, type Nav } from "../router";
@@ -29,35 +30,65 @@ type Shown =
   | { state: "shown"; data: PanelData }
   | { state: "failed"; message: string };
 
+/** The arguments of `neorc_panel` that draw `data` again: the view's own choice. */
+export function choiceOf(data: PanelData): Record<string, string> | undefined {
+  switch (data.shows) {
+    case "run":
+      return { run_id: data.run.id };
+    case "flow":
+      return { flow: data.flow.name, version: data.flow.version };
+    default:
+      return undefined;
+  }
+}
+
 export function App({ connectTo = connect }: { connectTo?: typeof connect }) {
   const [shown, setShown] = useState<Shown>({ state: "waiting" });
   const host = useRef<Host | null>(null);
+  // Read by the host's notifications, which outlive the render that made them.
+  const choice = useRef<Record<string, string> | undefined>(undefined);
 
-  const take = useCallback((answer: ToolAnswer) => {
+  const draw = useCallback((answer: ToolAnswer) => {
     const data = panelData(answer.structured);
-    if (data) setShown({ state: "shown", data });
-    else setShown({ state: "failed", message: answer.text || "neorc-mcp answered nothing to show." });
+    if (!data) {
+      setShown({ state: "failed", message: answer.text || "neorc-mcp answered nothing to show." });
+      return;
+    }
+    choice.current = choiceOf(data);
+    setShown({ state: "shown", data });
   }, []);
 
-  useEffect(() => {
-    host.current = connectTo(window.parent, {
-      onPanel: take,
-      onTheme: (theme: Theme) => document.documentElement.setAttribute("data-theme", theme),
-      onFailure: (message) => setShown({ state: "failed", message }),
-    });
-  }, [take, connectTo]);
-
   const call = useCallback(
-    (name: string, args?: Record<string, unknown>) => {
-      host.current?.callTool(name, args).then(take, (error: Error) =>
+    (args?: Record<string, unknown>) => {
+      host.current?.callTool(PANEL_TOOL, args).then(draw, (error: Error) =>
         setShown({ state: "failed", message: error.message }),
       );
     },
-    [take],
+    [draw],
   );
 
-  // A link to a run or a flow shows it here, through neorc-mcp: the view
-  // cannot leave its frame, and the panel follows what the agent shows next.
+  // What the host hands over: the panel's own tool, which a host may call with
+  // no arguments after each turn, or the answer of show_run or show_flow. The
+  // choices, with no arguments, do not replace a run or a flow already drawn:
+  // the view reads its own choice again instead.
+  const fromHost = useCallback(
+    (answer: ToolAnswer) => {
+      const data = panelData(answer.structured);
+      if (data?.shows === "choices" && choice.current) call(choice.current);
+      else draw(answer);
+    },
+    [call, draw],
+  );
+
+  useEffect(() => {
+    host.current = connectTo(window.parent, {
+      onPanel: fromHost,
+      onTheme: (theme: Theme) => document.documentElement.setAttribute("data-theme", theme),
+      onFailure: (message) => setShown({ state: "failed", message }),
+    });
+  }, [fromHost, connectTo]);
+
+  // A link to a run or a flow draws it here: the view cannot leave its frame.
   useEffect(() => {
     const onClick = (event: MouseEvent) => {
       const link = (event.target as Element | null)?.closest?.("a[href]");
@@ -66,21 +97,23 @@ export function App({ connectTo = connect }: { connectTo?: typeof connect }) {
       event.preventDefault();
       if (!target.startsWith("#/neorc/")) return;
       const route = parseRoute(target.slice("#/neorc".length));
-      if (route.name === "run") call("show_run", { run_id: route.id });
-      else if (route.name === "flow") call("show_flow", { name: route.flow });
+      if (route.name === "run") call({ run_id: route.id });
+      else if (route.name === "flow") call({ flow: route.flow });
     };
     document.addEventListener("click", onClick);
     return () => document.removeEventListener("click", onClick);
   }, [call]);
 
   // A run in progress is read again until it ends.
-  const active = shown.state === "shown" && shown.data.shows === "run" && shown.data.run.status === "active";
-  const runId = shown.state === "shown" && shown.data.shows === "run" ? shown.data.run.id : null;
+  const runId =
+    shown.state === "shown" && shown.data.shows === "run" && shown.data.run.status === "active"
+      ? shown.data.run.id
+      : null;
   useEffect(() => {
-    if (!active) return;
-    const timer = setInterval(() => call(PANEL_TOOL), REFRESH_MS);
+    if (runId === null) return;
+    const timer = setInterval(() => call({ run_id: runId }), REFRESH_MS);
     return () => clearInterval(timer);
-  }, [active, runId, call]);
+  }, [runId, call]);
 
   const body = useMemo(() => {
     switch (shown.state) {
@@ -101,4 +134,3 @@ export function App({ connectTo = connect }: { connectTo?: typeof connect }) {
     </NavContext>
   );
 }
-

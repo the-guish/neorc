@@ -58,7 +58,9 @@ run on its flow, as neorc's UI draws it.
   Service tokens have no `neorc/user` role, so the token is a person's own,
   made on the account page.
 - What the agent sees of the manager is one person's view, for every
-  conversation the server serves.
+  conversation the server serves. In a host with several users, such as
+  Robinauts in the cloud, every user acts as that person: a host sends the
+  server one credential for all its users.
 
 ## The tools
 
@@ -124,26 +126,33 @@ A worker's own log stays on its host. Reaching it is the host's work.
 
 The panel is an MCP App (`io.modelcontextprotocol/ui`).
 
-| tool | what it does | who calls it |
+| tool | what it answers | who calls it |
 |---|---|---|
-| `neorc_panel` | answers with what the panel shows; names the view | the host, with no arguments |
-| `show_flow` | shows a flow, at its latest version or the one named | the model, and the view |
-| `show_run` | shows a run | the model, and the view |
+| `neorc_panel` | the run or the flow its arguments name, or with none, the choices; names the view | the host, and the view |
+| `show_run` | a run | the model |
+| `show_flow` | a flow, at its latest version or the one named | the model |
 
-- `neorc_panel` carries `_meta.ui.resourceUri`, `ui://neorc/panel.html`. A
-  host calls it with no arguments, so the server keeps what the panel shows.
-  One server keeps one choice, for every conversation it serves.
-- The three panel tools have `_meta.ui.visibility` `["model", "app"]`. Every
-  other tool has `["model"]`, so a view cannot start, cancel or complete
-  anything.
+- The server keeps no state. Each answer depends on its arguments alone. A
+  host sends nothing that tells conversations or users apart, so a choice
+  kept on the server would move the panels of every conversation and every
+  user together.
+- `neorc_panel` carries `_meta.ui.resourceUri`, `ui://neorc/panel.html`. It
+  takes `run_id`, or `flow` with an optional `version`, or nothing. A run and
+  a flow together are refused, and so is a version without its flow.
+- The three panel tools have `_meta.ui.visibility` `["model", "app"]` and are
+  read-only. Every other tool has `["model"]`, so a view cannot start, cancel
+  or complete anything.
 - Each answers with the panel's data, `shows` and what it shows:
-  - `nothing`: the flows' names.
+  - `choices`: the flows' names, and the 20 latest runs.
   - `flow`: the flow, and its versions.
   - `run`: the run, its flow at the run's version, its tasks and its
     sub-runs.
   - `missing`: the manager's detail, for a run or a flow it does not know.
-- The text beside it describes the panel for the model: a run's status and
+- The text beside it describes the answer for the model: a run's status and
   reason, and each task's status with its error.
+- `show_run` and `show_flow` reach the view when a host hands their result to
+  it. A host that only calls `neorc_panel` with no arguments shows the
+  choices, and the person picks from them.
 
 ### The view
 
@@ -160,9 +169,16 @@ The panel is an MCP App (`io.modelcontextprotocol/ui`).
   reads `ui/notifications/tool-result` and
   `ui/notifications/host-context-changed`, and it asks `tools/call`.
 - It takes the host's theme, light or dark, from the host's context.
-- A link to a run or a flow calls `show_run` or `show_flow`, and the panel
-  shows the answer.
-- While a run is active, the view calls `neorc_panel` every 3 seconds.
+- The view keeps its own choice: the run or the flow it draws. Each view
+  keeps its own, whatever other views draw.
+  - A result the host hands over replaces the choice: a run or a flow, as
+    `show_run` or `show_flow` answer.
+  - The choices, the answer to no arguments, do not replace a run or a flow
+    already drawn. The view reads its own choice again instead. A host may call
+    `neorc_panel` with no arguments after every turn.
+  - A link to a run or a flow calls `neorc_panel` with its arguments.
+  - While its run is active, the view calls `neorc_panel` with the run's id
+    every 3 seconds.
 
 ## Tests
 
@@ -170,5 +186,7 @@ The panel is an MCP App (`io.modelcontextprotocol/ui`).
   with a scheduler and a worker over HTTP, and neorc-mcp from its variables.
   They speak to it as a host does, over streamable HTTP with its key, and with
   the SDK's own client.
+- A test shows two runs one after the other, and reads each again by its own
+  arguments: the server kept neither.
 - `ts/neorc-ui/src/mcp-view/App.test.tsx` tests the view's protocol, what it
-  draws, its links and its refresh.
+  draws, its links, its refresh, and that it keeps its own choice.
