@@ -17,7 +17,9 @@ answers its run waits for. A third is a person's on ``examples/review_loop``,
 in the local mode too: a list of issues triaged on a queue's page, two rounds
 of it, and the run ending with the result. A fourth is on
 ``examples/vip_booking``, in the local mode too: a switch and its cases on a
-flow's page, and on the pages of two runs, each with the case it chose.
+flow's page, and on the pages of two runs, each with the case it chose. A
+fifth is on a form with a choice of a flow, in the local mode too: the flows
+the manager finds as a person types, one picked, and a run started with it.
 Skipped without a built UI or a browser: CI builds and installs both for one
 Python, and contributing/dev-environment.md says how to locally.
 ``NEORC_TEST_CHROMIUM`` names a Chromium to launch instead of Playwright's own.
@@ -55,6 +57,7 @@ from oneberth.web.testing import (
 )
 
 from neorc.manager import build_app
+from neorc_core._values import JsonValue
 from neorc_core.flows import read_flows
 from neorc_core.testing import examples
 
@@ -726,3 +729,127 @@ async def test_a_switch_shows_its_cases_and_the_one_a_run_chose_in_the_browser(
     )
 
     assert complaints == [], "the browser complained: " + "; ".join(complaints)
+
+
+def _flow(name: str, **more: JsonValue) -> JsonValue:
+    """A flow of one step, which a worker of ``examples/vip_booking`` runs."""
+    look: JsonValue = {
+        "handler": "tasks:load_booking",
+        "fixed_params": {"booking_id": 1},
+    }
+    return {"name": name, "version": "1.0.0", "steps": {"look": look}, **more}
+
+
+LAUNCHER = _flow(
+    "launcher",
+    inputs={"target": "string"},
+    form=[
+        {
+            "version": "v0.9",
+            "createSurface": {
+                "surfaceId": "launcher",
+                "catalogId": "https://github.com/open-shipyard/neorc/forms/v1",
+            },
+        },
+        {
+            "version": "v0.9",
+            "updateComponents": {
+                "surfaceId": "launcher",
+                "components": [
+                    {"id": "root", "component": "Column", "children": ["target"]},
+                    {
+                        "id": "target",
+                        "component": "FlowPicker",
+                        "label": "Flow",
+                        "value": {"path": "/target"},
+                        "checks": [
+                            {
+                                "condition": {
+                                    "call": "required",
+                                    "args": {"value": {"path": "/target"}},
+                                },
+                                "message": "Choose the flow to launch.",
+                            }
+                        ],
+                    },
+                ],
+            },
+        },
+    ],
+)
+"""A flow whose form asks for one of the manager's flows."""
+
+
+@pytest.mark.usefixtures("own_tasks_module")
+async def test_a_form_picks_one_of_the_managers_flows_in_the_browser(
+    routing: tuple[Deployed, ManagerClient], browsing: tuple[Page, list[str]]
+) -> None:
+    """docs/architecture/forms.md, "A choice of a flow".
+
+    The form lists no flow. The page asks the manager for them as the person
+    types, and a run starts with the flow picked.
+    """
+    from playwright.async_api import expect
+
+    (deployed, client), (page, complaints) = routing, browsing
+    expect.set_options(timeout=10_000)
+    await client.upload_flows([LAUNCHER, _flow("booking_report"), _flow("cleanup")])
+
+    await _open_signed_in(page, deployed, "#/neorc/flows/launcher")
+    box = page.get_by_role("combobox", name="Flow")
+    found = page.get_by_role("listbox", name="Flows for Flow").get_by_role("option")
+
+    # With the focus, and before a letter: every flow of the manager, by name.
+    await box.click()
+    await expect(found).to_have_text(
+        [
+            "booking_report 1.0.0",
+            "cleanup 1.0.0",
+            "launcher 1.0.0",
+            "vip_booking 1.0.0",
+        ]
+    )
+
+    # As the person types, in any case: the flows whose name holds the text,
+    # those that start with it first.
+    await box.press_sequentially("BOOK")
+    await expect(found).to_have_text(["booking_report 1.0.0", "vip_booking 1.0.0"])
+
+    # The list hangs from the box: right under it, as wide, over what follows.
+    listed = page.get_by_role("listbox", name="Flows for Flow")
+    at_box, at_list = await box.bounding_box(), await listed.bounding_box()
+    assert at_box is not None and at_list is not None
+    gap = at_list["y"] - (at_box["y"] + at_box["height"])
+    assert 0 <= gap <= 8, (at_box, at_list)
+    assert abs(at_list["x"] - at_box["x"]) <= 1, (at_box, at_list)
+    assert abs(at_list["width"] - at_box["width"]) <= 1, (at_box, at_list)
+
+    # A click picks one, and the list goes; the arrow and Enter pick another.
+    await found.filter(has_text="booking_report").click()
+    await expect(box).to_have_value("booking_report")
+    await expect(found).to_have_count(0)
+    await box.fill("book")
+    await expect(found).to_have_text(["booking_report 1.0.0", "vip_booking 1.0.0"])
+    await box.press("ArrowDown")
+    await box.press("Enter")
+    await expect(box).to_have_value("vip_booking")
+    await expect(found).to_have_count(0)
+
+    # The run starts with the name of the flow picked last.
+    await page.get_by_role("button", name="Start run").click()
+    await page.wait_for_url(re.compile(r"#/neorc/runs/[0-9a-f-]{36}$"))
+    await expect(page.locator("pre", has_text='"target"')).to_contain_text(
+        '"target": "vip_booking"'
+    )
+
+    # A text that names no flow is no choice: nothing is started.
+    await page.goto(f"{deployed.address}/ui/#/neorc/flows/launcher")
+    await box.click()
+    await box.press_sequentially("nope")
+    await expect(page.get_by_text("No flow matches.")).to_be_visible()
+    await page.get_by_role("button", name="Start run").click()
+    await expect(page.get_by_role("alert")).to_have_text(
+        "Flow: Choose the flow to launch."
+    )
+
+    assert complaints == []

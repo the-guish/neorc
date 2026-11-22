@@ -12,13 +12,14 @@ from __future__ import annotations
 
 import time
 import uuid
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import TypeVar
 
 from neorc_core import _values
 from neorc_core._errors import (
     FlowDefinitionError,
+    FlowNotFoundError,
     FlowVersionError,
     InvalidValueError,
     PermissionDeniedError,
@@ -58,7 +59,13 @@ from neorc_core.flows import (
     resolve,
 )
 from neorc_core.flows._validation import check_output
-from neorc_core.forms import check_form_inputs, check_form_result, step_forms
+from neorc_core.forms import (
+    check_form_inputs,
+    check_form_result,
+    flow_form,
+    picked_flows,
+    step_forms,
+)
 from neorc_core.ports._clients import DEFAULT_LEASE_SECONDS, check_lease_seconds
 from neorc_core.ports._store import DEFAULT_PAGE, Store
 from neorc_core.ports._task_notifier import TaskNotifier
@@ -154,9 +161,26 @@ class Manager:
         _lookup(name, "flow name")
         return await self._store.get_flow(name, version)
 
-    async def latest_flows(self) -> list[StoredFlow]:
-        """The latest version of every flow."""
-        return await self._store.latest_flows()
+    async def latest_flows(
+        self, *, search: str | None = None, limit: int | None = None
+    ) -> list[StoredFlow]:
+        """The latest version of every flow, by name.
+
+        ``search`` keeps the flows whose name holds that text, in any case:
+        those whose name starts with it first, then the others, each by name.
+        An empty text keeps every flow. ``limit`` keeps the first that many.
+        This is what a page asks while a person types a flow's name.
+        """
+        if limit is not None and limit < 1:
+            raise InvalidValueError(f"limit is at least 1, not {limit}")
+        flows = await self._store.latest_flows()
+        if search:
+            text = search.casefold()
+            flows = sorted(
+                (flow for flow in flows if text in flow.name.casefold()),
+                key=lambda flow: not flow.name.casefold().startswith(text),
+            )
+        return flows if limit is None else flows[:limit]
 
     async def flow_versions(self, name: str) -> list[StoredFlow]:
         """Every stored version of a flow, newest first."""
@@ -495,7 +519,8 @@ class Manager:
                 # The form may read the task's inputs: a list of items, each
                 # with a value of its own in the result.
                 inputs = (await self._delivery(task)).inputs
-                check_form_result(task.address.step, form, result, inputs)
+                flows = await self._held(picked_flows(form, result))
+                check_form_result(task.address.step, form, result, inputs, flows=flows)
         completed = await self._store.complete_task(task_id, result=result, error=error)
         await self._events.notify()
         return completed
@@ -595,7 +620,10 @@ class Manager:
         for attempt in range(_START_ATTEMPTS):
             stored = await self._store.get_flow(flow)
             check_inputs(stored.definition, inputs)
-            check_form_inputs(flow, stored.content, inputs)
+            picked = picked_flows(flow_form(stored.content), inputs)
+            check_form_inputs(
+                flow, stored.content, inputs, flows=await self._held(picked)
+            )
             try:
                 return await self._store.start_run(
                     flow,
@@ -609,6 +637,23 @@ class Manager:
                 if attempt == _START_ATTEMPTS - 1:
                     raise
         raise AssertionError("unreachable")
+
+    async def _held(self, names: Collection[str]) -> set[str]:
+        """Of ``names``, those of the flows the store holds.
+
+        A form's choice of a flow names one of them. A flow stays once it is
+        stored, so what holds here holds for the write after.
+        """
+        held: set[str] = set()
+        for name in names:
+            if not is_name(name):
+                continue
+            try:
+                await self._store.get_flow(name)
+            except FlowNotFoundError:
+                continue
+            held.add(name)
+        return held
 
     async def _context(self, run_id: RunId) -> tuple[Run, FlowDefinition, RunState]:
         run = await self._store.get_run(run_id)

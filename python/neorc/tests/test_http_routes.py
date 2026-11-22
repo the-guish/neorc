@@ -699,3 +699,39 @@ async def test_a_task_is_read_with_its_inputs_filled_in(
         {"word": "hi"},
     )
     assert (missing.status_code, _error(missing)) == (404, "TaskNotFoundError")
+
+
+async def test_the_flows_are_searched_by_name(http: httpx.AsyncClient) -> None:
+    assert isinstance(MAIN, dict)
+    names = ["main", "maintain", "remain", "other"]
+    await http.post("/flows", json={"flows": [{**MAIN, "name": n} for n in names]})
+
+    async def found(**params: Any) -> list[str]:
+        listed = await http.get("/flows", params=params)
+        assert listed.status_code == 200, listed.text
+        return [flow["name"] for flow in listed.json()["flows"]]
+
+    assert await found() == ["main", "maintain", "other", "remain"]
+    # Those whose name starts with the text first, then the others that hold it.
+    assert await found(search="MAIN") == ["main", "maintain", "remain"]
+    assert await found(search="main", limit=2) == ["main", "maintain"]
+    assert await found(search="") == ["main", "maintain", "other", "remain"]
+    assert await found(search="no such flow") == []
+    # A flow comes whole, as the listing gives it without a search.
+    whole = await http.get("/flows", params={"search": "other"})
+    assert whole.json() == {
+        "flows": [
+            {"name": "other", "version": "1.0.0", "content": {**MAIN, "name": "other"}}
+        ]
+    }
+
+
+@pytest.mark.parametrize(
+    "params", [{"limit": 0}, {"limit": 501}, {"limit": "x"}, {"search": "a" * 201}]
+)
+async def test_a_search_of_the_flows_outside_its_limits_is_refused(
+    http: httpx.AsyncClient, params: dict[str, Any]
+) -> None:
+    refused = await http.get("/flows", params=params)
+
+    assert (refused.status_code, _error(refused)) == (422, "InvalidRequest")

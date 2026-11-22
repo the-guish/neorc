@@ -91,7 +91,10 @@ what the in-memory manager receives too.
 """
 
 MAX_PAGE = 500
-"""The most runs, or tasks of a queue, one page of a listing may ask for."""
+"""The most runs, flows, or tasks of a queue, one page of a listing may ask for."""
+
+MAX_SEARCH = 200
+"""The longest text a search of the flows may ask for."""
 
 
 STATE_KEY = "neorc"
@@ -285,9 +288,19 @@ async def upload_flows(request: Request, manager: Managed) -> dict[str, list[boo
     response_model=None,
     responses=documented(FlowListResponse),
 )
-async def list_flows(manager: Managed) -> dict[str, list[dict[str, Any]]]:
-    """The latest version of every flow, by name."""
-    return {"flows": [_flow_response(f) for f in await manager.latest_flows()]}
+async def list_flows(
+    manager: Managed,
+    search: Annotated[str | None, Query(max_length=MAX_SEARCH)] = None,
+    limit: Annotated[int | None, Query(ge=1, le=MAX_PAGE)] = None,
+) -> dict[str, list[dict[str, Any]]]:
+    """The latest version of every flow, by name.
+
+    ``search`` keeps the flows whose name holds that text, those that start
+    with it first, and ``limit`` the first that many: what a page asks while
+    a person types a flow's name.
+    """
+    flows = await manager.latest_flows(search=search, limit=limit)
+    return {"flows": [_flow_response(flow) for flow in flows]}
 
 
 @router.get(

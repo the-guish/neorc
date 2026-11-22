@@ -1,9 +1,10 @@
 # Forms
 
 A flow can give the page that starts a run of it a form of its own: a list of
-values to pick from, radio buttons, a check box, a text area, in the place of
-one text box per input. The form is a file next to the flow's file, written in
-a small subset of [A2UI](https://github.com/a2ui-project/a2ui) v0.9.
+values to pick from, radio buttons, a check box, a text area, a choice of one
+of the manager's flows, in the place of one text box per input. The form is a
+file next to the flow's file, written in a small subset of
+[A2UI](https://github.com/a2ui-project/a2ui) v0.9.
 
 A task of an external queue can have a form too, for the person who answers
 it: [A task with a form](#a-task-with-a-form). Such a form can also show the
@@ -74,7 +75,9 @@ The messages an A2UI agent would send to draw a surface, as a JSON list: one
 
 ### The components
 
-Nine of A2UI's basic catalog, each with the properties listed and no other.
+Nine of A2UI's basic catalog, and `FlowPicker`, which is this catalog's own
+([A choice of a flow](#a-choice-of-a-flow)). Each has the properties listed
+and no other.
 
 | component | properties | the input it fills |
 |---|---|---|
@@ -87,6 +90,7 @@ Nine of A2UI's basic catalog, each with the properties listed and no other.
 | `CheckBox` | `label`, `value` | a `boolean` |
 | `ChoicePicker` | `label`, `value`, `options`, `checks`; `variant`: `mutuallyExclusive`; `displayStyle`: `checkbox`, `chips` | a `string`: the value of the one option chosen |
 | `Button` | `child`, `action`; `variant`: `default`, `primary`, `borderless`; in a task's form only | none in a flow; in a task, the field its action sets |
+| `FlowPicker` | `label`, `value`, `checks` | a `string`: the name of the flow chosen |
 
 - The component with the id `root` is a `Column`, and every other component
   is under it exactly once. A `Card` places its `child` under it, and a
@@ -109,16 +113,45 @@ form may use those the manager can keep by itself:
 | a text field | `required`, `length` | `length`: `min`, `max` or both, in characters |
 | a number field | `required`, `numeric` | `numeric`: `min`, `max` or both |
 | a choice | `required` | |
+| a choice of a flow | `required` | |
 
 Each is about the control's own value: its `args.value` is the control's
 `value`.
+
+### A choice of a flow
+
+A `FlowPicker` fills an input with the name of one of the manager's flows. The
+form lists no option: the page asks the manager for them as the person types.
+
+```json
+{ "id": "target", "component": "FlowPicker", "label": "Flow",
+  "value": { "path": "/target" },
+  "checks": [ { "condition": { "call": "required",
+                               "args": { "value": { "path": "/target" } } },
+                "message": "Choose the flow to launch." } ] }
+```
+
+- **The page searches the manager's flows live.** It asks
+  `GET /flows?search=<text>&limit=8` once the typing rests, and lists the
+  flows found under the box, each with its latest version.
+- **A search keeps the flows whose name holds the text**, in any case. The
+  flows whose name starts with the text come first, then the others, each by
+  name. Without a text, the listing is every flow by name.
+- **The request is the person's own.** It needs `neorc/flows:read`, as the
+  list of flows does, so the box offers the flows that person may read.
+- **The value is the flow chosen**: one picked from the list, or one whose
+  name was typed in full. Any other text leaves no flow chosen, and the form
+  submits nothing.
+- It fills a `string` input of a flow, and a field of a task's result. In a
+  List's template it holds one flow per item.
 
 ### What a form starts from
 
 `updateDataModel`, at the path `/`, gives controls a value to start from, in
 the shape A2UI keeps each in: a string for a text field, a string or a number
 for a number field, `true` or `false` for a check box, and for a choice a list
-of at most one of its options' values.
+of at most one of its options' values. A choice of a flow starts from a
+string, the flow's name.
 
 It sets no value for a control in a List's template, and nothing at
 `/inputs`: the task's inputs are there.
@@ -130,6 +163,9 @@ It sets no value for a control in a List's template, and nothing at
 - A choice of up to four options is radio buttons; of more, a list to pick
   from. A choice whose `displayStyle` is `chips` is a bar of buttons, one
   pressed at a time.
+- A choice of a flow is a text box, with the flows found listed under it. A
+  click picks one, and so do the arrow keys with Enter. Enter picks the first
+  flow found when the arrows were not used.
 - A `Row` lays its children side by side, and a `Card` draws a box around
   its child.
 - The form has no button. The page's own "Start run" starts the run, with
@@ -137,7 +173,8 @@ It sets no value for a control in a List's template, and nothing at
   A choice's list of one becomes the string, and a number field's text the
   number.
 - A broken check is said with the form's own message, and nothing is sent.
-  A choice left unmade and a number field without a number are refused too.
+  A choice left unmade, of a flow too, and a number field without a number
+  are refused too.
 - "Edit as JSON" is still there, for what a form cannot say.
 - A form the page cannot read is not drawn: the page falls back to one field
   per input. The manager has refused such a form already; this is for a page
@@ -163,13 +200,14 @@ start a run.
 - **At upload**, a form outside the subset is refused, with every reason, and
   nothing is stored: `form.clip: component 'Video' is not in the subset`.
 - **At every start of a run**, after the inputs' declared types are checked,
-  the inputs must keep what the form says: a choice is one of its options,
-  and each check holds. That is for every start, whoever sends it: the page, a
-  script with a token, a webhook, a flow calling this one as a sub-flow. A
-  calling flow's run fails with the reason, as it does for an input of the
-  wrong type.
+  the inputs must keep what the form says: a choice is one of its options, a
+  choice of a flow names a flow the manager holds, and each check holds. That
+  is for every start, whoever sends it: the page, a script with a token, a
+  webhook, a flow calling this one as a sub-flow. A calling flow's run fails
+  with the reason, as it does for an input of the wrong type.
 
         code_task: input 'repo' is not one of acme/billing, acme/search
+        launcher: input 'target' names no flow 'nope'
 
 So a form is not only how a page looks. It narrows what the flow accepts.
 
@@ -289,12 +327,16 @@ back to a text field. The task can still fail with a reason.
 ## What is ours and not A2UI's
 
 A form file is A2UI v0.9: its messages, its components and their properties,
-its bindings, its checks. Around it, six things are this project's:
+its bindings, its checks. Around it, seven things are this project's:
 
 - **The catalog.** A surface names
   `https://github.com/open-shipyard/neorc/forms/v1`, which is the subset
   above. A2UI's way of saying which components a surface may use is a
   catalog, and this one is smaller than the basic one.
+- **A choice of a flow.** `FlowPicker` is no component of A2UI's basic
+  catalog: a catalog may add its own, and this one adds it. Its options are
+  the manager's flows, which the page asks for, and no part of the form. Its
+  value is a string, where A2UI keeps a choice as a list.
 - **How a form submits.** In A2UI a `Button` sends an event, with its
   context, to the agent that drew the surface. A flow's form has no button:
   the page submits the data the controls wrote. In a task's form a `Button`
@@ -346,23 +388,28 @@ is a piece of work that was not needed to start a run.
 | this page | `docs/architecture/forms.md` |
 
 `neorc_core.forms` imports nothing of `neorc_core` but its errors. The rest of
-neorc meets the feature in **eight places**, four for a flow's form and four
-for a task's:
+neorc meets the feature in **nine places**, four for a flow's form, four for a
+task's, and one for a choice of a flow:
 
 | where | what |
 |---|---|
 | `neorc_core/flows/_loader.py`, `_TOP_KEYS` and `_Parser.flow` | a flow may have a `form`, and `form_problems` says what is wrong with it |
 | `neorc_core/flows/_loader.py`, `load_flow_yaml`, `load_flow_file`, `read_flows` | `inline_form` reads the files a flow file names, the tasks' too |
-| `neorc_core/_manager.py`, `_start_latest` | `check_form_inputs`, after `check_inputs` |
+| `neorc_core/_manager.py`, `_start_latest` | `check_form_inputs`, after `check_inputs`, with the flows the manager holds of those `picked_flows` names |
 | `ts/neorc-ui/src/components/StartRunForm.tsx` | `formOf`, `answered` and `<FlowForm>`, in the place of the fields; `useHostForm`, the host's form, before the flow's own |
 | `neorc_core/flows/_loader.py`, `_STEP_KEYS`, `_Parser.step` and `_Parser.loop` | a task may have a `form`, which reads only the task's params, and an exit condition may not |
 | `neorc_core/_manager.py`, `upload_flows` | `step_forms`: a form is for a task of an external queue |
-| `neorc_core/_manager.py`, `complete_task` | `check_form_result`, with the task's inputs, before the completion is stored |
+| `neorc_core/_manager.py`, `complete_task` | `check_form_result`, with the task's inputs and the flows the manager holds of those `picked_flows` names, before the completion is stored |
 | `ts/neorc-ui/src/components/TaskPanel.tsx` | `formOf` with the task's inputs, `answered` and `<FlowForm>` with its buttons, in the place of the text field |
+| `ts/neorc-ui/src/queries.ts`, `useFlowSearch`, and `src/api.ts`, `searchFlows` | what a choice of a flow asks the manager as a person types |
 
 Nothing else knows what a form holds. The store keeps it as part of the flow's
 content, the HTTP routes carry that content as they did, and the adapters in
 `neorc` have no line about it.
+
+The search of the flows is the manager's own, and no part of the feature:
+`Manager.latest_flows` takes `search` and `limit`, and `GET /flows` carries
+both. A choice of a flow is its first reader.
 
 `ts/neorc-ui/src/forms/code_task.form.json`, `review_draft.form.json` and
 `triage.form.json` are copies of the examples' forms, which the UI's tests
@@ -375,8 +422,9 @@ read; a test in `python/neorc-core/tests/forms/` fails when a copy differs.
    `_STEP_KEYS`, and the lines about it in `_Parser.flow`, `_Parser.step` and
    `_Parser.loop`; make the three readers of `_loader.py` read a file's
    structure as it is; take the lines out of `_start_latest`, `upload_flows`
-   and `complete_task`; give `StartRunForm` back its fields alone, and
-   `TaskPanel` its text field. Take `forms` off the root component
+   and `complete_task`, and `_held` with them; give `StartRunForm` back its
+   fields alone, and `TaskPanel` its text field. Take `useFlowSearch` and
+   `searchFlows` out. Take `forms` off the root component
    (`ts/neorc-ui/src/context.ts`, `NeorcApp.tsx`).
 3. Take the journey on `examples/review_loop` out of
    `python/neorc/tests/test_ui_browser.py`.

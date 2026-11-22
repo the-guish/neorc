@@ -1,5 +1,6 @@
 import { Fragment, type ReactNode } from "react";
 
+import { FlowPicker } from "./FlowPicker";
 import { textOf, type Answers, type Control, type Form, type Held } from "./subset";
 import "./forms.css";
 
@@ -148,6 +149,16 @@ export function FlowForm({
             />
             {control.label}
           </label>
+        );
+      case "flow":
+        return (
+          <FlowPicker
+            key={control.id}
+            id={id}
+            label={control.label}
+            value={String(held(control.input, scope) ?? "")}
+            onChange={(name) => set(control.input, scope, name)}
+          />
         );
       case "choice": {
         const chosen = String(held(control.input, scope) ?? "");

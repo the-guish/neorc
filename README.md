@@ -144,7 +144,8 @@ form to start a run and a button to cancel one. People sign in to it with an
 identity provider, as below.
 
 A flow can give that form its own fields, a list of values, radio buttons, a
-check box, laid out in rows and cards, in a file next to the flow's: [docs/architecture/forms.md](docs/architecture/forms.md),
+check box, a choice of one of the manager's flows searched as a person types,
+laid out in rows and cards, in a file next to the flow's: [docs/architecture/forms.md](docs/architecture/forms.md),
 and [examples/code_task](examples/code_task) to try one.
 
 [examples/hello](examples/hello) and [examples/wordplay](examples/wordplay)

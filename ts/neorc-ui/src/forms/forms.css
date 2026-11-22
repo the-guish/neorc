@@ -94,3 +94,46 @@
   background: var(--accent);
   color: var(--on-accent);
 }
+
+/* A choice of one of the manager's flows: a text box, and the list of the
+   flows found hanging from it, over what follows. The list is placed from
+   the box's own wrapper, so a line said below the box is under the list. */
+
+.neorc-start-run .neorc-flow-form .neorc-flow-form-picker {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.neorc-start-run .neorc-flow-form .neorc-flow-form-picker-box {
+  position: relative;
+  display: grid;
+}
+
+.neorc-start-run .neorc-flow-form .neorc-flow-form-picker ul {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 1;
+  max-height: 16rem;
+  overflow-y: auto;
+  margin: 0.15rem 0 0;
+  padding: 0.2rem 0;
+  list-style: none;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.neorc-start-run .neorc-flow-form .neorc-flow-form-picker li {
+  padding: 0.25rem 0.6rem;
+}
+
+.neorc-start-run .neorc-flow-form .neorc-flow-form-picker li[role="option"] {
+  cursor: pointer;
+}
+
+.neorc-start-run .neorc-flow-form .neorc-flow-form-picker li[role="option"]:hover,
+.neorc-start-run .neorc-flow-form .neorc-flow-form-picker li.neorc-flow-form-picker-active {
+  background: var(--hover);
+}
