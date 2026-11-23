@@ -13,6 +13,11 @@ A worker on startup should:
 4. confirm the manager it is healthy
 5. start receiving tasks.
 
+A handler that does not fit stops the worker at step 3, which lists every
+problem. The option `--allow-unfit-handlers` logs the problems and goes on to
+step 5: a task with such a handler fails when it is taken. The manager keeps a
+flow whose files were removed, so this option lets the other flows run.
+
 A worker validates its queue's task definitions only at startup. A mechanism for
 the manager to tell workers to perform actions, such as revalidating flows
 after a new version is uploaded, will come later; it is not designed yet.

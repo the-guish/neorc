@@ -201,6 +201,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     worker_start.add_argument("--poll-timeout", type=float, default=30.0)
     worker_start.add_argument("--lease-seconds", type=float, default=60.0)
+    worker_start.add_argument(
+        "--allow-unfit-handlers",
+        action="store_true",
+        help="report the handlers that do not fit their tasks and serve the "
+        "queue all the same; such a task fails when it is taken",
+    )
     worker_start.set_defaults(handler=worker_start_command)
 
     run = commands.add_parser(
@@ -670,7 +676,10 @@ async def _prepared(
     Workers outlive manager restarts, and are often started alongside one:
     an unreachable manager is retried until a stop signal. Handlers that do
     not fit their tasks will not fit on retry: that exits, listing every
-    problem. Returns ``False`` when stopped before the check passed.
+    problem. With ``--allow-unfit-handlers`` the problems are logged and the
+    worker serves its queue: a flow whose handlers were removed, and that the
+    manager still holds, does not stop the tasks of every other flow. Returns
+    ``False`` when stopped before the check passed.
     """
     while not stopping.is_set():
         try:
@@ -679,11 +688,15 @@ async def _prepared(
         except AccessError as exc:
             raise SystemExit(_refused(exc)) from exc
         except HandlerError as exc:
-            raise SystemExit(
+            message = (
                 f"the handlers in {str(args.code_location)!r} do not fit the "
                 f"tasks on queue {args.queue!r}:\n"
                 + "\n".join(f"  {p}" for p in exc.problems)
-            ) from exc
+            )
+            if not getattr(args, "allow_unfit_handlers", False):
+                raise SystemExit(message) from exc
+            _log.warning("%s\nthese tasks fail when they are taken", message)
+            return True
         except ManagerUnavailableError as exc:
             _log.warning(
                 "cannot check the handlers yet (%s); retrying in %ss",

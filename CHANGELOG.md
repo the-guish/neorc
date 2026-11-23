@@ -20,6 +20,11 @@ one version, cut from a single tag on `main`.
   another kind is refused with a 409, `QueueKindError`: its operator changes a
   kind. `ManagerClient.declare_queue` and `Manager.add_queue` do the same.
 - `neorc`: the HTTP clients send every write as JSON, as oneberth asks.
+- `neorc`: `neorc worker start --allow-unfit-handlers` logs the handlers that
+  do not fit their tasks and serves the queue. A task with such a handler
+  fails when it is taken. Without the option the worker exits, as before. The
+  manager keeps a flow whose files were removed, so a worker started again
+  after its handlers were removed served no task at all.
 
 ### Changed
 

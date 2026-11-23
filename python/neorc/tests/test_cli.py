@@ -797,6 +797,33 @@ def test_a_worker_whose_handlers_do_not_fit_exits_listing_every_problem(
     assert "b: takes no parameter 'x'" in message
 
 
+def test_a_worker_allowed_unfit_handlers_logs_every_problem_and_serves(
+    fake_clients: type[_FakeClient],
+    fake_loops: type[_FakeLoop],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    fake_loops.problems = ["a: cannot import 'tasks'", "b: takes no parameter 'x'"]
+
+    with caplog.at_level("WARNING"):
+        exit_code = _cli.main(
+            [
+                "worker",
+                "start",
+                "--manager-address",
+                "m",
+                "--code-location",
+                str(_EXAMPLES / "hello"),
+                "--allow-unfit-handlers",
+            ]
+        )
+
+    assert exit_code == 0
+    assert fake_loops.prepared == 1
+    assert "queue 'default'" in caplog.text
+    assert "a: cannot import 'tasks'" in caplog.text
+    assert "b: takes no parameter 'x'" in caplog.text
+
+
 def test_a_worker_needs_its_code_location_and_a_manager(
     fake_clients: type[_FakeClient], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
