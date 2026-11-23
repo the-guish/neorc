@@ -137,6 +137,22 @@ describe("FlowPage", () => {
     expect(within(canvas).queryByText("split_words")).not.toBeInTheDocument();
   });
 
+  it("offers no run of an inactive flow", async () => {
+    const inactive = { ...WORD_PICKER, active: false };
+    mockApi({
+      "/flows/word_picker": inactive,
+      "/flows/word_picker/versions": { versions: [inactive] },
+    });
+
+    renderWithClient(<FlowPage flow="word_picker" />);
+
+    expect(await screen.findByText("inactive")).toBeInTheDocument();
+    expect(screen.getByText(/This flow is inactive: it starts no run/)).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Start a run" })).not.toBeInTheDocument();
+    // What it was stays readable.
+    expect(screen.getByLabelText("Definition")).toBeInTheDocument();
+  });
+
   it("starts runs on the latest version only", async () => {
     mockApi({
       "/flows/word_picker/versions/1.0.0": WORD_PICKER_1_0,

@@ -15,6 +15,7 @@ import pytest
 
 from neorc_core._errors import (
     FlowDefinitionError,
+    FlowInactiveError,
     FlowNotFoundError,
     FlowVersionError,
     RunNotFoundError,
@@ -254,6 +255,107 @@ class StoreContract:
             await store.store_flows(
                 [self.upload_of("a", "1.0.0"), self.upload_of("a", "2.0.0")]
             )
+
+    # Inactive flows.
+
+    async def test_a_flow_made_inactive_keeps_its_versions_and_starts_no_run(
+        self, store: Store
+    ) -> None:
+        await self.upload(store, version="1.0.0")
+        await self.upload(store, version="2.0.0")
+        await self.upload(store, "b")
+
+        assert await store.deactivate_flows(["a"]) == [True]
+
+        latest = await store.get_flow("a")
+        assert (latest.version, latest.active) == (Version(2, 0, 0), False)
+        assert (await store.get_flow("a", Version(1, 0, 0))).active is False
+        assert [(f.name, f.active) for f in await store.latest_flows()] == [
+            ("a", False),
+            ("b", True),
+        ]
+        assert [f.active for f in await store.flow_versions("a")] == [False, False]
+        with pytest.raises(FlowInactiveError, match="'a' is inactive"):
+            await store.start_run("a", Version(2, 0, 0), {})
+        assert (await self.start(store, "b")).status is RunStatus.ACTIVE
+
+    async def test_a_flow_made_inactive_fails_the_run_trees_it_is_part_of(
+        self, store: Store
+    ) -> None:
+        await self.upload(store, "a")
+        await self.upload(store, "b")
+        await self.upload(store, "c")
+        parent = await self.start(store, "a")
+        child = await store.start_run(
+            "b",
+            (await store.get_flow("b")).version,
+            {},
+            parent_id=parent.id,
+            parent_address=WORK,
+        )
+        other = await self.start(store, "c")
+        before = await store.last_sequence()
+
+        assert await store.deactivate_flows(["b"]) == [True]
+
+        for run in (parent, child):
+            failed = await store.get_run(run.id)
+            assert failed.status is RunStatus.FAILED
+            assert failed.reason == "b was deactivated"
+        assert (await store.get_run(other.id)).status is RunStatus.ACTIVE
+        events = await store.events_after(before)
+        assert sorted((e.run_id, e.kind) for e in events) == sorted(
+            [(parent.id, EventKind.RUN_FINISHED), (child.id, EventKind.RUN_FINISHED)]
+        )
+
+    async def test_flows_are_made_inactive_as_one(self, store: Store) -> None:
+        await self.upload(store, "a")
+        run = await self.start(store, "a")
+
+        with pytest.raises(FlowNotFoundError, match="nothing"):
+            await store.deactivate_flows(["a", "nothing"])
+
+        assert (await store.get_flow("a")).active is True
+        assert (await store.get_run(run.id)).status is RunStatus.ACTIVE
+        await self.upload(store, "b")
+        assert await store.deactivate_flows(["a", "b"]) == [True, True]
+        assert await store.deactivate_flows(["a", "b"]) == [False, False]
+
+    async def test_an_inactive_flow_uploaded_again_is_active(
+        self, store: Store
+    ) -> None:
+        await self.upload(store, "a")
+        await self.upload(store, "b")
+        await store.deactivate_flows(["a", "b"])
+
+        assert await self.upload(store, "a") is False
+        assert await self.upload(store, "b", version="2.0.0") is True
+
+        assert (await store.get_flow("a")).active is True
+        assert (await store.get_flow("b")).active is True
+        assert (await self.start(store, "a")).status is RunStatus.ACTIVE
+
+    async def test_a_refused_upload_leaves_an_inactive_flow_inactive(
+        self, store: Store
+    ) -> None:
+        await self.upload(store, "a", version="2.0.0")
+        await store.deactivate_flows(["a"])
+
+        with pytest.raises(FlowVersionError):
+            await self.upload(store, "a", version="1.0.0")
+
+        assert (await store.get_flow("a")).active is False
+
+    async def test_an_inactive_flow_still_answers_the_flows_calling_it(
+        self, store: Store
+    ) -> None:
+        await store.store_flows([self.callee("1.0.0", "x"), self.caller("1.0.0", "x")])
+        await store.deactivate_flows(["b"])
+
+        # The set is checked with the inactive flow in it: its inputs are known.
+        assert await store.store_flows([self.caller("2.0.0", "x")]) == [True]
+        with pytest.raises(FlowDefinitionError, match="b has no input 'y'"):
+            await store.store_flows([self.caller("3.0.0", "y")])
 
     # Runs.
 

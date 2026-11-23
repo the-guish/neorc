@@ -393,7 +393,7 @@ def role_tokens_transport(
                         task = await manager.get_task(uuid.UUID(worker["task"]))
                         queue = task.queue
                 return await self._token(Role.WORKER, queue)
-            if path == "/flows" and method == "POST":
+            if path in ("/flows", "/flows/deactivate") and method == "POST":
                 return await self._token(Role.CI)
             if (
                 path.startswith("/runs/")

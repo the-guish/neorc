@@ -174,6 +174,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _manager_address_option(flows_upload)
     flows_upload.set_defaults(handler=flows_upload_command)
+    flows_deactivate = flows_commands.add_parser(
+        "deactivate",
+        help="make flows inactive: they keep their runs and start no new one",
+    )
+    flows_deactivate.add_argument("names", nargs="+", help="the flows' names")
+    _manager_address_option(flows_deactivate)
+    flows_deactivate.set_defaults(handler=flows_deactivate_command)
 
     scheduler = commands.add_parser("scheduler", help="run the scheduler")
     scheduler_commands = scheduler.add_subparsers(dest="subcommand", required=True)
@@ -576,6 +583,36 @@ def flows_upload_command(args: argparse.Namespace) -> int:
     for content, is_new in zip(contents, stored, strict=True):
         state = "stored" if is_new else "unchanged"
         print(f"{state} {content['name']} {content['version']}")
+    return 0
+
+
+def flows_deactivate_command(args: argparse.Namespace) -> int:
+    """Make the named flows inactive as one, and say which were active.
+
+    An inactive flow keeps its versions and its runs, starts no run, and gives
+    a worker no task to check. Its active run trees fail. ``neorc flows
+    upload`` makes it active again. Exits 1 when the manager refuses.
+    """
+    with _needs("http"):
+        from neorc.http import HttpManagerClient
+
+    address = _manager_address(args, "deactivate flows on")
+
+    async def deactivate() -> list[bool]:
+        async with _client(HttpManagerClient, address) as client:
+            return await client.deactivate_flows(args.names)
+
+    try:
+        deactivated = asyncio.run(deactivate())
+    except AccessError as exc:
+        print(_refused(exc), file=sys.stderr)
+        return 1
+    except NeorcError as exc:
+        print(f"deactivation refused: {exc}", file=sys.stderr)
+        return 1
+    for name, was_active in zip(args.names, deactivated, strict=True):
+        state = "deactivated" if was_active else "unchanged"
+        print(f"{state} {name}")
     return 0
 
 

@@ -111,7 +111,9 @@ class LocalCluster:
             await self.start_workers()
 
     async def start_workers(self) -> None:
-        """Start a worker for every worker queue in the latest flows that has none yet.
+        """Start a worker for every worker queue of the latest active flows.
+
+        A queue that has a worker already gets no other.
 
         An external queue gets none: its tasks wait for a completion, through
         ``manager.complete_task``.
@@ -120,6 +122,7 @@ class LocalCluster:
             {
                 task.queue
                 for flow in await self.manager.latest_flows()
+                if flow.active
                 for task in flow.definition.tasks()
             }
         )

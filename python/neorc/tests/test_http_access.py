@@ -268,6 +268,7 @@ async def test_every_route_needs_a_token(
 
 ROUTE_PERMISSIONS = {
     ("POST", "/flows"): "flows:upload",
+    ("POST", "/flows/deactivate"): "flows:upload",
     ("GET", "/flows"): "flows:read",
     ("GET", "/flows/{name}"): "flows:read",
     ("GET", "/flows/{name}/versions"): "flows:read",

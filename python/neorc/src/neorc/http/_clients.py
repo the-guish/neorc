@@ -290,6 +290,12 @@ class HttpManagerClient(_HttpClient, ManagerClient):
         response = await self._request("POST", "/flows", body={"flows": list(contents)})
         return _parsed(response, lambda body: [bool(s) for s in body["stored"]])
 
+    async def deactivate_flows(self, names: Sequence[str]) -> list[bool]:
+        response = await self._request(
+            "POST", "/flows/deactivate", body={"names": list(names)}
+        )
+        return _parsed(response, lambda body: [bool(d) for d in body["deactivated"]])
+
     async def declare_queue(self, name: str, kind: QueueKind) -> bool:
         response = await self._request(
             "PUT", f"/queues/{_queue_segment(name)}", body={"kind": kind.value}

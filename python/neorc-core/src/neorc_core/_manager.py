@@ -149,13 +149,30 @@ class Manager:
         await self._events.notify()  # a new version cancels runs
         return stored
 
+    async def deactivate_flows(self, names: Sequence[str]) -> list[bool]:
+        """Make flows inactive as one; per name, whether the flow was active.
+
+        An inactive flow keeps its versions and its runs. It starts no run, as
+        a flow or as a sub-flow: ``FlowInactiveError``. Its tasks are left out
+        of what a worker checks. Every active run tree with a run of it fails.
+        Uploading the flow again makes it active.
+
+        Raises ``FlowNotFoundError`` for a name that is not a flow, and then
+        nothing changes.
+        """
+        for name in names:
+            _lookup(name, "flow name")
+        deactivated = await self._store.deactivate_flows(list(names))
+        await self._events.notify()  # a flow made inactive fails runs
+        return deactivated
+
     async def get_flow(self, name: str, version: Version | None = None) -> StoredFlow:
         """A flow version, the latest when ``version`` is ``None``."""
         _lookup(name, "flow name")
         return await self._store.get_flow(name, version)
 
     async def latest_flows(self) -> list[StoredFlow]:
-        """The latest version of every flow."""
+        """The latest version of every flow, inactive ones too."""
         return await self._store.latest_flows()
 
     async def flow_versions(self, name: str) -> list[StoredFlow]:
@@ -200,7 +217,8 @@ class Manager:
 
         ``inputs`` are in their JSON form, and must be exactly the flow's
         declared inputs, each of its declared type: ``InvalidValueError``
-        otherwise. ``FlowNotFoundError`` if there is no such flow.
+        otherwise. ``FlowNotFoundError`` if there is no such flow, and
+        ``FlowInactiveError`` if it is inactive.
         ``started_by`` is who asked, as the host names them; the run and
         every sub-flow run of its tree keep it.
         """
@@ -285,9 +303,10 @@ class Manager:
         """Start the sub-flow run at ``address`` in an active parent run.
 
         It runs the called flow's latest version, with its inputs resolved now
-        and checked against that version's declared types. It has the parent's
-        starter. Starting the same address again returns the run already
-        started.
+        and checked against that version's declared types. An inactive flow
+        is refused with ``FlowInactiveError``, which fails the parent run. It
+        has the parent's starter. Starting the same address again returns the
+        run already started.
         """
         run, definition, state = await self._context(parent_id)
         ensure_active(run)
@@ -330,7 +349,7 @@ class Manager:
     # Workers.
 
     async def task_definitions(self, queue: str) -> list[TaskStep]:
-        """Every task on ``queue`` in the latest flows, for a worker to check.
+        """Every task on ``queue`` in the latest active flows, for a worker to check.
 
         One task step per flow that defines it, flows in name order. Raises
         ``PermissionDeniedError`` for a queue that is not a declared worker
@@ -341,6 +360,7 @@ class Manager:
         return [
             task
             for flow in await self._store.latest_flows()
+            if flow.active
             for task in flow.definition.tasks()
             if task.queue == queue
         ]

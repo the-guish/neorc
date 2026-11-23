@@ -12,6 +12,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 from neorc_core._errors import (
+    FlowInactiveError,
     FlowNotFoundError,
     FlowVersionError,
     RunNotFoundError,
@@ -30,7 +31,9 @@ from neorc_core._runs import (
     StoredFlow,
     Task,
     check_uploads,
+    deactivated_reason,
     ensure_active,
+    inactive_message,
     last_change,
     run_state_of,
     storable_text,
@@ -61,6 +64,7 @@ class MemoryStore(Store):
     def __init__(self, *, queues: Mapping[str, QueueKind] | None = None) -> None:
         self._lock = asyncio.Lock()
         self._flows: dict[str, dict[Version, StoredFlow]] = {}
+        self._inactive: set[str] = set()
         self._runs: dict[RunId, Run] = {}
         self._tasks: dict[TaskId, Task] = {}
         self._task_ids: dict[tuple[RunId, Address], TaskId] = {}
@@ -74,6 +78,7 @@ class MemoryStore(Store):
             }
             results = check_uploads(stored, uploads)
             for upload, is_new in zip(uploads, results, strict=True):
+                self._inactive.discard(upload.name)
                 if not is_new:
                     continue
                 self._flows.setdefault(upload.name, {})[upload.version] = upload
@@ -87,6 +92,28 @@ class MemoryStore(Store):
                     self._finish_tree(root_id, RunStatus.CANCELLED, reason)
             return results
 
+    async def deactivate_flows(self, names: Sequence[str]) -> list[bool]:
+        async with self._lock:
+            for name in names:
+                self._flow(name, None)
+            results: list[bool] = []
+            for name in names:
+                was_active = name not in self._inactive
+                results.append(was_active)
+                if not was_active:
+                    continue
+                self._inactive.add(name)
+                roots = {
+                    run.root_id
+                    for run in self._runs.values()
+                    if run.flow == name and run.status is RunStatus.ACTIVE
+                }
+                for root_id in sorted(roots):
+                    self._finish_tree(
+                        root_id, RunStatus.FAILED, deactivated_reason(name)
+                    )
+            return results
+
     async def get_flow(self, name: str, version: Version | None = None) -> StoredFlow:
         async with self._lock:
             return self._flow(name, version)
@@ -94,8 +121,8 @@ class MemoryStore(Store):
     async def latest_flows(self) -> list[StoredFlow]:
         async with self._lock:
             return [
-                versions[max(versions)]
-                for _, versions in sorted(self._flows.items())
+                self._flow(name, None)
+                for name, versions in sorted(self._flows.items())
                 if versions
             ]
 
@@ -104,7 +131,7 @@ class MemoryStore(Store):
             versions = self._flows.get(name)
             if not versions:
                 raise FlowNotFoundError(f"no flow {name!r}")
-            return [versions[v] for v in sorted(versions, reverse=True)]
+            return [self._flow(name, v) for v in sorted(versions, reverse=True)]
 
     async def list_runs(
         self,
@@ -157,11 +184,13 @@ class MemoryStore(Store):
         if (parent_id is None) != (parent_address is None):
             raise ValueError("a sub-flow run names both its parent and its address")
         async with self._lock:
-            latest = self._flow(flow, None).version
-            if version != latest:
+            latest = self._flow(flow, None)
+            if version != latest.version:
                 raise FlowVersionError(
-                    f"{flow} {version} is not the latest version, {latest}"
+                    f"{flow} {version} is not the latest version, {latest.version}"
                 )
+            if not latest.active:
+                raise FlowInactiveError(inactive_message(flow))
             if parent_id is None:
                 run_id = uuid.uuid4()
                 root_id = run_id
@@ -416,6 +445,8 @@ class MemoryStore(Store):
         stored = versions.get(max(versions) if version is None else version)
         if stored is None:
             raise FlowNotFoundError(f"no version {version} of flow {name!r}")
+        if name in self._inactive:
+            return replace(stored, active=False)
         return stored
 
     def _run(self, run_id: RunId) -> Run:

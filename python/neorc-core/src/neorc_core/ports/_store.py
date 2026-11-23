@@ -52,6 +52,19 @@ class Store(ABC):
         or leaves the latest flows invalid as a set. Returns, per upload,
         whether a new version was stored; ``False`` for an identical one. Each
         new version cancels every active run tree containing a run of its flow.
+        Every uploaded flow is active afterwards, an identical one too.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    async def deactivate_flows(self, names: Sequence[str]) -> list[bool]:
+        """Make flows inactive, and fail the run trees they are part of.
+
+        One operation: raises ``FlowNotFoundError`` before anything changes if
+        a name is not a stored flow. Returns, per name, whether the flow was
+        active. Each flow made inactive fails every active run tree containing
+        a run of it. An inactive flow keeps its versions and its runs, and
+        ``start_run`` refuses it.
         """
         raise NotImplementedError
 
@@ -65,7 +78,7 @@ class Store(ABC):
 
     @abstractmethod
     async def latest_flows(self) -> list[StoredFlow]:
-        """The latest version of every stored flow, by name."""
+        """The latest version of every stored flow, by name, inactive ones too."""
         raise NotImplementedError
 
     @abstractmethod
@@ -130,7 +143,8 @@ class Store(ABC):
         The run keeps ``started_by`` as it is given, for a sub-flow run too.
 
         ``version`` must still be the flow's latest, or this raises
-        ``FlowVersionError``; ``FlowNotFoundError`` if the flow is unknown. A
+        ``FlowVersionError``; ``FlowNotFoundError`` if the flow is unknown, and
+        ``FlowInactiveError`` if it is inactive. A
         sub-flow run names its parent and the step instance it is: the parent
         must be active (``RunStateError``), and starting the same instance again
         returns the run already started, with no new event.

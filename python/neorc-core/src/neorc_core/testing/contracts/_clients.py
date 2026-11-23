@@ -14,6 +14,7 @@ import pytest
 
 from neorc_core._errors import (
     FlowDefinitionError,
+    FlowInactiveError,
     FlowNotFoundError,
     FlowVersionError,
     InvalidValueError,
@@ -137,6 +138,31 @@ class ManagerClientContract(_Clients):
             await manager_client.upload_flows([changed])
         with pytest.raises(FlowDefinitionError):
             await manager_client.upload_flows([{"name": "broken"}])
+
+    async def test_a_flow_made_inactive_starts_no_run_until_uploaded_again(
+        self, manager_client: ManagerClient
+    ) -> None:
+        run_id = await self.started(manager_client)
+
+        assert await manager_client.deactivate_flows(["main"]) == [True]
+        assert await manager_client.deactivate_flows(["main"]) == [False]
+
+        failed = await manager_client.get_run(run_id)
+        assert (failed.status, failed.reason) == (
+            RunStatus.FAILED,
+            "main was deactivated",
+        )
+        with pytest.raises(FlowInactiveError, match="'main' is inactive"):
+            await manager_client.start_run("main", INPUTS)
+        with pytest.raises(FlowNotFoundError):
+            await manager_client.deactivate_flows(["nothing"])
+        # What cannot name a flow is refused, not looked up.
+        with pytest.raises(InvalidValueError, match="flow name"):
+            await manager_client.deactivate_flows(["main\x00"])
+
+        assert await manager_client.upload_flows([MAIN]) == [False]
+        again = await manager_client.start_run("main", INPUTS)
+        assert again.status is RunStatus.ACTIVE
 
     async def test_a_flow_definition_reads_back_as_uploaded(
         self, manager_client: ManagerClient
@@ -351,6 +377,10 @@ class QueueClientContract(_Clients):
         }
         assert work.fixed_params == {"n": 2}
         assert say.handler == "tasks:say"
+        # An inactive flow's tasks are not a worker's to check.
+        await manager_client.deactivate_flows(["echo"])
+        assert await queue_client.task_definitions("voice") == []
+        assert len(await queue_client.task_definitions("default")) == 1
         # A queue nobody declared serves no worker; the refusal ends a worker.
         with pytest.raises(PermissionDeniedError, match="'nobody' is not declared"):
             await queue_client.task_definitions("nobody")

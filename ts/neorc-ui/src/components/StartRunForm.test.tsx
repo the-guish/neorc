@@ -9,6 +9,7 @@ import { bodyOf, inputsOf, jsonBodyOf, StartRunForm } from "./StartRunForm";
 const TYPED: Flow = {
   name: "typed",
   version: "1.0.0",
+  active: true,
   content: {
     name: "typed",
     version: "1.0.0",

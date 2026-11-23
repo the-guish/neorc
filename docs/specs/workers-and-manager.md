@@ -8,7 +8,7 @@ Workers would only need to be redeployed when the code needed in their queue cha
 
 A worker on startup should:
 1. receive from the startup command: a code location, a queue name (will be "default" if not specified), the manager address
-2. contact the manager and pull the task definitions for their queue, sending its API token; a token the manager refuses for that queue stops the worker (see [roles.md](roles.md)).
+2. contact the manager and pull the task definitions for their queue (the tasks of the latest active flows; see "Inactive flows" in [flows.md](flows.md)), sending its API token; a token the manager refuses for that queue stops the worker (see [roles.md](roles.md)).
 3. verify every task's handler can be imported and its named parameters match the task's inputs in the flow definition.
 4. confirm the manager it is healthy
 5. start receiving tasks.

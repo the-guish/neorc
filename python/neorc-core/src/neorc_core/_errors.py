@@ -44,6 +44,10 @@ class FlowNotFoundError(NeorcError):
     """No flow, or no version of a flow, exists with the given name."""
 
 
+class FlowInactiveError(NeorcError):
+    """A flow is inactive: it starts no run until it is uploaded again."""
+
+
 class FlowVersionError(NeorcError, ValueError):
     """An upload breaks the version rules, or a run names a version not the latest."""
 

@@ -30,6 +30,8 @@ class FlowResponse(_Exact):
     version: str
     content: Any
     """The flow's definition as it was uploaded."""
+    active: bool
+    """Whether the flow starts runs. An inactive flow keeps its versions and runs."""
 
 
 class FlowListResponse(_Exact):
@@ -42,6 +44,11 @@ class FlowVersionsResponse(_Exact):
 
 class UploadResponse(_Exact):
     stored: list[bool]
+
+
+class DeactivateResponse(_Exact):
+    deactivated: list[bool]
+    """Per name, whether the flow was active."""
 
 
 class AddressResponse(_Exact):

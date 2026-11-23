@@ -33,6 +33,23 @@
         "title": "AddressResponse",
         "type": "object"
       },
+      "DeactivateResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "deactivated": {
+            "items": {
+              "type": "boolean"
+            },
+            "title": "Deactivated",
+            "type": "array"
+          }
+        },
+        "required": [
+          "deactivated"
+        ],
+        "title": "DeactivateResponse",
+        "type": "object"
+      },
       "DeliveryResponse": {
         "additionalProperties": false,
         "properties": {
@@ -174,6 +191,10 @@
       "FlowResponse": {
         "additionalProperties": false,
         "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
           "content": {
             "title": "Content"
           },
@@ -189,7 +210,8 @@
         "required": [
           "name",
           "version",
-          "content"
+          "content",
+          "active"
         ],
         "title": "FlowResponse",
         "type": "object"
@@ -1045,7 +1067,7 @@
     },
     "/neorc/flows": {
       "get": {
-        "description": "The latest version of every flow, by name.",
+        "description": "The latest version of every flow, by name, inactive ones too.",
         "operationId": "list_flows_neorc_flows_get",
         "responses": {
           "200": {
@@ -1237,6 +1259,105 @@
           }
         },
         "summary": "Upload Flows"
+      }
+    },
+    "/neorc/flows/deactivate": {
+      "post": {
+        "description": "Make flows inactive as one; per name, whether the flow was active.",
+        "operationId": "deactivate_flows_neorc_flows_deactivate_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeactivateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The exception the manager raised"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The exception the manager raised"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The exception the manager raised"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The exception the manager raised"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The exception the manager raised"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The exception the manager raised"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The exception the manager raised"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "A refusal"
+          }
+        },
+        "summary": "Deactivate Flows"
       }
     },
     "/neorc/flows/{name}": {
