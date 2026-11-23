@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { HELLO, WORD_PICKER } from "../test/fixtures";
@@ -22,6 +22,27 @@ describe("FlowsPage", () => {
       "#/neorc/flows/word_picker",
     );
     expect(screen.getByText("1.2.0")).toBeInTheDocument();
+  });
+
+  it("folds the inactive flows away, below the others", async () => {
+    mockApi({
+      "/flows": { flows: [HELLO, { ...WORD_PICKER, active: false }] },
+    });
+
+    renderWithClient(<FlowsPage />);
+
+    const active = await screen.findByRole("table", { name: "Flows" });
+    expect(within(active).getAllByRole("row")).toHaveLength(2);
+    expect(within(active).getByRole("link", { name: "hello" })).toBeInTheDocument();
+    expect(screen.getByText("Inactive flows (1)")).toBeInTheDocument();
+    // Folded away: the table is in the page, and not shown until asked for.
+    expect(screen.getByText("Inactive flows (1)").closest("details")).not.toHaveAttribute(
+      "open",
+    );
+    const inactive = screen.getByRole("table", { name: "Inactive flows", hidden: true });
+    expect(
+      within(inactive).getByRole("link", { name: "word_picker", hidden: true }),
+    ).toHaveAttribute("href", "#/neorc/flows/word_picker");
   });
 
   it("says when nothing is uploaded yet", async () => {

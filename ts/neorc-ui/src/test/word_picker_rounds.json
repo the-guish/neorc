@@ -1,6 +1,7 @@
 {
   "flows": {
     "word_picker": {
+      "active": true,
       "content": {
         "inputs": {
           "preferred_letter": "string",
@@ -97,6 +98,7 @@
       "version": "1.0.0"
     },
     "word_picker_rounds": {
+      "active": true,
       "content": {
         "inputs": {
           "preferred_letter": "string",

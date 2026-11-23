@@ -44,6 +44,7 @@ from oneberth.web import permit, while_connected
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from neorc.manager._schemas import (
+    DeactivateResponse,
     DeliveryResponse,
     EventListResponse,
     FlowListResponse,
@@ -201,6 +202,12 @@ class UploadRequest(BaseModel):
     flows: list[Any]
 
 
+class DeactivateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    names: list[str]
+
+
 class StartRunRequest(BaseModel):
     inputs: dict[str, Any]
 
@@ -264,7 +271,12 @@ def bound_queue(permission: Permission) -> Any:
 
 
 def _flow_response(flow: Any) -> dict[str, Any]:
-    return {"name": flow.name, "version": str(flow.version), "content": flow.content}
+    return {
+        "name": flow.name,
+        "version": str(flow.version),
+        "content": flow.content,
+        "active": flow.active,
+    }
 
 
 @router.post(
@@ -279,6 +291,18 @@ async def upload_flows(request: Request, manager: Managed) -> dict[str, list[boo
     return {"stored": await manager.upload_flows(body.flows)}
 
 
+@router.post(
+    "/flows/deactivate",
+    dependencies=[permit(Permission.FLOWS_UPLOAD)],
+    response_model=None,
+    responses=documented(DeactivateResponse),
+)
+async def deactivate_flows(request: Request, manager: Managed) -> dict[str, list[bool]]:
+    """Make flows inactive as one; per name, whether the flow was active."""
+    body = await read_body(request, DeactivateRequest)
+    return {"deactivated": await manager.deactivate_flows(body.names)}
+
+
 @router.get(
     "/flows",
     dependencies=[permit(Permission.FLOWS_READ)],
@@ -286,7 +310,7 @@ async def upload_flows(request: Request, manager: Managed) -> dict[str, list[boo
     responses=documented(FlowListResponse),
 )
 async def list_flows(manager: Managed) -> dict[str, list[dict[str, Any]]]:
-    """The latest version of every flow, by name."""
+    """The latest version of every flow, by name, inactive ones too."""
     return {"flows": [_flow_response(f) for f in await manager.latest_flows()]}
 
 

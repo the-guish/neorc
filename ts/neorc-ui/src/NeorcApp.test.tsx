@@ -18,6 +18,7 @@ const OTHER = {
 const SHIP: Flow = {
   name: "ship",
   version: "1.0.0",
+  active: true,
   content: {
     name: "ship",
     version: "1.0.0",

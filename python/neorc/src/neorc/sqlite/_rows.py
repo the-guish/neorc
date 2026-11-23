@@ -79,9 +79,9 @@ def flow_to_row(flow: StoredFlow) -> dict[str, Any]:
     }
 
 
-def flow_from_row(row: sqlite3.Row) -> StoredFlow:
+def flow_from_row(row: sqlite3.Row, *, active: bool = True) -> StoredFlow:
     content = json.loads(row["content"])
-    return StoredFlow(parse_flow(content), content)
+    return StoredFlow(parse_flow(content), content, active)
 
 
 def run_to_row(run: Run, created_at: datetime) -> dict[str, Any]:

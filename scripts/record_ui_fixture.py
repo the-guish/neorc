@@ -46,6 +46,7 @@ async def record() -> dict[str, Any]:
                     "name": flow.name,
                     "version": str(flow.version),
                     "content": flow.content,
+                    "active": flow.active,
                 }
                 for flow in await manager.latest_flows()
             },

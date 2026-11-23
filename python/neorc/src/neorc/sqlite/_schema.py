@@ -38,6 +38,7 @@ BUSY_TIMEOUT_SECONDS = 5.0
 """How long a statement waits for a lock another connection holds, before it fails."""
 
 FLOW_VERSIONS_TABLE = "neorc_flow_versions"
+INACTIVE_FLOWS_TABLE = "neorc_inactive_flows"
 RUNS_TABLE = "neorc_runs"
 FLOW_TASKS_TABLE = "neorc_flow_tasks"
 EVENTS_TABLE = "neorc_events"
@@ -56,6 +57,11 @@ CREATE TABLE {FLOW_VERSIONS_TABLE} (
     patch            INTEGER NOT NULL,
     content          TEXT NOT NULL,
     PRIMARY KEY (name, major, minor, patch)
+);
+
+CREATE TABLE {INACTIVE_FLOWS_TABLE} (
+    name             TEXT PRIMARY KEY,
+    created_at       INTEGER NOT NULL
 );
 
 CREATE TABLE {RUNS_TABLE} (

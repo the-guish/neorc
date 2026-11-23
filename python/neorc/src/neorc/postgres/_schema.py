@@ -42,6 +42,7 @@ from __future__ import annotations
 from neorc.postgres._driver import connected, quote_identifier, schema_settings
 
 FLOW_VERSIONS_TABLE = "neorc_flow_versions"
+INACTIVE_FLOWS_TABLE = "neorc_inactive_flows"
 RUNS_TABLE = "neorc_runs"
 FLOW_TASKS_TABLE = "neorc_flow_tasks"
 EVENTS_TABLE = "neorc_events"
@@ -49,6 +50,7 @@ QUEUES_TABLE = "neorc_queues"
 
 TABLES = (
     FLOW_VERSIONS_TABLE,
+    INACTIVE_FLOWS_TABLE,
     RUNS_TABLE,
     FLOW_TASKS_TABLE,
     EVENTS_TABLE,
@@ -86,6 +88,12 @@ CREATE TABLE IF NOT EXISTS {FLOW_VERSIONS_TABLE} (
     patch            integer NOT NULL,
     content          text NOT NULL,
     PRIMARY KEY (name, major, minor, patch)
+);
+
+-- The flows that start no run. A row is removed when its flow is uploaded again.
+CREATE TABLE IF NOT EXISTS {INACTIVE_FLOWS_TABLE} (
+    name             text PRIMARY KEY,
+    created_at       timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS {RUNS_TABLE} (

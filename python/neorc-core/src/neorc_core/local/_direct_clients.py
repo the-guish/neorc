@@ -124,6 +124,11 @@ class DirectManagerClient(ManagerClient):
         stored = await self._manager.upload_flows(request["flows"])
         return list(transmit(stored))
 
+    async def deactivate_flows(self, names: Sequence[str]) -> list[bool]:
+        request = transmit({"names": list(names)})
+        deactivated = await self._manager.deactivate_flows(request["names"])
+        return list(transmit(deactivated))
+
     async def declare_queue(self, name: str, kind: QueueKind) -> bool:
         request = transmit({"name": name, "kind": kind.value})
         added = await self._manager.add_queue(

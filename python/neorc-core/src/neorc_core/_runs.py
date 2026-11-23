@@ -51,10 +51,16 @@ class RunStatus(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class StoredFlow:
-    """One version of a flow: its definition, and the structure it was uploaded as."""
+    """One version of a flow: its definition, and the structure it was uploaded as.
+
+    ``active`` is the flow's, not the version's: an inactive flow keeps its
+    versions and its runs, starts no run, and gives a worker no task to check.
+    Uploading the flow again makes it active.
+    """
 
     definition: FlowDefinition
     content: JsonValue
+    active: bool = True
 
     @property
     def name(self) -> str:
@@ -289,6 +295,16 @@ def check_uploads(
         )
     validate_flow_set(latest.values())
     return results
+
+
+def deactivated_reason(flow: str) -> str:
+    """Why a run tree failed when ``flow`` was made inactive."""
+    return f"{flow} was deactivated"
+
+
+def inactive_message(flow: str) -> str:
+    """What ``FlowInactiveError`` says of ``flow``."""
+    return f"flow {flow!r} is inactive: upload it again to start runs of it"
 
 
 def ensure_active(run: Run) -> None:

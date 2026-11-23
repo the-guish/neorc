@@ -26,6 +26,12 @@ export function FlowPage({ flow, version }: { flow: string; version?: string | u
     <>
       <h1>
         {flow} <small className="neorc-muted">{shown.data.version}</small>
+        {!shown.data.active && (
+          <>
+            {" "}
+            <span className="neorc-badge neorc-badge-inactive">inactive</span>
+          </>
+        )}
       </h1>
       <p>
         <a href={href({ name: "runs", flow })}>Runs of this flow</a>
@@ -52,7 +58,12 @@ export function FlowPage({ flow, version }: { flow: string; version?: string | u
           <FlowGraph key={`${flow}@${shown.data.version}`} steps={steps} />
         </>
       )}
-      {shown.data.version === versions.data[0]?.version ? (
+      {!shown.data.active ? (
+        <p className="neorc-muted">
+          This flow is inactive: it starts no run. Uploading it again makes it
+          active.
+        </p>
+      ) : shown.data.version === versions.data[0]?.version ? (
         <StartRunForm key={`${flow}@${shown.data.version}`} flow={shown.data} />
       ) : (
         <p className="neorc-muted">

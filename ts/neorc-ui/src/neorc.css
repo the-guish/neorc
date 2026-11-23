@@ -740,6 +740,24 @@
   border: 1px dashed var(--line);
 }
 
+/* A flow that starts no run, and the list of such flows on the Flows page. */
+
+.neorc-badge-inactive {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  vertical-align: middle;
+}
+
+.neorc-inactive-flows {
+  margin-top: 1.5rem;
+}
+
+.neorc-inactive-flows > summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+
 /* Cards: the run page's steps, and anything else in a box. */
 
 .neorc-card {

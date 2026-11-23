@@ -20,6 +20,21 @@ one version, cut from a single tag on `main`.
   another kind is refused with a 409, `QueueKindError`: its operator changes a
   kind. `ManagerClient.declare_queue` and `Manager.add_queue` do the same.
 - `neorc`: the HTTP clients send every write as JSON, as oneberth asks.
+- `neorc-core`, `neorc`, `neorc-ui`: a flow can be made inactive. It keeps its
+  versions and its runs, starts no run and no sub-flow run
+  (`FlowInactiveError`, a 409), fails the run trees it is part of, and gives a
+  worker no task to check, so its handlers may leave the code location.
+  Uploading it again makes it active. `neorc flows deactivate NAME...`, the
+  route `POST /flows/deactivate` with the permission `neorc/flows:upload`,
+  `ManagerClient.deactivate_flows`, `Manager.deactivate_flows` and
+  `Store.deactivate_flows` do it. A flow is listed with `active`; the
+  interface leaves an inactive flow out of the panel and folds it away on the
+  Flows page. Before, a flow could not be retired: a worker started again
+  after a flow's handlers were removed ended at its check, and no task ran.
+  The stores keep the inactive flows in a new table, `neorc_inactive_flows`.
+  Postgres creates it at the next `create_schema`. A SQLite file made before
+  this needs it added by hand: `CREATE TABLE neorc_inactive_flows (name TEXT
+  PRIMARY KEY, created_at INTEGER NOT NULL);`. The schema version stays 1.
 
 ### Changed
 
@@ -63,6 +78,10 @@ one version, cut from a single tag on `main`.
   in its last line, where it said that the front listener did not start: the
   component that failed with its error, or oneberth's own part, such as a
   store that will not open.
+- `neorc-ui`: `package-lock.json` holds the hash of `@oneberth/ui` packed
+  from that oneberth. It held the hash from `52da9df`, so `npm ci` refused
+  the tarball wherever npm had no cache, and `scripts/neorc-ui-pack.sh`
+  failed there.
 
 ### Removed
 

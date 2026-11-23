@@ -19,6 +19,7 @@ import { TaskPanel } from "./TaskPanel";
 const ROUNDS: Flow = {
   name: "approval",
   version: "1.0.0",
+  active: true,
   content: {
     name: "approval",
     version: "1.0.0",

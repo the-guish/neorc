@@ -27,6 +27,7 @@ from neorc_core import (
     AuthenticationError,
     CrossSiteRequestError,
     FlowDefinitionError,
+    FlowInactiveError,
     FlowNotFoundError,
     FlowVersionError,
     HandlerError,
@@ -54,6 +55,7 @@ STATUS_OF: dict[type[NeorcError], int] = {
     PayloadTooLargeError: 413,
     UnsupportedMediaTypeError: 415,
     # What was asked does not fit where things are.
+    FlowInactiveError: 409,
     FlowVersionError: 409,
     QueueKindError: 409,
     RunStateError: 409,

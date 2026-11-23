@@ -50,6 +50,7 @@ from neorc.sqlite._schema import (
     EVENTS_TABLE,
     FLOW_TASKS_TABLE,
     FLOW_VERSIONS_TABLE,
+    INACTIVE_FLOWS_TABLE,
     QUEUES_TABLE,
     RUNS_TABLE,
     connect,
@@ -59,6 +60,7 @@ from neorc_core import (
     LEASED_STATUSES,
     Event,
     EventKind,
+    FlowInactiveError,
     FlowNotFoundError,
     FlowVersionError,
     NeorcError,
@@ -82,7 +84,9 @@ from neorc_core import (
 )
 from neorc_core._runs import (
     check_uploads,
+    deactivated_reason,
     ensure_active,
+    inactive_message,
     run_state_of,
     storable_text,
     sub_run_id_for,
@@ -124,6 +128,16 @@ SELECT {FLOW_COLUMNS} FROM {FLOW_VERSIONS_TABLE} WHERE name = ? {_LATEST_ORDER}
 _INSERT_FLOW = f"""
 INSERT INTO {FLOW_VERSIONS_TABLE} ({FLOW_COLUMNS}) VALUES ({placeholders(FLOW_COLUMNS)})
 """
+
+_SELECT_INACTIVE_FLOWS = f"SELECT name FROM {INACTIVE_FLOWS_TABLE}"
+
+_SELECT_INACTIVE_FLOW = f"SELECT 1 FROM {INACTIVE_FLOWS_TABLE} WHERE name = ?"
+
+_INSERT_INACTIVE_FLOW = f"""
+INSERT INTO {INACTIVE_FLOWS_TABLE} (name, created_at) VALUES (?, ?)
+"""
+
+_DELETE_INACTIVE_FLOW = f"DELETE FROM {INACTIVE_FLOWS_TABLE} WHERE name = ?"
 
 _SELECT_RUN = f"SELECT {RUN_COLUMNS} FROM {RUNS_TABLE} WHERE id = ?"
 
@@ -326,6 +340,9 @@ class SqliteStore(Store):
     async def store_flows(self, uploads: Sequence[StoredFlow]) -> list[bool]:
         return await self._write(_store_flows, list(uploads))
 
+    async def deactivate_flows(self, names: Sequence[str]) -> list[bool]:
+        return await self._write(_deactivate_flows, list(names))
+
     async def get_flow(self, name: str, version: Version | None = None) -> StoredFlow:
         return await self._read(_flow, name, version)
 
@@ -514,12 +531,33 @@ def _store_flows(conn: sqlite3.Connection, uploads: list[StoredFlow]) -> list[bo
     results = check_uploads(stored, uploads)
     new = [u for u, is_new in zip(uploads, results, strict=True) if is_new]
     conn.executemany(_INSERT_FLOW, [flow_to_row(upload) for upload in new])
+    conn.executemany(_DELETE_INACTIVE_FLOW, [(upload.name,) for upload in uploads])
     for upload in new:
         reason = f"{upload.name} {upload.version} was uploaded"
         roots = [row[0] for row in conn.execute(_ACTIVE_ROOTS_OF_FLOW, (upload.name,))]
         for root_id in roots:
             _finish_tree(conn, root_id, RunStatus.CANCELLED, reason)
     return results
+
+
+def _deactivate_flows(conn: sqlite3.Connection, names: list[str]) -> list[bool]:
+    for name in names:
+        _flow(conn, name, None)
+    results: list[bool] = []
+    for name in names:
+        was_active = not _is_inactive(conn, name)
+        results.append(was_active)
+        if not was_active:
+            continue
+        conn.execute(_INSERT_INACTIVE_FLOW, (name, time_to(_now())))
+        roots = [row[0] for row in conn.execute(_ACTIVE_ROOTS_OF_FLOW, (name,))]
+        for root_id in roots:
+            _finish_tree(conn, root_id, RunStatus.FAILED, deactivated_reason(name))
+    return results
+
+
+def _is_inactive(conn: sqlite3.Connection, name: str) -> bool:
+    return conn.execute(_SELECT_INACTIVE_FLOW, (name,)).fetchone() is not None
 
 
 def _flow(conn: sqlite3.Connection, name: str, version: Version | None) -> StoredFlow:
@@ -533,18 +571,23 @@ def _flow(conn: sqlite3.Connection, name: str, version: Version | None) -> Store
         if version is None:
             raise FlowNotFoundError(f"no flow {name!r}")
         raise FlowNotFoundError(f"no version {version} of flow {name!r}")
-    return flow_from_row(row)
+    return flow_from_row(row, active=not _is_inactive(conn, name))
 
 
 def _latest_flows(conn: sqlite3.Connection) -> list[StoredFlow]:
-    return [flow_from_row(row) for row in conn.execute(_SELECT_LATEST_FLOWS)]
+    inactive = {row[0] for row in conn.execute(_SELECT_INACTIVE_FLOWS)}
+    return [
+        flow_from_row(row, active=row["name"] not in inactive)
+        for row in conn.execute(_SELECT_LATEST_FLOWS)
+    ]
 
 
 def _flow_versions(conn: sqlite3.Connection, name: str) -> list[StoredFlow]:
     rows = conn.execute(_SELECT_FLOW_VERSIONS, (name,)).fetchall()
     if not rows:
         raise FlowNotFoundError(f"no flow {name!r}")
-    return [flow_from_row(row) for row in rows]
+    active = not _is_inactive(conn, name)
+    return [flow_from_row(row, active=active) for row in rows]
 
 
 def _list_runs(
@@ -594,9 +637,12 @@ def _start_run(
     parent_address: Address | None,
     started_by: RunStarter | None,
 ) -> Run:
-    latest = _flow(conn, flow, None).version
+    stored = _flow(conn, flow, None)
+    latest = stored.version
     if version != latest:
         raise FlowVersionError(f"{flow} {version} is not the latest version, {latest}")
+    if not stored.active:
+        raise FlowInactiveError(inactive_message(flow))
     if parent_id is None:
         run_id = uuid.uuid4()
         root_id = run_id

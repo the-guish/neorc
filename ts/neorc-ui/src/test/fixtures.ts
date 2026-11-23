@@ -33,6 +33,7 @@ export const SIGNED_IN: Session = {
 export const WORD_PICKER: Flow = {
   name: "word_picker",
   version: "1.2.0",
+  active: true,
   content: {
     name: "word_picker",
     version: "1.2.0",
@@ -63,6 +64,7 @@ export const WORD_PICKER_1_0: Flow = {
 export const HELLO: Flow = {
   name: "hello",
   version: "0.1.0",
+  active: true,
   content: {
     name: "hello",
     version: "0.1.0",
@@ -75,6 +77,7 @@ export const HELLO: Flow = {
 export const BOOKING: Flow = {
   name: "vip_booking",
   version: "1.0.0",
+  active: true,
   content: {
     name: "vip_booking",
     version: "1.0.0",
@@ -185,6 +188,7 @@ export const QUEUES: Queue[] = [
 export const APPROVAL: Flow = {
   name: "approval",
   version: "1.0.0",
+  active: true,
   content: {
     name: "approval",
     version: "1.0.0",
@@ -265,6 +269,7 @@ export function delivered(task: Task): Delivery {
 export const REVIEW_ROUND: Flow = {
   name: "review_round",
   version: "1.0.0",
+  active: true,
   content: {
     name: "review_round",
     version: "1.0.0",

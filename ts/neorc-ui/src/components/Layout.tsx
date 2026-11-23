@@ -242,10 +242,12 @@ function Queues({ route }: { route: Route }) {
 function PinnedFlows({ route }: { route: Route }) {
   const { href } = useNav();
   const flows = useFlows();
-  if (!flows.isSuccess || flows.data.length === 0) return null;
+  // An inactive flow starts no run: the Flows page lists it, the panel does not.
+  const active = (flows.data ?? []).filter((flow) => flow.active);
+  if (active.length === 0) return null;
   return (
     <nav className="neorc-sidebar-section" aria-label="Flows">
-      {flows.data.map((flow) => (
+      {active.map((flow) => (
         <a
           key={flow.name}
           href={href({ name: "flow", flow: flow.name })}

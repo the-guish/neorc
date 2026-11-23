@@ -17,6 +17,7 @@ import pytest
 
 from neorc import _cli
 from neorc_core import (
+    FlowNotFoundError,
     FlowVersionError,
     HandlerError,
     InvalidValueError,
@@ -545,6 +546,7 @@ class _FakeClient:
 
     built: ClassVar[list[tuple[str, dict[str, Any]]]] = []
     uploaded: ClassVar[list[Any]] = []
+    deactivated: ClassVar[list[Any]] = []
     stored: ClassVar[list[bool]] = [True, False]
 
     def __init__(self, address: str, **kwargs: Any) -> None:
@@ -560,11 +562,16 @@ class _FakeClient:
         type(self).uploaded.append(contents)
         return type(self).stored
 
+    async def deactivate_flows(self, names: Any) -> list[bool]:
+        type(self).deactivated.append(names)
+        return type(self).stored
+
 
 @pytest.fixture
 def fake_clients(monkeypatch: pytest.MonkeyPatch) -> type[_FakeClient]:
     _FakeClient.built = []
     _FakeClient.uploaded = []
+    _FakeClient.deactivated = []
     _FakeClient.stored = [True, False]
     monkeypatch.setattr("neorc.http.HttpManagerClient", _FakeClient)
     monkeypatch.setattr("neorc.http.HttpQueueClient", _FakeClient)
@@ -637,6 +644,35 @@ def test_flows_upload_needs_flow_files_and_a_manager(
         _cli.main(["flows", "upload", str(tmp_path / "x"), "--manager-address", "m"])
     with pytest.raises(SystemExit, match=_cli.MANAGER_ADDRESS_ENV):
         _cli.main(["flows", "upload", str(tmp_path)])
+
+
+def test_flows_deactivate_names_the_flows_and_says_which_were_active(
+    fake_clients: type[_FakeClient], capsys: pytest.CaptureFixture[str]
+) -> None:
+    exit_code = _cli.main(
+        ["flows", "deactivate", "a", "b", "--manager-address", "manager.test:8420"]
+    )
+
+    assert exit_code == 0
+    assert fake_clients.built == [("manager.test:8420", {})]
+    assert fake_clients.deactivated == [["a", "b"]]
+    assert capsys.readouterr().out == "deactivated a\nunchanged b\n"
+
+
+def test_flows_deactivate_reports_a_refusal(
+    fake_clients: type[_FakeClient],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    async def refuse(self: Any, names: Any) -> list[bool]:
+        raise FlowNotFoundError("no flow 'a'")
+
+    monkeypatch.setattr(_FakeClient, "deactivate_flows", refuse)
+
+    exit_code = _cli.main(["flows", "deactivate", "a", "--manager-address", "m"])
+
+    assert exit_code == 1
+    assert "deactivation refused: no flow 'a'" in capsys.readouterr().err
 
 
 class _FakeLoop:

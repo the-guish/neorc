@@ -109,6 +109,11 @@ class ManagerClient(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    async def deactivate_flows(self, names: Sequence[str]) -> list[bool]:
+        """Make flows inactive as one; per name, whether the flow was active."""
+        raise NotImplementedError
+
+    @abstractmethod
     async def declare_queue(self, name: str, kind: QueueKind) -> bool:
         """Declare a new queue of ``kind``; whether it is new.
 

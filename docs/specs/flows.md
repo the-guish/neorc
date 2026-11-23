@@ -104,3 +104,32 @@ sub-flow run under it. Deploying a flow therefore cancels every run currently
 inside it, including runs of flows that call it. Failures propagate across the
 tree the same way. See [core.md](core.md), "Cancellation and failure".
 
+## Inactive flows
+
+The manager keeps every flow it was given, with its versions and its runs. A
+flow that should run no more is made inactive: `neorc flows deactivate NAME...`,
+`POST /flows/deactivate` with `{"names": [...]}`, or
+`ManagerClient.deactivate_flows`. It asks for the permission of an upload,
+`neorc/flows:upload`. The names are taken as one: an unknown name refuses the
+whole request, and nothing changes.
+
+An inactive flow:
+
+- keeps its versions and its runs, which read as before;
+- starts no run. A request for one is refused with `FlowInactiveError`, a 409;
+- starts no sub-flow run. The run that reaches the step fails, with the step
+  and `FlowInactiveError` as its reason. An upload does not refuse a flow that
+  calls an inactive flow: the set is checked with the inactive flows in it;
+- fails every run tree it is part of, at the moment it is made inactive, with
+  the reason `<flow> was deactivated`. Tasks already in flight may finish;
+- gives a worker no task to check. Its handlers may be removed from the code
+  location, and a worker started after that serves the other flows;
+- is listed with `"active": false`. The interface leaves it out of the panel,
+  folds it away on the Flows page, and offers no run of it.
+
+Uploading the flow again makes it active, with a new version or an identical
+one. An identical upload still answers "unchanged".
+
+A host that mirrors a folder of flow files makes inactive the flows whose files
+left the folder, after its upload and before it starts a worker.
+

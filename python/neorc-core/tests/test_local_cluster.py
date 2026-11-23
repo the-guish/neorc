@@ -179,6 +179,92 @@ async def test_a_failure_in_a_sub_flow_fails_the_whole_tree(tmp_path: Path) -> N
     assert run.reason == "boom failed"
 
 
+PARENT_AND_CHILD = {
+    "parent": """\
+        name: parent
+        version: 1.0.0
+        steps:
+          call:
+            flow: child
+            fixed_params: {word: red}
+        """,
+    "child": """\
+        name: child
+        version: 1.0.0
+        inputs:
+          word: string
+        output: tasks.echo
+        steps:
+          echo:
+            handler: MODULE:echo
+            params: {word: inputs.word}
+        """,
+}
+
+
+async def test_an_inactive_sub_flow_fails_the_run_that_reaches_it(
+    tmp_path: Path,
+) -> None:
+    flows_dir, _ = project(tmp_path, "def echo(word): return word", **PARENT_AND_CHILD)
+
+    async with LocalCluster(code_location=tmp_path) as cluster:
+        await cluster.upload(flows_dir)
+        assert await cluster.client.deactivate_flows(["child"]) == [True]
+        await cluster.start()
+        run = await cluster.run("parent", {}, timeout=TIMEOUT)
+        await cluster.upload(flows_dir)
+        await cluster.start()  # the flow's queue has a worker now
+        again = await cluster.run("parent", {}, timeout=TIMEOUT)
+
+    assert run.status is RunStatus.FAILED
+    assert run.reason == (
+        "call: FlowInactiveError: flow 'child' is inactive: upload it again to "
+        "start runs of it"
+    )
+    # Uploaded again, the flow is active, and its caller runs to the end.
+    assert again.status is RunStatus.SUCCEEDED
+
+
+async def test_a_flow_made_inactive_fails_its_run_and_its_handlers_may_go(
+    tmp_path: Path,
+) -> None:
+    flows_dir, module = project(
+        tmp_path,
+        """\
+        import time
+
+        def echo(word):
+            time.sleep(0.5)
+            return word
+        """,
+        **PARENT_AND_CHILD,
+    )
+
+    async with LocalCluster(code_location=tmp_path) as cluster:
+        await cluster.upload(flows_dir)
+        await cluster.start()
+        run_id = (await cluster.client.start_run("parent", {})).id
+        child_id = sub_run_id_for(run_id, Address("call"))
+
+        async def child_started() -> bool:
+            return bool(await cluster.manager.sub_runs(run_id))
+
+        await until(child_started)
+
+        await cluster.client.deactivate_flows(["child"])
+        run = await cluster.client.get_run(run_id)
+        child = await cluster.client.get_run(child_id)
+        # The handlers leave with the flow: a worker has nothing of it to check.
+        (tmp_path / f"{module}.py").unlink()
+        definitions = await DirectQueueClient(cluster.manager).task_definitions(
+            "default"
+        )
+
+    assert (run.status, run.reason) == (RunStatus.FAILED, "child was deactivated")
+    assert (child.status, child.reason) == (RunStatus.FAILED, "child was deactivated")
+    assert definitions == []
+
+
 async def test_a_loop_past_max_cycles_fails_the_run(tmp_path: Path) -> None:
     flows_dir, _ = project(
         tmp_path,

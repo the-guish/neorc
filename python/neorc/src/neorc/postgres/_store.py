@@ -58,6 +58,7 @@ from neorc.postgres._schema import (
     EVENTS_TABLE,
     FLOW_TASKS_TABLE,
     FLOW_VERSIONS_TABLE,
+    INACTIVE_FLOWS_TABLE,
     QUEUES_TABLE,
     RUNS_TABLE,
 )
@@ -65,6 +66,7 @@ from neorc_core import (
     LEASED_STATUSES,
     Event,
     EventKind,
+    FlowInactiveError,
     FlowNotFoundError,
     FlowVersionError,
     Queue,
@@ -87,7 +89,9 @@ from neorc_core import (
 )
 from neorc_core._runs import (
     check_uploads,
+    deactivated_reason,
     ensure_active,
+    inactive_message,
     run_state_of,
     storable_text,
     sub_run_id_for,
@@ -127,6 +131,14 @@ _INSERT_FLOW = f"""
 INSERT INTO {FLOW_VERSIONS_TABLE} ({FLOW_COLUMNS})
 VALUES ({placeholders(FLOW_COLUMNS)})
 """
+
+_SELECT_INACTIVE_FLOWS = f"SELECT name FROM {INACTIVE_FLOWS_TABLE}"
+
+_SELECT_INACTIVE_FLOW = f"SELECT 1 FROM {INACTIVE_FLOWS_TABLE} WHERE name = $1"
+
+_INSERT_INACTIVE_FLOW = f"INSERT INTO {INACTIVE_FLOWS_TABLE} (name) VALUES ($1)"
+
+_DELETE_INACTIVE_FLOWS = f"DELETE FROM {INACTIVE_FLOWS_TABLE} WHERE name = ANY($1)"
 
 _SELECT_RUN = f"SELECT {RUN_COLUMNS} FROM {RUNS_TABLE} WHERE id = $1"
 
@@ -346,6 +358,7 @@ class PostgresStore(Pooled, Store):
                 flow = flow_from_row(row)
                 stored.setdefault(flow.name, []).append(flow)
             results = check_uploads(stored, uploads)
+            await conn.execute(_DELETE_INACTIVE_FLOWS, [u.name for u in uploads])
             new = [u for u, is_new in zip(uploads, results, strict=True) if is_new]
             if not new:
                 return results
@@ -379,22 +392,58 @@ class PostgresStore(Pooled, Store):
             await _append_events(conn, events)
             return results
 
+    async def deactivate_flows(self, names: Sequence[str]) -> list[bool]:
+        async with self.pool.acquire() as conn, conn.transaction():
+            # The upload lock: no run of these flows starts meanwhile, and no
+            # upload makes one active again.
+            await _lock(conn, UPLOAD_LOCK, shared=False)
+            for name in names:
+                await _flow(conn, name, None)
+            results: list[bool] = []
+            roots: dict[str, list[RunId]] = {}
+            for name in names:
+                was_active = not await _is_inactive(conn, name)
+                results.append(was_active)
+                if not was_active:
+                    continue
+                await conn.execute(_INSERT_INACTIVE_FLOW, name)
+                rows = await conn.fetch(_ACTIVE_ROOTS_OF_FLOW, name)
+                roots[name] = [row["root_id"] for row in rows]
+            # As an upload does: a run can finish under its root lock alone, so
+            # the trees are read again once their roots are held.
+            await _lock_roots(conn, [r for ids in roots.values() for r in ids])
+            events: Events = []
+            for name, root_ids in roots.items():
+                if not root_ids:
+                    continue
+                rows = await conn.fetch(_ACTIVE_ROOTS_OF_FLOW_AMONG, name, root_ids)
+                still = [row["root_id"] for row in rows]
+                if still:
+                    events += await _finish_trees(
+                        conn, still, RunStatus.FAILED, deactivated_reason(name)
+                    )
+            await _append_events(conn, events)
+            return results
+
     async def get_flow(self, name: str, version: Version | None = None) -> StoredFlow:
         async with self.pool.acquire() as conn:
             return await _flow(conn, name, version)
 
     async def latest_flows(self) -> list[StoredFlow]:
-        async with self.pool.acquire() as conn:
+        async with self.pool.acquire() as conn, conn.transaction():
+            inactive = {row["name"] for row in await conn.fetch(_SELECT_INACTIVE_FLOWS)}
             return [
-                flow_from_row(row) for row in await conn.fetch(_SELECT_LATEST_FLOWS)
+                flow_from_row(row, active=row["name"] not in inactive)
+                for row in await conn.fetch(_SELECT_LATEST_FLOWS)
             ]
 
     async def flow_versions(self, name: str) -> list[StoredFlow]:
-        async with self.pool.acquire() as conn:
+        async with self.pool.acquire() as conn, conn.transaction():
             rows = await conn.fetch(_SELECT_FLOW_VERSIONS, name)
+            active = not await _is_inactive(conn, name)
         if not rows:
             raise FlowNotFoundError(f"no flow {name!r}")
-        return [flow_from_row(row) for row in rows]
+        return [flow_from_row(row, active=active) for row in rows]
 
     async def list_runs(
         self,
@@ -453,11 +502,14 @@ class PostgresStore(Pooled, Store):
             raise ValueError("a sub-flow run names both its parent and its address")
         async with self.pool.acquire() as conn, conn.transaction():
             await _lock(conn, UPLOAD_LOCK, shared=True)
-            latest = (await _flow(conn, flow, None)).version
+            stored = await _flow(conn, flow, None)
+            latest = stored.version
             if version != latest:
                 raise FlowVersionError(
                     f"{flow} {version} is not the latest version, {latest}"
                 )
+            if not stored.active:
+                raise FlowInactiveError(inactive_message(flow))
             if parent_id is None:
                 run_id = uuid.uuid4()
                 root_id = run_id
@@ -746,7 +798,11 @@ async def _flow(conn: Connection, name: str, version: Version | None) -> StoredF
         if version is None:
             raise FlowNotFoundError(f"no flow {name!r}")
         raise FlowNotFoundError(f"no version {version} of flow {name!r}")
-    return flow_from_row(row)
+    return flow_from_row(row, active=not await _is_inactive(conn, name))
+
+
+async def _is_inactive(conn: Connection, name: str) -> bool:
+    return await conn.fetchrow(_SELECT_INACTIVE_FLOW, name) is not None
 
 
 async def _run(conn: Connection, run_id: RunId) -> Run:

@@ -12,6 +12,7 @@ import example from "./code_task.form.json";
 const CODE_TASK: Flow = {
   name: "code_task",
   version: "1.0.0",
+  active: true,
   content: {
     name: "code_task",
     version: "1.0.0",

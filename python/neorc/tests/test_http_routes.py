@@ -93,11 +93,39 @@ async def test_a_flow_reads_back_by_name_and_by_version(
     malformed = await http.get("/flows/main/versions/latest")
 
     assert latest.status_code == 200
-    assert latest.json() == {"name": "main", "version": "1.0.0", "content": MAIN}
+    assert latest.json() == {
+        "name": "main",
+        "version": "1.0.0",
+        "content": MAIN,
+        "active": True,
+    }
     assert version.json() == latest.json()
     assert (missing.status_code, _error(missing)) == (404, "FlowNotFoundError")
     assert (unknown.status_code, _error(unknown)) == (404, "FlowNotFoundError")
     assert (malformed.status_code, _error(malformed)) == (422, "InvalidValueError")
+
+
+async def test_a_flow_made_inactive_is_listed_so_and_starts_no_run(
+    http: httpx.AsyncClient,
+) -> None:
+    await http.post("/flows", json={"flows": [MAIN]})
+
+    deactivated = await http.post("/flows/deactivate", json={"names": ["main"]})
+    again = await http.post("/flows/deactivate", json={"names": ["main"]})
+    unknown = await http.post("/flows/deactivate", json={"names": ["nothing"]})
+    listed = await http.get("/flows")
+    refused = await http.post("/flows/main/runs", json={"inputs": {"word": "hi"}})
+    await http.post("/flows", json={"flows": [MAIN]})
+    back = await http.get("/flows/main")
+
+    assert deactivated.json() == {"deactivated": [True]}
+    assert again.json() == {"deactivated": [False]}
+    assert (unknown.status_code, _error(unknown)) == (404, "FlowNotFoundError")
+    assert [(f["name"], f["active"]) for f in listed.json()["flows"]] == [
+        ("main", False)
+    ]
+    assert (refused.status_code, _error(refused)) == (409, "FlowInactiveError")
+    assert back.json()["active"] is True
 
 
 async def test_a_run_starts_reads_back_and_is_cancelled(

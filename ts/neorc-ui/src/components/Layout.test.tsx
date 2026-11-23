@@ -101,6 +101,24 @@ describe("Layout", () => {
     ).toBeInTheDocument();
   });
 
+  it("leaves the inactive flows out of the panel", async () => {
+    mockApi({
+      "/flows": { flows: [HELLO, { ...WORD_PICKER, active: false }] },
+    });
+
+    renderWithClient(
+      <Layout route={{ name: "runs" }}>
+        <p>the page</p>
+      </Layout>,
+    );
+
+    const flows = await screen.findByRole("navigation", { name: "Flows" });
+    expect(within(flows).getByRole("link", { name: "hello" })).toBeInTheDocument();
+    expect(
+      within(flows).queryByRole("link", { name: "word_picker" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("stands without the flows or the runs", async () => {
     mockApi({});
 
