@@ -92,6 +92,12 @@ person in.
     neorc tokens create worker-1 --role neorc/worker --resource default \
         --database-file neorc.db
 
+In a container, `--local --host 0.0.0.0` listens on the container's addresses
+instead, for a private network that holds the manager's own workers. The
+person still opens `127.0.0.1` at the manager's port, published on their
+machine. Another host names the manager by its IP address: the local mode
+refuses a name.
+
 Write the work, as plain functions that need not import neorc:
 
 ```python

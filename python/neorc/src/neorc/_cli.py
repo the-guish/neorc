@@ -67,6 +67,8 @@ CONFIG_ENV = "ONEBERTH_CONFIG"
 QUEUE_KINDS = tuple(kind.value for kind in QueueKind)
 
 DEFAULT_HOST = "0.0.0.0"  # a manager serves workers on other hosts
+LOCAL_HOST = "127.0.0.1"
+"""Where the local mode listens by default, and where its one person opens it."""
 DEFAULT_PORT = 8420
 
 if TYPE_CHECKING:
@@ -91,8 +93,11 @@ def build_parser() -> argparse.ArgumentParser:
     manager_start.add_argument(
         "--host",
         default=None,
-        help=f"{DEFAULT_HOST} by default; 127.0.0.1 with --local, which takes a "
-        "loopback address alone",
+        help=f"where to listen: {DEFAULT_HOST} by default, and {LOCAL_HOST} with "
+        "--local. With --local, an address that is not loopback serves a private "
+        "network, such as a container's: the person still opens "
+        f"{LOCAL_HOST} at this port, and another host names the manager by its "
+        "IP address",
     )
     manager_start.add_argument("--port", type=int, default=DEFAULT_PORT)
     database = manager_start.add_mutually_exclusive_group()
@@ -403,21 +408,32 @@ def manager_start_command(args: argparse.Namespace) -> int:
     return 0
 
 
-LOCAL_HOST = "127.0.0.1"
-"""Where the local mode listens by default: its one person is at this machine."""
-
-
 def _local_config(host: str, port: int) -> Config:
-    """The configuration of oneberth's local mode: the manager on a loopback address."""
+    """The configuration of oneberth's local mode, for a manager on ``host``.
+
+    The person opens the manager at a loopback address: ``host`` when it is
+    one, and ``LOCAL_HOST`` when the manager listens elsewhere, as in a
+    container that publishes ``port`` on its machine.
+    """
     with _needs("manager"):
-        from oneberth.config import ConfigError, local_config
+        from oneberth.config import ConfigError, is_loopback, local_config
+    beyond = not is_loopback(host)
     try:
-        return local_config("neorc", port=port, host=host)
+        config = local_config("neorc", port=port, host=LOCAL_HOST if beyond else host)
     except ConfigError as exc:
         raise SystemExit(
-            "neorc manager start: --local listens on a loopback address alone: "
+            "neorc manager start: --local cannot serve this address: "
             + "; ".join(exc.problems)
         ) from None
+    if beyond:
+        _log.warning(
+            "the local mode listens on %s, which other hosts reach: serve it on a "
+            "private network alone, such as a container's; the person opens %s, "
+            "and another host names the manager by its IP address",
+            host,
+            config.apps["neorc"].public_url,
+        )
+    return config
 
 
 def _config(args: argparse.Namespace) -> Config:

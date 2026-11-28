@@ -137,13 +137,33 @@ def test_manager_start_in_the_local_mode_needs_no_configuration(
     assert second["config"].apps["neorc"].public_url == "http://[::1]:8420"
 
 
-def test_the_local_mode_listens_on_a_loopback_address_alone(
+def test_the_local_mode_listens_beyond_loopback_when_asked(
+    started: list[dict[str, Any]], caplog: pytest.LogCaptureFixture
+) -> None:
+    """As in a container: the manager listens on the container's addresses,
+    and the person opens the port published on their machine's loopback."""
+    command = ["manager", "start", "--local", "--port", "8433"]
+
+    assert _cli.main(command) == 0
+    assert caplog.messages == []  # loopback, the default, warns of nothing
+    assert _cli.main([*command, "--host", "0.0.0.0"]) == 0
+
+    beyond = started[1]
+    assert (beyond["local"], beyond["host"], beyond["port"]) == (True, "0.0.0.0", 8433)
+    assert beyond["config"].apps["neorc"].public_url == "http://127.0.0.1:8433"
+    (warning,) = caplog.messages
+    assert "listens on 0.0.0.0" in warning
+    assert "private network" in warning
+    assert "opens http://127.0.0.1:8433" in warning
+
+
+def test_the_local_mode_takes_no_sign_in_configuration(
     started: list[dict[str, Any]], config: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    with pytest.raises(SystemExit, match="--local listens on a loopback address"):
-        _cli.main(["manager", "start", "--local", "--host", "0.0.0.0"])
     with pytest.raises(SystemExit):
         _cli.main(["manager", "start", "--local", "--config", str(config)])
+    with pytest.raises(SystemExit, match="--local cannot serve this address"):
+        _cli.main(["manager", "start", "--local", "--port", "99999"])
 
     assert "not allowed with argument" in capsys.readouterr().err
     assert started == []

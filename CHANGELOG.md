@@ -20,6 +20,11 @@ one version, cut from a single tag on `main`.
   another kind is refused with a 409, `QueueKindError`: its operator changes a
   kind. `ManagerClient.declare_queue` and `Manager.add_queue` do the same.
 - `neorc`: the HTTP clients send every write as JSON, as oneberth asks.
+- `neorc`: `neorc manager start --local` listens beyond loopback when `--host`
+  names such an address, for a private network such as a container's. The
+  person still opens `127.0.0.1` at the manager's port, and another host names
+  the manager by its IP address, since oneberth's local mode refuses a name.
+  The manager logs a warning at such a start.
 
 ### Changed
 
